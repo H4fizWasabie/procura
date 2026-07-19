@@ -1,0 +1,226 @@
+{{template "base.html" .}}
+{{define "content_pos"}}
+<div class="top-bar"><h2>Purchase Orders</h2><button onclick="openCreate()">+ New PO</button></div>
+<div class="search-bar">
+    <input type="text" id="search" placeholder="Search PO ID or supplier..." oninput="load()">
+    <input type="text" id="supplier" placeholder="Supplier filter">
+    <select id="status"><option value="">All Status</option>
+        <option>Pending Approval</option><option>Approved</option>
+        <option>Pending Payment</option><option>Paid</option><option>Partial</option><option>Void</option>
+    </select>
+    <button onclick="load()">Search</button>
+</div>
+<table><thead><tr>
+    <th>PO ID</th><th>Date</th><th>Supplier</th><th>Total</th><th>Status</th><th>Ship</th><th>Actions</th>
+</tr></thead><tbody id="body"></tbody></table>
+<div id="toast" class="toast" style="display:none"></div>
+
+<!-- Create PO Modal -->
+<div id="create-modal" class="modal">
+    <div class="modal-content" style="max-width:760px">
+        <div class="modal-header"><h3>New Purchase Order</h3><span class="close" onclick="closeCreate()">&times;</span></div>
+        <div class="modal-body">
+            <div class="form-row">
+                <div class="form-group"><label>PO ID</label><input id="c-po-id" disabled></div>
+                <div class="form-group"><label>Date</label><input type="date" id="c-date"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Supplier</label><select id="c-supplier"></select></div>
+                <div class="form-group"><label>Department</label><input id="c-dept"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Terms</label><input id="c-terms" placeholder="e.g. Net 30"></div>
+                <div class="form-group"><label>Invoice Date</label><input type="date" id="c-inv-date"></div>
+            </div>
+            <div class="form-group"><label>Bill No</label><input id="c-bill"></div>
+            <h4 style="margin:12px 0 8px">Line Items</h4>
+            <table id="c-items"><thead><tr>
+                <th>Stock ID</th><th>Name</th><th>Qty</th><th>UOM</th><th>Cost</th><th>Total</th><th></th>
+            </tr></thead><tbody></tbody></table>
+            <button onclick="addItemRow()" style="margin-top:6px;font-size:11px">+ Add Item</button>
+            <div class="btn-group">
+                <button class="btn-secondary" onclick="closeCreate()">Cancel</button>
+                <button onclick="savePO()">Save PO</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit PO Modal -->
+<div id="edit-modal" class="modal">
+    <div class="modal-content" style="max-width:760px">
+        <div class="modal-header"><h3>Edit PO: <span id="e-po-id-label"></span></h3><span class="close" onclick="closeEdit()">&times;</span></div>
+        <div class="modal-body">
+            <div class="form-row">
+                <div class="form-group"><label>PO ID</label><input id="e-po-id" disabled></div>
+                <div class="form-group"><label>Date</label><input id="e-date" disabled></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Supplier</label><input id="e-supplier" disabled></div>
+                <div class="form-group"><label>Department</label><input id="e-dept" disabled></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Total</label><input id="e-total" disabled></div>
+                <div class="form-group"><label>Balance</label><input id="e-balance" disabled></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Status</label><select id="e-status">
+                    <option>Pending Approval</option><option>Approved</option>
+                    <option>Pending Payment</option><option>Paid</option>
+                    <option>Partial</option><option>Void</option>
+                </select></div>
+                <div class="form-group"><label>Ship Status</label><select id="e-ship">
+                    <option value="">-</option><option>Shipped</option><option>Partial</option>
+                    <option>Pending</option><option>Delivered</option>
+                </select></div>
+                <div class="form-group"><label>Invoice Date</label><input type="date" id="e-inv-date"></div>
+            </div>
+            <div class="form-group"><label>Bill No</label><input id="e-bill" disabled></div>
+            <h4 style="margin:12px 0 8px">Line Items</h4>
+            <table><thead><tr>
+                <th>Stock ID</th><th>Name</th><th>Qty</th><th>UOM</th><th>Cost</th><th>Total</th>
+            </tr></thead><tbody id="e-items-body"></tbody></table>
+            <div class="btn-group">
+                <button class="btn-secondary" onclick="closeEdit()">Cancel</button>
+                <button onclick="approvePO()" style="background:var(--amber)">Approve</button>
+                <button onclick="payPO()" style="background:var(--green)">Request Payment</button>
+                <button onclick="saveStatus()">Save Status</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let allSuppliers = [];
+let editPoData = null;
+
+async function init() {
+    const res = await fetch('/api/suppliers');
+    allSuppliers = await res.json();
+    document.getElementById('c-supplier').innerHTML = '<option value="">- Select -</option>' +
+        allSuppliers.map(s => `<option value="${esc(s.supplier_name)}">${esc(s.supplier_name)}</option>`).join('');
+    load();
+}
+async function load() {
+    const p = new URLSearchParams({search: document.getElementById('search').value,
+        supplier: document.getElementById('supplier').value,
+        status: document.getElementById('status').value});
+    const res = await fetch('/api/pos?' + p);
+    const data = await res.json();
+    document.getElementById('body').innerHTML = data.map(po => `
+        <tr>
+            <td><a href="#" class="link" onclick="openEdit('${esc(po.po_id)}')">${esc(po.po_id)}</a></td>
+            <td>${esc(po.date||'').slice(0,10)}</td><td>${esc(po.supplier||'')}</td>
+            <td class="money">RM ${(po.total||0).toFixed(2)}</td>
+            <td><span class="badge ${(po.status||'').includes('Paid')?'badge-green':(po.status||'').includes('Pending')?'badge-amber':'badge-blue'}">${esc(po.status||'')}</span></td>
+            <td>${esc(po.ship_status||'')}</td>
+            <td><button onclick="openEdit('${esc(po.po_id)}')" class="btn-sm">Edit</button></td>
+        </tr>`).join('');
+}
+async function openCreate() {
+    const res = await fetch('/api/pos/next-id');
+    const {id} = await res.json();
+    document.getElementById('c-po-id').value = id;
+    document.getElementById('c-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('c-dept').value = '';
+    document.getElementById('c-terms').value = '';
+    document.getElementById('c-inv-date').value = '';
+    document.getElementById('c-bill').value = '';
+    document.getElementById('c-items').querySelector('tbody').innerHTML = '';
+    addItemRow();
+    document.getElementById('create-modal').classList.add('open');
+}
+function closeCreate() { document.getElementById('create-modal').classList.remove('open'); }
+function addItemRow() {
+    const tbody = document.getElementById('c-items').querySelector('tbody');
+    const row = document.createElement('tr');
+    row.innerHTML = `<td><input style="width:100px" class="ci-stock"></td>
+        <td><input style="width:150px" class="ci-name"></td>
+        <td><input type="number" step="1" value="1" style="width:60px" class="ci-qty" oninput="calcRow(this)"></td>
+        <td><input style="width:60px" class="ci-uom" value="UNIT"></td>
+        <td><input type="number" step="0.01" style="width:80px" class="ci-cost" oninput="calcRow(this)"></td>
+        <td><input style="width:90px" class="ci-total" disabled></td>
+        <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
+    tbody.appendChild(row);
+}
+function calcRow(el) {
+    const row = el.closest('tr');
+    const qty = parseFloat(row.querySelector('.ci-qty').value) || 0;
+    const cost = parseFloat(row.querySelector('.ci-cost').value) || 0;
+    row.querySelector('.ci-total').value = (qty * cost).toFixed(2);
+}
+function collectItems(prefix) {
+    const rows = document.querySelectorAll(`#${prefix}-items tbody tr`);
+    return Array.from(rows).map(row => ({
+        stock_id: row.querySelector('.ci-stock')?.value || '',
+        item_name: row.querySelector('.ci-name')?.value || '',
+        quantity: parseFloat(row.querySelector('.ci-qty')?.value) || 0,
+        uom: row.querySelector('.ci-uom')?.value || 'UNIT',
+        cost: parseFloat(row.querySelector('.ci-cost')?.value) || 0,
+        total: parseFloat(row.querySelector('.ci-total')?.value) || 0,
+    }));
+}
+async function savePO() {
+    const body = {
+        po_id: document.getElementById('c-po-id').value,
+        date: document.getElementById('c-date').value,
+        supplier: document.getElementById('c-supplier').value,
+        department: document.getElementById('c-dept').value,
+        terms: document.getElementById('c-terms').value,
+        invoice_date: document.getElementById('c-inv-date').value,
+        bill_no: document.getElementById('c-bill').value,
+        items: collectItems('c'),
+    };
+    const res = await fetch('/api/pos', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await res.json();
+    toast(d.success ? 'Saved: '+d.po_id : d.error, d.success);
+    if (d.success) { closeCreate(); load(); }
+}
+async function openEdit(poId) {
+    const res = await fetch('/api/pos?search='+encodeURIComponent(poId));
+    const data = await res.json();
+    const po = data.find(p => p.po_id === poId);
+    if (!po) { toast('PO not found', false); return; }
+    editPoData = po;
+    document.getElementById('e-po-id-label').textContent = po.po_id;
+    document.getElementById('e-po-id').value = po.po_id;
+    document.getElementById('e-date').value = (po.date||'').slice(0,10);
+    document.getElementById('e-supplier').value = po.supplier || '';
+    document.getElementById('e-dept').value = po.department || '';
+    document.getElementById('e-total').value = 'RM '+(po.total||0).toFixed(2);
+    document.getElementById('e-balance').value = 'RM '+((po.total||0)-(po.paid||0)).toFixed(2);
+    document.getElementById('e-status').value = po.status || 'Pending Approval';
+    document.getElementById('e-ship').value = po.ship_status || '';
+    document.getElementById('e-inv-date').value = (po.invoice_date||'').slice(0,10);
+    document.getElementById('e-bill').value = po.bill_no || '';
+    document.getElementById('e-items-body').innerHTML = (po.items||[]).map(it => `
+        <tr><td>${esc(it.stock_id)}</td><td>${esc(it.item_name)}</td>
+        <td>${it.quantity}</td><td>${esc(it.uom)}</td>
+        <td>RM ${it.cost.toFixed(2)}</td><td>RM ${it.total.toFixed(2)}</td></tr>`).join('');
+    document.getElementById('edit-modal').classList.add('open');
+}
+function closeEdit() { document.getElementById('edit-modal').classList.remove('open'); }
+async function saveStatus() {
+    const res = await fetch('/api/pos/'+encodeURIComponent(editPoData.po_id)+'/status', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({status: document.getElementById('e-status').value})
+    });
+    const d = await res.json();
+    toast(d.success?'Updated':d.error, d.success);
+    if (d.success) { closeEdit(); load(); }
+}
+async function approvePO() {
+    await fetch('/api/workflow/approve', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({po_id: editPoData.po_id})}).then(r=>r.json()).then(d=>toast(d.success?'Approved':d.error,d.success));
+    closeEdit(); load();
+}
+async function payPO() {
+    await fetch('/api/workflow/payment', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({po_id: editPoData.po_id})}).then(r=>r.json()).then(d=>toast(d.success?'Payment requested':d.error,d.success));
+    closeEdit(); load();
+}
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+init();
+</script>
+{{end}}

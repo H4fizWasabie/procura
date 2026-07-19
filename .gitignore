@@ -1,0 +1,21 @@
+# Binary
+procura
+/procura
+
+# Database
+data/procura.sqlite
+data/imports/
+data/reports/
+
+# Logs
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

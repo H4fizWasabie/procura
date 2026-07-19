@@ -1,0 +1,83 @@
+{{template "base.html" .}}
+{{define "content_reports"}}
+<h2>Reports</h2>
+<div class="grid-3 section" style="grid-template-columns:1fr 1fr">
+    <div class="card">
+        <h3>Restock Report</h3>
+        <p style="color:var(--muted);font-size:13px">Items below ROP sorted by cost impact</p>
+        <button onclick="loadRestock()" style="margin-top:8px">Generate</button>
+        <table style="margin-top:12px" id="restock-table"></table>
+    </div>
+    <div class="card">
+        <h3>Historical Report</h3>
+        <div class="search-bar"><select id="h-type"><option value="closing_stock">Closing Stock</option><option value="consumption">Consumption</option></select>
+        <select id="h-year"></select><select id="h-month"></select><button onclick="loadHistorical()">Load</button></div>
+        <table style="margin-top:8px" id="hist-table"></table>
+    </div>
+</div>
+
+<div class="card section">
+    <h3>Item History Report</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Select items to view history across POs</p>
+    <div class="form-group"><label>Search Items</label><input type="text" id="ih-search" placeholder="Type stock ID or name..." oninput="searchItems()"></div>
+    <div id="ih-item-list" style="max-height:200px;overflow-y:auto;margin-bottom:12px"></div>
+    <button onclick="loadItemHistory()">Generate Report</button>
+    <div id="ih-result" style="margin-top:12px"></div>
+</div>
+
+<div id="toast" class="toast" style="display:none"></div>
+<script>
+async function init() {
+    const now = new Date();
+    const ySel = document.getElementById('h-year');
+    for(let y=now.getFullYear(); y>=2020; y--) ySel.innerHTML += `<option value="${y}">${y}</option>`;
+    for(let m=1; m<=12; m++) document.getElementById('h-month').innerHTML += `<option value="${m}">${new Date(2000,m-1).toLocaleString('default',{month:'short'})}</option>`;
+    document.getElementById('h-month').value = now.getMonth()+1;
+}
+async function loadRestock() {
+    const res = await fetch('/api/reports/restock?page=1&pageSize=50'); const d = await res.json();
+    document.getElementById('restock-table').innerHTML = `<thead><tr><th>SKU</th><th>Item</th><th>Gap</th><th>Cost</th><th>Total</th></tr></thead><tbody>`+
+        (d.data||[]).map(r => `<tr><td>${esc(r.sku)}</td><td>${esc(r.name)}</td><td>${r.qty}</td><td>RM ${r.cost.toFixed(2)}</td><td>RM ${r.totalValue.toFixed(2)}</td></tr>`).join('')+'</tbody>';
+}
+async function loadHistorical() {
+    const p = new URLSearchParams({type:document.getElementById('h-type').value, year:document.getElementById('h-year').value, month:document.getElementById('h-month').value, page:'1', pageSize:'50'});
+    const res = await fetch('/api/reports/historical?'+p); const d = await res.json();
+    document.getElementById('hist-table').innerHTML = `<thead><tr><th>SKU</th><th>Item</th><th>Qty</th><th>Cost</th><th>Total</th></tr></thead><tbody>`+
+        (d.data||[]).map(r => `<tr><td>${esc(r.sku)}</td><td>${esc(r.name)}</td><td>${r.qty}</td><td>RM ${r.cost.toFixed(2)}</td><td>RM ${r.totalValue.toFixed(2)}</td></tr>`).join('')+'</tbody>';
+}
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+// ── Item History ──
+let allItems = [], selectedItems = new Set();
+async function loadItemsForHistory() {
+    const res = await fetch('/api/inventory/basic');
+    allItems = await res.json();
+}
+function searchItems() {
+    const q = (document.getElementById('ih-search').value||'').toLowerCase();
+    const filtered = q ? allItems.filter(i => (i['Stock ID']||'').toLowerCase().includes(q) || (i['Item Name']||'').toLowerCase().includes(q)) : [];
+    if (!filtered.length) { document.getElementById('ih-item-list').innerHTML = q ? '<p style="color:var(--muted)">No matches</p>' : ''; return; }
+    document.getElementById('ih-item-list').innerHTML = filtered.slice(0,20).map(i => `
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+            <input type="checkbox" ${selectedItems.has(i['Stock ID'])?'checked':''} onchange="toggleItem('${esc(i['Stock ID'])}','${esc(i['Item Name'])}',this.checked)">
+            <span style="font-family:monospace;color:var(--accent)">${esc(i['Stock ID'])}</span> ${esc(i['Item Name'])}
+        </label>`).join('');
+}
+function toggleItem(id, name, on) { if (on) selectedItems.add(id); else selectedItems.delete(id); }
+async function loadItemHistory() {
+    if (!selectedItems.size) { toast('Select at least one item', false); return; }
+    const items = Array.from(selectedItems).map(id => {
+        const item = allItems.find(i => i['Stock ID'] === id);
+        return {id, name: item ? item['Item Name'] : id};
+    });
+    const res = await fetch('/api/reports/item-history', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(items)});
+    const data = await res.json();
+    if (!data || !data.length) { document.getElementById('ih-result').innerHTML = '<p style="color:var(--muted)">No history found</p>'; return; }
+    document.getElementById('ih-result').innerHTML = '<table><thead><tr><th>Item</th><th>PO ID</th><th>Date</th><th>Qty</th><th>Cost</th><th>Total</th></tr></thead><tbody>' +
+        data.map(r => `<tr><td>${esc(r.item_name)}</td><td>${esc(r.po_id)}</td><td>${esc(r.date||'').slice(0,10)}</td><td>${r.qty}</td><td>RM ${(r.cost||0).toFixed(2)}</td><td>RM ${(r.total||0).toFixed(2)}</td></tr>`).join('') + '</tbody></table>';
+}
+
+init(); loadRestock(); loadItemsForHistory();
+</script>
+{{end}}

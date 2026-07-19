@@ -1,0 +1,170 @@
+{{template "base.html" .}}
+{{define "content_analytics"}}
+<div class="top-bar">
+    <h2>Analytics</h2>
+    <div style="display:flex;gap:8px;align-items:center;font-size:12px">
+        <span>From</span>
+        <select id="af-month" onchange="load()"></select><select id="af-year" onchange="load()"></select>
+        <span>To</span>
+        <select id="at-month" onchange="load()"></select><select id="at-year" onchange="load()"></select>
+        <button onclick="load(true)">Refresh</button>
+    </div>
+</div>
+
+<div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('finance',this)">Finance</button>
+    <button class="tab-btn" onclick="switchTab('operation',this)">Operation</button>
+    <button class="tab-btn" onclick="switchTab('inventory',this)">Inventory</button>
+    <button class="tab-btn" onclick="switchTab('supplier',this)">Supplier</button>
+    <button class="tab-btn" onclick="switchTab('business',this)">Business</button>
+</div>
+
+<div id="ana-content"><div class="empty"><div class="spinner"></div><p>Loading data...</p></div></div>
+<div id="toast" class="toast" style="display:none"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+let anaData = null, charts = {}, currentTab = 'finance';
+
+function initDropdowns() {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    [document.getElementById('af-month'), document.getElementById('at-month')].forEach(sel => {
+        sel.innerHTML = months.map((m,i) => `<option value="${i}">${m}</option>`).join('');
+        sel.value = sel.id==='af-month' ? 0 : new Date().getMonth();
+    });
+    const yr = new Date().getFullYear();
+    [document.getElementById('af-year'), document.getElementById('at-year')].forEach(sel => {
+        for (let y=2020; y<=yr; y++) sel.innerHTML += `<option value="${y}">${y}</option>`;
+        sel.value = sel.id==='af-year' ? 2025 : yr;
+    });
+}
+function getRange() {
+    return {
+        from_year: parseInt(document.getElementById('af-year').value),
+        from_month: parseInt(document.getElementById('af-month').value),
+        to_year: parseInt(document.getElementById('at-year').value),
+        to_month: parseInt(document.getElementById('at-month').value),
+    };
+}
+async function load(force) {
+    document.getElementById('ana-content').innerHTML = '<div class="empty"><div class="spinner"></div></div>';
+    const r = getRange();
+    const res = await fetch(`/api/analytics?from_year=${r.from_year}&from_month=${r.from_month}&to_year=${r.to_year}&to_month=${r.to_month}`);
+    anaData = await res.json();
+    renderTab(currentTab);
+}
+function switchTab(tab, btn) {
+    currentTab = tab;
+    document.querySelectorAll('.tabs .tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    if (anaData) renderTab(tab);
+}
+function fmt(v) { return 'RM '+(v||0).toLocaleString('en-MY',{maximumFractionDigits:0}); }
+function mths() { return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; }
+function colors(n) { return ['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6','#06b6d4','#ec4899','#64748b'].slice(0,n); }
+
+function renderTab(tab) {
+    if (!anaData) return;
+    Object.values(charts).forEach(c => { try { c.destroy(); } catch(e){} }); charts = {};
+    const div = document.getElementById('ana-content');
+    const labels = mths();
+
+    if (tab === 'finance') {
+        div.innerHTML = `
+            <div class="ana-kpi-grid">
+                <div class="ana-kpi" style="border-left:4px solid #3b82f6"><div class="lbl">Total PO Spend</div><div class="val">${fmt(anaData.finance?.totalSpend)}</div></div>
+                <div class="ana-kpi" style="border-left:4px solid #ef4444"><div class="lbl">Outstanding</div><div class="val">${fmt(anaData.finance?.unpaidPo)}</div></div>
+                <div class="ana-kpi" style="border-left:4px solid #10b981"><div class="lbl">Inventory Asset</div><div class="val">${fmt(anaData.finance?.inventoryAsset)}</div></div>
+            </div>
+            <div class="ana-chart-grid">
+                <div class="ana-chart-card"><h4>Monthly Spending</h4><div class="chart-box"><canvas id="c-fin-trend"></canvas></div></div>
+                <div class="ana-chart-card"><h4>Department Spend</h4><div class="chart-box"><canvas id="c-fin-dept"></canvas></div></div>
+            </div>`;
+        setTimeout(() => {
+            charts['c-fin-trend'] = new Chart(document.getElementById('c-fin-trend'), {
+                type:'bar',data:{labels,datasets:[{label:'Spend',data:anaData.finance?.monthlySpend||[],backgroundColor:'#3b82f6'}]},
+                options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}
+            });
+            const dept = anaData.finance?.deptSpend || {};
+            charts['c-fin-dept'] = new Chart(document.getElementById('c-fin-dept'), {
+                type:'doughnut',data:{labels:Object.keys(dept),datasets:[{data:Object.values(dept),backgroundColor:colors(Object.keys(dept).length)}]},
+                options:{responsive:true,maintainAspectRatio:false}
+            });
+        }, 50);
+    } else if (tab === 'operation') {
+        div.innerHTML = `
+            <div class="ana-kpi-grid">
+                <div class="ana-kpi" style="border-left:4px solid #f59e0b"><div class="lbl">Total POs</div><div class="val">${anaData.operation?.poCount||0}</div></div>
+                <div class="ana-kpi" style="border-left:4px solid #ef4444"><div class="lbl">Restock Cost</div><div class="val">${fmt(anaData.operation?.restockCost)}</div></div>
+            </div>
+            <div class="ana-chart-grid">
+                <div class="ana-chart-card"><h4>In-House Usage (RM)</h4><div class="chart-box"><canvas id="c-ops-inh"></canvas></div></div>
+                <div class="ana-chart-card"><h4>Top 10 Critical</h4>
+                    <table><thead><tr><th>Item</th><th style="text-align:right">Shortage</th><th style="text-align:right">Cost</th></tr></thead><tbody>
+                    ${(anaData.operation?.criticalItems||[]).slice(0,10).map(i => `<tr><td>${esc(i.name)}</td><td style="text-align:right">${i.gap||0}</td><td style="text-align:right">${fmt(i.cost)}</td></tr>`).join('')}</tbody></table>
+                </div>
+            </div>`;
+        setTimeout(() => {
+            charts['c-ops-inh'] = new Chart(document.getElementById('c-ops-inh'), {
+                type:'line',data:{labels,datasets:[{label:'RM',data:anaData.operation?.inHouseConsumption||[],borderColor:'#ef4444',fill:true,backgroundColor:'rgba(239,68,68,0.1)',tension:0.3}]},
+                options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}
+            });
+        }, 50);
+    } else if (tab === 'inventory') {
+        div.innerHTML = `
+            <div class="ana-chart-grid">
+                <div class="ana-chart-card"><h4>Closing Stock Value</h4><div class="chart-box"><canvas id="c-inv-val"></canvas></div></div>
+                <div class="ana-chart-card"><h4>Consumption Value</h4><div class="chart-box"><canvas id="c-inv-cons"></canvas></div></div>
+                <div class="ana-chart-card"><h4>High Movers</h4>
+                    <table><tbody>${(anaData.inventory?.highMovers||[]).slice(0,10).map(i => `<tr><td>${esc(i.name)}</td><td style="text-align:right">${i.qty||0}</td><td style="text-align:right">${fmt(i.val)}</td></tr>`).join('')}</tbody></table>
+                </div>
+                <div class="ana-chart-card"><h4>Dead Stock</h4>
+                    <table><tbody>${(anaData.inventory?.deadStock||[]).slice(0,10).map(i => `<tr><td>${esc(i.name)}</td></tr>`).join('')}</tbody></table>
+                </div>
+            </div>`;
+        setTimeout(() => {
+            charts['c-inv-val'] = new Chart(document.getElementById('c-inv-val'), {type:'bar',data:{labels,datasets:[{label:'Value',data:anaData.inventory?.valuationTrend||[],backgroundColor:'#10b981'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+            charts['c-inv-cons'] = new Chart(document.getElementById('c-inv-cons'), {type:'bar',data:{labels,datasets:[{label:'Consump',data:anaData.inventory?.consumptionTrend||[],backgroundColor:'#f59e0b'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+        }, 50);
+    } else if (tab === 'supplier') {
+        const tops = Object.entries(anaData.supplier?.topSuppliers||{}).sort((a,b)=>b[1]-a[1]).slice(0,10);
+        div.innerHTML = `
+            <div class="ana-kpi-grid"><div class="ana-kpi" style="border-left:4px solid #8b5cf6"><div class="lbl">Active Suppliers</div><div class="val">${Object.keys(anaData.supplier?.topSuppliers||{}).length}</div></div></div>
+            <div class="ana-chart-grid">
+                <div class="ana-chart-card"><h4>Top Suppliers (Spend)</h4>
+                    <table><tbody>${tops.map(e => `<tr><td>${esc(e[0])}</td><td style="text-align:right">${fmt(e[1])}</td></tr>`).join('')}</tbody></table>
+                </div>
+                <div class="ana-chart-card"><h4>Avg Performance</h4><div class="chart-box"><canvas id="c-sup-radar"></canvas></div></div>
+                <div class="ana-chart-card"><h4>Performance Ranking</h4>
+                    <table><thead><tr><th>Supplier</th><th>Entries</th><th>Avg</th></tr></thead><tbody>
+                    ${(anaData.supplier?.performanceRanking||[]).map(r => `<tr><td>${esc(r.name)}</td><td style="text-align:center">${r.count}</td><td><span class="badge ${r.avg>=4.5?'badge-green':r.avg<3?'badge-red':'badge-amber'}">${r.avg.toFixed(1)}</span></td></tr>`).join('')}</tbody></table>
+                </div>
+            </div>`;
+        setTimeout(() => {
+            const rad = anaData.supplier?.radarData || {};
+            if (rad.acc) charts['c-sup-radar'] = new Chart(document.getElementById('c-sup-radar'), {
+                type:'radar',data:{labels:['Accuracy','Speed','Quality'],datasets:[{label:'Avg',data:[rad.acc,rad.spd,rad.qual],backgroundColor:'rgba(46,204,113,0.2)',borderColor:'#2ecc71'}]},
+                options:{responsive:true,maintainAspectRatio:false,scales:{r:{min:0,max:5,ticks:{stepSize:1}}}}
+            });
+        }, 50);
+    } else if (tab === 'business') {
+        div.innerHTML = `
+            <div class="ana-chart-grid">
+                <div class="ana-chart-card"><h4>Gross Revenue Trend</h4><div class="chart-box"><canvas id="c-biz-rev"></canvas></div></div>
+                <div class="ana-chart-card"><h4>Product Type Split</h4><div class="chart-box"><canvas id="c-biz-type"></canvas></div></div>
+                <div class="ana-chart-card"><h4>Top Revenue Items</h4>
+                    <table><tbody>${(anaData.business?.topTurnoverItems||[]).slice(0,10).map(i => `<tr><td>${esc(i.name)}</td><td style="text-align:right">${fmt(i.revenue)}</td></tr>`).join('')}</tbody></table>
+                </div>
+            </div>`;
+        setTimeout(() => {
+            charts['c-biz-rev'] = new Chart(document.getElementById('c-biz-rev'), {type:'bar',data:{labels,datasets:[{label:'Revenue',data:anaData.business?.grossRevenueTrend||[],backgroundColor:'#8b5cf6'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+            const ptKeys = Object.keys(anaData.business?.productTypeSplit||{});
+            if (ptKeys.length) charts['c-biz-type'] = new Chart(document.getElementById('c-biz-type'), {type:'doughnut',data:{labels:ptKeys,datasets:[{data:Object.values(anaData.business?.productTypeSplit||{})}]},options:{responsive:true,maintainAspectRatio:false}});
+        }, 50);
+    }
+}
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+initDropdowns(); load();
+</script>
+{{end}}

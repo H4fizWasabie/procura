@@ -1,0 +1,107 @@
+{{template "base.html" .}}
+{{define "content_scorecard"}}
+<div class="top-bar"><h2>Supplier Scorecard</h2><button onclick="loadSummary()">Refresh</button></div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="card">
+        <h3>Pending Reviews</h3>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Rate completed POs</p>
+        <table><thead><tr><th>PO ID</th><th>Supplier</th><th>Date</th><th>Amount</th><th></th></tr></thead>
+        <tbody id="sc-pending-body"></tbody></table>
+        <div id="sc-empty" class="empty" style="display:none"><span class="material-icons">check_circle</span><p>All caught up!</p></div>
+    </div>
+    <div class="card">
+        <h3>Summary</h3>
+        <div id="sc-summary" style="font-size:13px;color:var(--muted)">Loading...</div>
+    </div>
+</div>
+<div id="toast" class="toast" style="display:none"></div>
+
+<div id="rate-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header"><h3>Rate: <span id="rm-po"></span></h3><span class="close" onclick="closeRate()">&times;</span></div>
+        <div class="modal-body">
+            <input type="hidden" id="rm-po-id">
+            <div style="background:var(--bg);padding:12px;border-radius:6px;margin-bottom:16px">
+                <strong>Supplier:</strong> <span id="rm-supplier"></span> &nbsp;|&nbsp;
+                <strong>Bill:</strong> <span id="rm-bill"></span>
+            </div>
+            <div class="star-row"><label>Accuracy</label><input type="range" min="1" max="5" value="5" id="rm-acc" oninput="document.getElementById('v-acc').textContent=this.value"><span class="star-val" id="v-acc">5</span></div>
+            <div class="star-row"><label>Speed</label><input type="range" min="1" max="5" value="5" id="rm-spd" oninput="document.getElementById('v-spd').textContent=this.value"><span class="star-val" id="v-spd">5</span></div>
+            <div class="star-row"><label>Quality</label><input type="range" min="1" max="5" value="5" id="rm-qual" oninput="document.getElementById('v-qual').textContent=this.value"><span class="star-val" id="v-qual">5</span></div>
+            <div class="form-group"><label>Comments</label><textarea id="rm-comment" rows="2"></textarea></div>
+            <div class="btn-group">
+                <button class="btn-secondary" onclick="closeRate()">Cancel</button>
+                <button onclick="submitScore()">Submit Score</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let pendingList = [];
+async function loadSummary() {
+    const [listRes, posRes, sumRes] = await Promise.all([
+        fetch('/api/scorecard'),
+        fetch('/api/pos?status=Paid&status=Partial'),
+        fetch('/api/scorecard/summary')
+    ]);
+    const list = await listRes.json();
+    const pos = await posRes.json();
+    const summary = await sumRes.json();
+
+    const scoredIds = new Set((list||[]).map(s => s.po_id));
+    pendingList = (pos||[]).filter(p => !scoredIds.has(p.po_id));
+
+    const tbody = document.getElementById('sc-pending-body');
+    if (pendingList.length === 0) {
+        tbody.innerHTML = ''; document.getElementById('sc-empty').style.display = 'block';
+    } else {
+        document.getElementById('sc-empty').style.display = 'none';
+        tbody.innerHTML = pendingList.map(p => `
+            <tr><td>${esc(p.po_id)}</td><td>${esc(p.supplier)}</td>
+            <td>${esc(p.date||'').slice(0,10)}</td>
+            <td class="money">RM ${(p.total||0).toFixed(2)}</td>
+            <td><button onclick="openRate('${esc(p.po_id)}','${esc(p.supplier)}','${esc(p.bill_no||'')}')" class="btn-sm">Rate</button></td></tr>`).join('');
+    }
+    const sdiv = document.getElementById('sc-summary');
+    if (summary && summary.length) {
+        sdiv.innerHTML = '<table><thead><tr><th>Supplier</th><th>Entries</th><th>Avg</th></tr></thead><tbody>' +
+            summary.map(s => `<tr><td>${esc(s.supplier_name)}</td><td>${s.count}</td>
+                <td><span class="badge ${s.avg>=4.5?'badge-green':s.avg<3?'badge-red':'badge-amber'}">${s.avg.toFixed(1)}</span></td></tr>`).join('') + '</tbody></table>';
+    } else {
+        sdiv.innerHTML = '<p>No scores recorded yet.</p>';
+    }
+}
+function openRate(poId, supplier, billNo) {
+    document.getElementById('rm-po-id').value = poId;
+    document.getElementById('rm-po').textContent = poId;
+    document.getElementById('rm-supplier').textContent = supplier;
+    document.getElementById('rm-bill').textContent = billNo || '-';
+    document.getElementById('rm-acc').value = 5; document.getElementById('v-acc').textContent = '5';
+    document.getElementById('rm-spd').value = 5; document.getElementById('v-spd').textContent = '5';
+    document.getElementById('rm-qual').value = 5; document.getElementById('v-qual').textContent = '5';
+    document.getElementById('rm-comment').value = '';
+    document.getElementById('rate-modal').classList.add('open');
+}
+function closeRate() { document.getElementById('rate-modal').classList.remove('open'); }
+async function submitScore() {
+    const body = {
+        po_id: document.getElementById('rm-po-id').value,
+        supplier: document.getElementById('rm-supplier').textContent,
+        bill_no: document.getElementById('rm-bill').textContent,
+        accuracy: parseInt(document.getElementById('rm-acc').value),
+        speed: parseInt(document.getElementById('rm-spd').value),
+        quality: parseInt(document.getElementById('rm-qual').value),
+        comment: document.getElementById('rm-comment').value,
+    };
+    const res = await fetch('/api/scorecard', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await res.json();
+    toast(d.success?'Score saved':'Error', d.success);
+    if (d.success) { closeRate(); loadSummary(); }
+}
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+loadSummary();
+</script>
+{{end}}

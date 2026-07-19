@@ -1,0 +1,101 @@
+{{template "base.html" .}}
+{{define "content_planning"}}
+<div class="top-bar">
+    <h2>Planning</h2>
+    <button id="order-btn" onclick="markOrdered()" disabled>Mark Ordered</button>
+</div>
+
+<div class="search-bar">
+    <input type="text" id="filter" placeholder="Filter by name, supplier, or category..." oninput="render()">
+</div>
+
+<table>
+    <thead><tr>
+        <th><input type="checkbox" id="select-all" onchange="toggleAll(this)"></th>
+        <th>Stock ID</th><th>Item</th><th>Supplier</th><th>Category</th>
+        <th>Current</th><th>ROP</th><th>Health</th><th>Velocity</th>
+        <th>Status</th><th>Suggested</th><th>Cost</th>
+    </tr></thead>
+    <tbody id="plan-body"></tbody>
+</table>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<script>
+let data = [], selected = new Set();
+
+async function load() {
+    const res = await fetch('/api/planning');
+    data = await res.json();
+    selected.clear();
+    render();
+}
+
+function render() {
+    const q = (document.getElementById('filter').value || '').toLowerCase();
+    const filtered = data.filter(i =>
+        !q || (i.id||'').toLowerCase().includes(q) || (i.name||'').toLowerCase().includes(q)
+            || (i.supplier||'').toLowerCase().includes(q) || (i.category||'').toLowerCase().includes(q)
+    );
+
+    const tbody = document.getElementById('plan-body');
+    tbody.innerHTML = filtered.map((it, idx) => `
+        <tr>
+            <td><input type="checkbox" ${selected.has(it.id) ? 'checked' : ''} onchange="toggle('${esc(it.id)}', this.checked)"></td>
+            <td>${esc(it.id)}</td>
+            <td>${esc(it.name)}</td>
+            <td>${esc(it.supplier || '-')}</td>
+            <td>${esc(it.category || '-')}</td>
+            <td class="money">${it.current || 0}</td>
+            <td class="money">${it.rop || 0}</td>
+            <td><span class="badge ${it.health <= 25 ? 'badge-red' : it.health <= 50 ? 'badge-amber' : 'badge-green'}">${it.health.toFixed(0)}%</span></td>
+            <td><span class="badge ${it.velocityClass === 'FAST' ? 'badge-green' : it.velocityClass === 'SLOW' ? 'badge-red' : 'badge-amber'}">${it.velocityClass || 'MEDIUM'}</span></td>
+            <td><span class="badge ${it.status === 'CRITICAL' ? 'badge-red' : 'badge-amber'}">${it.status}</span></td>
+            <td class="money">${it.suggested > 0 ? it.suggested.toFixed(0) : '-'}</td>
+            <td class="money">${it.cost ? 'RM ' + it.cost.toFixed(2) : '-'}</td>
+        </tr>
+    `).join('');
+
+    document.getElementById('order-btn').disabled = selected.size === 0;
+}
+
+function toggle(id, on) { on ? selected.add(id) : selected.delete(id); render(); }
+function toggleAll(el) {
+    const q = (document.getElementById('filter').value || '').toLowerCase();
+    data.forEach(it => {
+        if (!q || (it.id||'').toLowerCase().includes(q) || (it.name||'').toLowerCase().includes(q)
+                || (it.supplier||'').toLowerCase().includes(q)) {
+            el.checked ? selected.add(it.id) : selected.delete(it.id);
+        }
+    });
+    render();
+}
+
+async function markOrdered() {
+    const items = data.filter(it => selected.has(it.id)).map(it => ({
+        stockId: it.id, name: it.name, supplier: it.supplier,
+        qty: Math.max(it.suggested, 1)
+    }));
+    if (!items.length) return;
+    const supplier = items[0].supplier;
+
+    try {
+        const res = await fetch('/api/planning/order', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({items, notes: 'Ordered from planning, supplier: ' + (supplier || 'unknown')})
+        });
+        const d = await res.json();
+        toast(d.success ? 'Order ' + d.orderId + ' created (' + items.length + ' items)' : d.error, d.success);
+        if (d.success) load();
+    } catch(e) { toast('Error: ' + e.message, false); }
+}
+
+function toast(msg, ok) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast ' + (ok ? 'toast-ok' : 'toast-err');
+    t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3000);
+}
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+load();
+</script>
+{{end}}

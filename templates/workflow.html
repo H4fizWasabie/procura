@@ -1,0 +1,78 @@
+{{template "base.html" .}}
+{{define "content_workflow"}}
+<div class="top-bar"><h2>Workflow</h2></div>
+<div class="tabs">
+    <button class="tab-btn active" onclick="switchWf('APPROVAL',this)">Manager Approval</button>
+    <button class="tab-btn" onclick="switchWf('PAYMENT',this)">Finance Request</button>
+</div>
+
+<div id="wf-table-area">
+    <div class="search-bar">
+        <input type="text" id="wf-search" placeholder="Search POs..." oninput="renderWf()">
+        <button onclick="loadWf(true)">Refresh</button>
+    </div>
+    <table><thead><tr>
+        <th style="width:40px"><input type="checkbox" onchange="toggleAll(this)"></th>
+        <th>PO ID</th><th>Supplier</th><th>Dept</th><th style="text-align:right">Amount</th><th>Status</th><th>Ship</th>
+    </tr></thead><tbody id="wf-body"></tbody></table>
+    <div id="wf-empty" class="empty" style="display:none"><span class="material-icons">done_all</span><p>No items pending</p></div>
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <span id="wf-count" style="font-weight:700;color:var(--accent)">0 selected</span>
+        <button onclick="batchAction()" id="wf-action-btn">Approve Selected</button>
+    </div>
+</div>
+<div id="toast" class="toast" style="display:none"></div>
+
+<script>
+let wfMode = 'APPROVAL', wfData = [], selected = new Set();
+async function loadWf(force) {
+    const res = await fetch('/api/pos?status='+(wfMode==='APPROVAL'?'Pending+Approval':'Approved'));
+    const pos = await res.json();
+    wfData = (pos||[]).filter(p => wfMode==='APPROVAL' ? p.status==='Pending Approval' : p.status==='Approved');
+    selected.clear(); renderWf();
+}
+function switchWf(mode, btn) {
+    wfMode = mode;
+    document.querySelectorAll('#wf-table-area .tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('wf-action-btn').textContent = mode==='APPROVAL'?'Approve Selected':'Request Payment';
+    loadWf();
+}
+function renderWf() {
+    const q = (document.getElementById('wf-search')?.value||'').toLowerCase();
+    const filtered = q ? wfData.filter(p => (p.po_id||'').toLowerCase().includes(q) || (p.supplier||'').toLowerCase().includes(q)) : wfData;
+    const tbody = document.getElementById('wf-body');
+    if (!filtered.length) { tbody.innerHTML=''; document.getElementById('wf-empty').style.display='block'; return; }
+    document.getElementById('wf-empty').style.display = 'none';
+    tbody.innerHTML = filtered.map(p => `
+        <tr>
+            <td><input type="checkbox" ${selected.has(p.po_id)?'checked':''} onchange="toggleSel('${esc(p.po_id)}',this.checked)"></td>
+            <td style="font-weight:700;color:var(--accent)">${esc(p.po_id)}</td>
+            <td>${esc(p.supplier)}</td><td>${esc(p.department||'-')}</td>
+            <td class="money">RM ${(p.total||0).toFixed(2)}</td>
+            <td><span class="badge badge-amber">${esc(p.status)}</span></td>
+            <td style="font-size:11px">${esc(p.ship_status||'-')}</td>
+        </tr>`).join('');
+}
+function toggleSel(id, on) { on ? selected.add(id) : selected.delete(id); document.getElementById('wf-count').textContent = selected.size + ' selected'; }
+function toggleAll(cb) {
+    document.querySelectorAll('#wf-body input[type=checkbox]').forEach(chk => {
+        chk.checked = cb.checked;
+        toggleSel(chk.closest('tr').querySelector('td:nth-child(2)').textContent, cb.checked);
+    });
+}
+async function batchAction() {
+    if (!selected.size) { toast('Select POs first', false); return; }
+    const endpoint = wfMode === 'APPROVAL' ? '/api/workflow/approve' : '/api/workflow/payment';
+    let count = 0;
+    for (const poId of selected) {
+        const res = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({po_id: poId})});
+        const d = await res.json(); if (d.success) count++;
+    }
+    toast(`Processed ${count} POs`, true); loadWf();
+}
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+loadWf();
+</script>
+{{end}}

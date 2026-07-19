@@ -1,0 +1,317 @@
+<div id="view-scorecard" class="view-section hidden">
+  <div class="module-header">
+    <h2><span class="material-icons">stars</span> Supplier Scorecard</h2>
+    <div style="font-size:0.85rem; color:#64748b;">Rate completed transactions</div>
+  </div>
+
+  <div class="card">
+    <div class="action-bar"
+      style="border-bottom:1px solid #e2e8f0; padding:15px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+      <div class="search-wrapper" style="flex:1; max-width:400px; position:relative;">
+        <span class="material-icons" style="position:absolute; left:12px; top:12px; color:#94a3b8;">search</span>
+        <input type="text" id="sc-search" class="tbl-input" style="padding-left:40px;"
+          placeholder="Search PO or Supplier..." onkeyup="filterScorecards()">
+      </div>
+      <button class="btn btn-secondary" onclick="loadScorecard(true)">
+        <span class="material-icons">refresh</span> Refresh
+      </button>
+    </div>
+
+    <div class="table-responsive" style="height: calc(100vh - 260px); overflow-y: auto;">
+      <table class="modern-table">
+        <thead>
+          <tr>
+            <th>PO ID</th>
+            <th>Supplier</th>
+            <th>Date</th>
+            <th>Invoice / Bill #</th>
+            <th style="text-align:right">Amount</th>
+            <th style="text-align:center">Action</th>
+          </tr>
+        </thead>
+        <tbody id="sc-tbody"></tbody>
+      </table>
+
+      <div id="sc-empty" class="empty-state hidden" style="padding:40px; text-align:center; color:#94a3b8;">
+        <span class="material-icons" style="font-size:48px; color:#27ae60; opacity:0.8;">check_circle</span>
+        <p>All caught up! No pending reviews.</p>
+      </div>
+
+      <div id="sc-loading" class="empty-state" style="padding:40px; text-align:center; color:#94a3b8;">
+        <span class="btn-spinner"
+          style="width:30px; height:30px; border-color:var(--primary); display:inline-block;"></span>
+        <p style="margin-top:10px;">Loading pending reviews...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="sc-modal" class="modal">
+  <div class="modal-content" style="width:500px;">
+    <div class="modal-header">
+      <span style="font-weight:700; font-size:1.1rem; color:var(--text-main);">Rate Performance</span>
+      <span class="close" onclick="closeScModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+
+      <div
+        style="background:var(--bg-app); padding:20px; border-radius:8px; margin-bottom:25px; border:1px solid var(--border);">
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+          <strong id="sc-m-po" style="color:var(--primary); font-size:1.1rem;">PO-XXXX</strong>
+          <span id="sc-m-sup" style="font-weight:600; color:var(--text-main);">Supplier Name</span>
+        </div>
+        <div style="font-size:0.9rem; color:var(--text-muted); margin-bottom:15px;">
+          Invoice: <span id="sc-m-inv">INV-001</span>
+        </div>
+        <a id="sc-m-link" href="#" target="_blank" class="btn btn-sm btn-secondary"
+          style="width:100%; text-decoration:none; display:flex; align-items:center; justify-content:center; gap:8px;">
+          <span class="material-icons" style="font-size:16px;">picture_as_pdf</span> View Invoice PDF
+        </a>
+      </div>
+
+      <form id="sc-form" onsubmit="submitScore(event)">
+        <input type="hidden" id="sc-h-poid">
+        <input type="hidden" id="sc-h-sup">
+        <input type="hidden" id="sc-h-bill">
+
+        <div class="score-row">
+          <label>Accuracy <span class="chk-sub">(Items match PO?)</span></label>
+          <div class="star-rating">
+            <input type="range" id="sc-acc" min="1" max="5" value="5" oninput="updStar('acc')">
+            <span id="val-acc" class="score-val">5</span>
+          </div>
+        </div>
+
+        <div class="score-row">
+          <label>Speed <span class="chk-sub">(On time?)</span></label>
+          <div class="star-rating">
+            <input type="range" id="sc-spd" min="1" max="5" value="5" oninput="updStar('spd')">
+            <span id="val-spd" class="score-val">5</span>
+          </div>
+        </div>
+
+        <div class="score-row">
+          <label>Quality <span class="chk-sub">(Damages?)</span></label>
+          <div class="star-rating">
+            <input type="range" id="sc-qual" min="1" max="5" value="5" oninput="updStar('qual')">
+            <span id="val-qual" class="score-val">5</span>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top:25px;">
+          <label
+            style="font-weight:600; font-size:0.85rem; color:#64748b; margin-bottom:8px; display:block;">Comments</label>
+          <textarea id="sc-comment" class="tbl-input" rows="3" placeholder="Any discrepancies or notes..."
+            style="width:100%; resize:none;"></textarea>
+        </div>
+
+        <div style="text-align:right; margin-top:25px; border-top:1px solid #f1f5f9; padding-top:20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeScModal()">Cancel</button>
+          <button type="submit" class="btn btn-success">Submit Score</button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+</div>
+
+<style>
+  .score-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+
+  .score-row label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-main);
+  }
+
+  .chk-sub {
+    font-weight: 400;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  .star-rating {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+  }
+
+  .score-val {
+    font-weight: 800;
+    color: var(--primary);
+    width: 25px;
+    text-align: center;
+    font-size: 1.1rem;
+  }
+
+  input[type=range] {
+    accent-color: var(--primary);
+    cursor: pointer;
+    width: 120px;
+  }
+
+  .tbl-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.95rem;
+    color: var(--text-main);
+    background: var(--bg-card);
+    transition: 0.2s;
+  }
+
+  .tbl-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  }
+</style>
+
+<script>
+  let scData = [];
+
+  async function loadScorecard(force = false) {
+    document.getElementById('sc-tbody').innerHTML = '';
+    document.getElementById('sc-loading').classList.remove('hidden');
+    document.getElementById('sc-empty').classList.add('hidden');
+
+    const res = await fetchData('scorecardContext', 'apiGetScorecardContext', force);
+    if (res) {
+      document.getElementById('sc-loading').classList.add('hidden');
+      renderScorecardList(res.pending);
+    }
+  }
+
+  function renderScorecardList(list) {
+    const tbody = document.getElementById('sc-tbody');
+    tbody.innerHTML = '';
+
+    if (!list || list.length === 0) {
+      document.getElementById('sc-empty').classList.remove('hidden');
+      return;
+    }
+    document.getElementById('sc-empty').classList.add('hidden');
+
+    list.forEach(item => {
+      const tr = document.createElement('tr');
+
+      const tdId = document.createElement('td');
+      tdId.style.fontWeight = 'bold';
+      tdId.style.color = 'var(--primary)';
+      tdId.textContent = item.poId;
+
+      const tdSup = document.createElement('td');
+      tdSup.textContent = item.supplier;
+
+      const tdDate = document.createElement('td');
+      tdDate.textContent = item.date;
+
+      const tdBill = document.createElement('td');
+      tdBill.textContent = item.billNo || '-';
+
+      const tdTotal = document.createElement('td');
+      tdTotal.style.textAlign = 'right';
+      tdTotal.textContent = `RM ${Number(item.total).toFixed(2)}`;
+
+      const tdAction = document.createElement('td');
+      tdAction.style.textAlign = 'center';
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-sm btn-primary';
+      btn.innerHTML = '<span class="material-icons" style="font-size:16px">star</span> Rate';
+      btn.onclick = () => openScModal(item);
+      tdAction.appendChild(btn);
+
+      tr.appendChild(tdId);
+      tr.appendChild(tdSup);
+      tr.appendChild(tdDate);
+      tr.appendChild(tdBill);
+      tr.appendChild(tdTotal);
+      tr.appendChild(tdAction);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  function filterScorecards() {
+    const term = document.getElementById('sc-search').value.toLowerCase();
+    const list = APP.STORE.scorecardContext ? APP.STORE.scorecardContext.pending : [];
+    const filtered = list.filter(i =>
+      i.poId.toLowerCase().includes(term) ||
+      i.supplier.toLowerCase().includes(term) ||
+      (i.billNo && i.billNo.toLowerCase().includes(term))
+    );
+    renderScorecardList(filtered);
+  }
+
+  // --- MODAL LOGIC ---
+  function openScModal(item) {
+    document.getElementById('sc-h-poid').value = item.poId;
+    document.getElementById('sc-h-sup').value = item.supplier;
+    document.getElementById('sc-h-bill').value = item.billNo;
+
+    document.getElementById('sc-m-po').textContent = item.poId;
+    document.getElementById('sc-m-sup').textContent = item.supplier;
+    document.getElementById('sc-m-inv').textContent = item.billNo ? "Inv: " + item.billNo : "No Invoice #";
+
+    const linkBtn = document.getElementById('sc-m-link');
+    if (item.invUrl) {
+      linkBtn.href = item.invUrl;
+      linkBtn.style.display = 'flex';
+      linkBtn.innerHTML = '<span class="material-icons" style="font-size:16px;">picture_as_pdf</span> View Invoice PDF';
+    } else {
+      linkBtn.style.display = 'none';
+    }
+
+    // Reset Form
+    document.getElementById('sc-acc').value = 5; updStar('acc');
+    document.getElementById('sc-spd').value = 5; updStar('spd');
+    document.getElementById('sc-qual').value = 5; updStar('qual');
+    document.getElementById('sc-comment').value = '';
+
+    document.getElementById('sc-modal').style.display = 'block';
+  }
+
+  function closeScModal() {
+    document.getElementById('sc-modal').style.display = 'none';
+  }
+
+  function updStar(key) {
+    const val = document.getElementById('sc-' + key).value;
+    document.getElementById('val-' + key).innerText = val;
+  }
+
+  function submitScore(e) {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const originalText = btn.innerText;
+    btn.innerText = "Saving...";
+    btn.disabled = true;
+
+    const payload = {
+      poId: document.getElementById('sc-h-poid').value,
+      supplier: document.getElementById('sc-h-sup').value,
+      billNo: document.getElementById('sc-h-bill').value,
+      acc: document.getElementById('sc-acc').value,
+      spd: document.getElementById('sc-spd').value,
+      qual: document.getElementById('sc-qual').value,
+      comment: document.getElementById('sc-comment').value
+    };
+
+    runServer('apiSaveScorecard', payload).then(res => {
+      if (res.success) {
+        APP.Utils.showToast("Scorecard Saved!");
+        closeScModal();
+        loadScorecard(true);
+      } else {
+        APP.Utils.showToast("Error: " + res.error);
+      }
+      btn.innerText = originalText;
+      btn.disabled = false;
+    });
+  }
+</script>

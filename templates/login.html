@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procura — Login</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="login-box card">
+        <h2>Procura</h2>
+        <div id="error" class="error-msg" style="display:none"></div>
+        <input type="email" id="email" placeholder="Email" autocomplete="email">
+        <input type="password" id="pin" placeholder="PIN" autocomplete="current-password">
+        <button onclick="login()">Sign In</button>
+    </div>
+<script>
+async function login() {
+    const err = document.getElementById('error');
+    err.style.display = 'none';
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                email: document.getElementById('email').value,
+                pin: document.getElementById('pin').value
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            window.location.href = '/';
+        } else {
+            err.textContent = data.error;
+            err.style.display = 'block';
+        }
+    } catch(e) {
+        err.textContent = 'Connection error';
+        err.style.display = 'block';
+    }
+}
+document.getElementById('pin').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+</script>
+</body>
+</html>

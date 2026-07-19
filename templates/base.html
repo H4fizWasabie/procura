@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procura</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+</head>
+<body>
+    <nav>
+        <a href="/" class="brand">Procura</a>
+        <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
+        <a href="/items" class="{{if eq .Active "inventory"}}active{{end}}">Items</a>
+        <a href="/suppliers" class="{{if eq .Active "suppliers"}}active{{end}}">Suppliers</a>
+        <a href="/pos" class="{{if eq .Active "pos"}}active{{end}}">POs</a>
+        <a href="/planning" class="{{if eq .Active "planning"}}active{{end}}">Planning</a>
+        <a href="/rfq" class="{{if eq .Active "rfq"}}active{{end}}">RFQ</a>
+        <a href="/movement" class="{{if eq .Active "movement"}}active{{end}}">Movement</a>
+        <a href="/reports" class="{{if eq .Active "reports"}}active{{end}}">Reports</a>
+        <a href="/analytics" class="{{if eq .Active "analytics"}}active{{end}}">Analytics</a>
+        <a href="/scorecard" class="{{if eq .Active "scorecard"}}active{{end}}">Scorecard</a>
+        <a href="/tasks" class="{{if eq .Active "tasks"}}active{{end}}">Tasks</a>
+        <a href="/workflow" class="{{if eq .Active "workflow"}}active{{end}}">Workflow</a>
+        <a href="/catalogue" class="{{if eq .Active "catalogue"}}active{{end}}">Catalogue</a>
+        <a href="/uom" class="{{if eq .Active "uom"}}active{{end}}">UOM</a>
+        <a href="/import" class="{{if eq .Active "import"}}active{{end}}">Import</a>
+        <span style="margin-left:auto;color:var(--muted);font-size:12px">{{.User.name}}</span>
+    </nav>
+    <main>
+        {{if eq .ContentBlock "content_dashboard"}}{{template "content_dashboard" .}}
+        {{else if eq .ContentBlock "content_inventory"}}{{template "content_inventory" .}}
+        {{else if eq .ContentBlock "content_suppliers"}}{{template "content_suppliers" .}}
+        {{else if eq .ContentBlock "content_planning"}}{{template "content_planning" .}}
+        {{else if eq .ContentBlock "content_pos"}}{{template "content_pos" .}}
+        {{else if eq .ContentBlock "content_rfq"}}{{template "content_rfq" .}}
+        {{else if eq .ContentBlock "content_movement"}}{{template "content_movement" .}}
+        {{else if eq .ContentBlock "content_reports"}}{{template "content_reports" .}}
+        {{else if eq .ContentBlock "content_analytics"}}{{template "content_analytics" .}}
+        {{else if eq .ContentBlock "content_scorecard"}}{{template "content_scorecard" .}}
+        {{else if eq .ContentBlock "content_tasks"}}{{template "content_tasks" .}}
+        {{else if eq .ContentBlock "content_workflow"}}{{template "content_workflow" .}}
+        {{else if eq .ContentBlock "content_catalogue"}}{{template "content_catalogue" .}}
+        {{else if eq .ContentBlock "content_uom"}}{{template "content_uom" .}}
+        {{else if eq .ContentBlock "content_import"}}{{template "content_import" .}}
+        {{else}}{{template "content_dashboard" .}}{{end}}
+    </main>
+</body>
+</html>

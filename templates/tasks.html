@@ -1,0 +1,112 @@
+{{template "base.html" .}}
+{{define "content_tasks"}}
+<div class="top-bar">
+    <h2>Tasks</h2>
+    <div style="display:flex;gap:8px">
+        <button class="tab-btn active" onclick="filter('all')">All</button>
+        <button class="tab-btn" onclick="filter('pending')">Pending</button>
+        <button class="tab-btn" onclick="filter('done')">Done</button>
+        <button onclick="openCreate()" style="margin-left:12px">+ New Task</button>
+    </div>
+</div>
+<div id="task-grid" class="task-grid"></div>
+<div id="toast" class="toast" style="display:none"></div>
+
+<div id="task-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header"><h3 id="tm-title">New Task</h3><span class="close" onclick="closeModal()">&times;</span></div>
+        <div class="modal-body">
+            <input type="hidden" id="tm-id">
+            <div class="form-group"><label>Title</label><input id="tm-title-input" placeholder="What needs to be done?"></div>
+            <div class="form-group"><label>Notes</label><textarea id="tm-notes" rows="3" placeholder="Details..."></textarea></div>
+            <div class="btn-group">
+                <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+                <button onclick="saveTask()">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let tasks = [], currentFilter = 'all';
+async function init() {
+    const res = await fetch('/api/tasks');
+    tasks = await res.json();
+    render();
+}
+function filter(f) {
+    currentFilter = f;
+    document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active',
+        (f==='all'&&i===0)||(f==='pending'&&i===1)||(f==='done'&&i===2)));
+    render();
+}
+function render() {
+    let filtered = tasks;
+    if (currentFilter === 'pending') filtered = tasks.filter(t => t.status !== 'Done');
+    if (currentFilter === 'done') filtered = tasks.filter(t => t.status === 'Done');
+    const grid = document.getElementById('task-grid');
+    if (!filtered.length) {
+        grid.innerHTML = `<div class="empty"><span class="material-icons">assignment</span><p>${currentFilter==='done'?'No completed tasks':'No tasks yet'}</p></div>`;
+        return;
+    }
+    grid.innerHTML = filtered.map(t => `
+        <div class="task-card ${t.status==='Done'?'done':''}">
+            <h4>${esc(t.title)}</h4>
+            ${t.notes ? `<div class="task-notes">${esc(t.notes)}</div>` : ''}
+            <div class="task-meta"><span>${esc(t.id)}</span><span>${esc(t.created_date||'')}</span></div>
+            <div class="task-actions">
+                <button onclick="toggleStatus('${esc(t.id)}')" class="btn-sm">${t.status==='Done'?'Reopen':'Done'}</button>
+                <button onclick="editTask('${esc(t.id)}')" class="btn-sm">Edit</button>
+                <button onclick="deleteTask('${esc(t.id)}')" class="btn-sm btn-danger">Del</button>
+            </div>
+        </div>`).join('');
+}
+function openCreate() {
+    document.getElementById('tm-id').value = '';
+    document.getElementById('tm-title').textContent = 'New Task';
+    document.getElementById('tm-title-input').value = '';
+    document.getElementById('tm-notes').value = '';
+    document.getElementById('task-modal').classList.add('open');
+}
+function editTask(id) {
+    const t = tasks.find(x => x.id === id);
+    if (!t) return;
+    document.getElementById('tm-id').value = id;
+    document.getElementById('tm-title').textContent = 'Edit Task';
+    document.getElementById('tm-title-input').value = t.title;
+    document.getElementById('tm-notes').value = t.notes || '';
+    document.getElementById('task-modal').classList.add('open');
+}
+function closeModal() { document.getElementById('task-modal').classList.remove('open'); }
+async function saveTask() {
+    const body = {
+        id: document.getElementById('tm-id').value || undefined,
+        title: document.getElementById('tm-title-input').value,
+        notes: document.getElementById('tm-notes').value,
+    };
+    if (!body.title) { toast('Title required', false); return; }
+    const res = await fetch('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await res.json();
+    toast(d.success?'Saved':'Error', d.success);
+    if (d.success) { closeModal(); init(); }
+}
+async function toggleStatus(id) {
+    const t = tasks.find(x => x.id === id);
+    if (!t) return;
+    const newStatus = t.status === 'Done' ? 'Pending' : 'Done';
+    await fetch('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({id: t.id, title: t.title, notes: t.notes, status: newStatus})});
+    init();
+}
+async function deleteTask(id) {
+    if (!confirm('Delete this task?')) return;
+    const t = tasks.find(x => x.id === id);
+    await fetch('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({id: t.id, title: t.title, notes: t.notes, status: 'Deleted'})});
+    init();
+}
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+init();
+</script>
+{{end}}

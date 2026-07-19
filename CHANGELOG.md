@@ -1,6 +1,8 @@
 # Changelog
 
 ## 2026-07-19
+- [ui] Complete UI parity — 7 new pages (analytics, scorecard, tasks, workflow, catalogue, uom, import), modal upgrades (inventory/PO/RFQ), movement upload+analysis with Chart.js, dashboard quick actions, reports item history, shared CSS (modals/forms/tabs/charts)
+- [movement] Added Timeline, ItemDetail, BulkSave API endpoints for movement analysis and upload
 - [spec] UI parity gap closure design doc — 5-phase plan for 7 new pages + existing page upgrades
 
 ## 2025-07-19

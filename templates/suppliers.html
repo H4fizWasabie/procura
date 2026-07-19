@@ -1,0 +1,131 @@
+{{template "base.html" .}}
+{{define "content_suppliers"}}
+<div class="top-bar">
+    <h2>Suppliers</h2>
+    <button onclick="showForm()">+ New Supplier</button>
+</div>
+
+<div class="search-bar">
+    <input type="text" id="search" placeholder="Search by name or contact..." oninput="loadList()">
+</div>
+
+<table>
+    <thead><tr>
+        <th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>Terms</th><th>Actions</th>
+    </tr></thead>
+    <tbody id="sup-body"></tbody>
+</table>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<!-- Modal for add/edit -->
+<div id="modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:99;align-items:center;justify-content:center;">
+    <div class="card" style="width:480px;max-height:90vh;overflow-y:auto;">
+        <h3 id="modal-title">New Supplier</h3>
+        <div style="display:grid;gap:8px;margin-top:12px;">
+            <input id="f-name" placeholder="Supplier Name *">
+            <input id="f-contact" placeholder="Contact Person">
+            <input id="f-phone" placeholder="Phone">
+            <input id="f-email" placeholder="Email">
+            <input id="f-address" placeholder="Address">
+            <input id="f-terms" placeholder="Payment Terms">
+            <input id="f-brn" placeholder="BRN">
+            <input id="f-acc" placeholder="Account No">
+            <input id="f-bank" placeholder="Bank Name">
+            <input type="hidden" id="f-original">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+            <button onclick="closeModal()" style="background:var(--border);color:var(--text)">Cancel</button>
+            <button onclick="saveSupplier()">Save</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let list = [];
+
+async function loadList() {
+    const q = document.getElementById('search').value;
+    const res = await fetch('/api/suppliers?search=' + encodeURIComponent(q));
+    list = await res.json();
+    const tbody = document.getElementById('sup-body');
+    tbody.innerHTML = list.map(s => `
+        <tr>
+            <td>${esc(s.supplier_name)}</td>
+            <td>${esc(s.contact_person || '-')}</td>
+            <td>${esc(s.phone || '-')}</td>
+            <td>${esc(s.email || '-')}</td>
+            <td>${esc(s.payment_terms || '-')}</td>
+            <td>
+                <button onclick="editSupplier('${esc(s.supplier_name)}')" style="font-size:11px;padding:3px 8px;margin-right:4px">Edit</button>
+                <button onclick="deleteSupplier('${esc(s.supplier_name)}')" style="font-size:11px;padding:3px 8px;background:var(--red)">Del</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function showForm() {
+    document.getElementById('modal-title').textContent = 'New Supplier';
+    ['f-name','f-contact','f-phone','f-email','f-address','f-terms','f-brn','f-acc','f-bank','f-original'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('modal').style.display = 'flex';
+}
+
+function editSupplier(name) {
+    const s = list.find(x => x.supplier_name === name);
+    if (!s) return;
+    document.getElementById('modal-title').textContent = 'Edit Supplier';
+    document.getElementById('f-original').value = s.supplier_name;
+    document.getElementById('f-name').value = s.supplier_name;
+    document.getElementById('f-contact').value = s.contact_person || '';
+    document.getElementById('f-phone').value = s.phone || '';
+    document.getElementById('f-email').value = s.email || '';
+    document.getElementById('f-address').value = s.address || '';
+    document.getElementById('f-terms').value = s.payment_terms || '';
+    document.getElementById('f-brn').value = s.brn || '';
+    document.getElementById('f-acc').value = s.account_no || '';
+    document.getElementById('f-bank').value = s.bank_name || '';
+    document.getElementById('modal').style.display = 'flex';
+}
+
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+async function saveSupplier() {
+    const name = document.getElementById('f-name').value.trim();
+    if (!name) { toast('Supplier name required', false); return; }
+    const supplier = {
+        supplier_name: name, contact_person: document.getElementById('f-contact').value,
+        phone: document.getElementById('f-phone').value, email: document.getElementById('f-email').value,
+        address: document.getElementById('f-address').value, payment_terms: document.getElementById('f-terms').value,
+        brn: document.getElementById('f-brn').value, account_no: document.getElementById('f-acc').value,
+        bank_name: document.getElementById('f-bank').value,
+    };
+    try {
+        const res = await fetch('/api/suppliers', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({supplier, original_name: document.getElementById('f-original').value})
+        });
+        const data = await res.json();
+        toast(data.success ? 'Saved' : data.error, data.success);
+        if (data.success) { closeModal(); loadList(); }
+    } catch(e) { toast('Error: ' + e.message, false); }
+}
+
+async function deleteSupplier(name) {
+    if (!confirm('Delete ' + name + '?')) return;
+    try {
+        const res = await fetch('/api/suppliers/' + encodeURIComponent(name), { method: 'DELETE' });
+        const data = await res.json();
+        toast(data.success ? 'Deleted' : data.error, data.success);
+        loadList();
+    } catch(e) { toast('Error: ' + e.message, false); }
+}
+
+function toast(msg, ok) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast ' + (ok ? 'toast-ok' : 'toast-err');
+    t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500);
+}
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+loadList();
+</script>
+{{end}}

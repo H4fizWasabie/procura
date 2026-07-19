@@ -1,0 +1,89 @@
+{{template "base.html" .}}
+{{define "content_rfq"}}
+<div class="top-bar"><h2>RFQ</h2><button onclick="openCreate()">+ New RFQ</button></div>
+<table><thead><tr><th>RFQ ID</th><th>Date</th><th>Supplier</th><th>Items</th><th>Actions</th></tr></thead><tbody id="body"></tbody></table>
+<div id="toast" class="toast" style="display:none"></div>
+
+<div id="create-modal" class="modal">
+    <div class="modal-content" style="max-width:700px">
+        <div class="modal-header"><h3>New RFQ</h3><span class="close" onclick="closeCreate()">&times;</span></div>
+        <div class="modal-body">
+            <div class="form-row">
+                <div class="form-group"><label>RFQ ID</label><input id="c-id" disabled></div>
+                <div class="form-group"><label>Date</label><input type="date" id="c-date"></div>
+            </div>
+            <div class="form-group"><label>Supplier</label><select id="c-supplier"><option value="">- Select -</option></select></div>
+            <div class="form-group"><label>Notes</label><textarea id="c-notes" rows="2" placeholder="Additional notes..."></textarea></div>
+            <h4 style="margin:12px 0 8px">Items</h4>
+            <table id="c-items"><thead><tr><th>Stock ID</th><th>Name</th><th>Qty</th><th>UOM</th><th></th></tr></thead><tbody></tbody></table>
+            <button onclick="addItem()" style="margin-top:6px;font-size:11px">+ Add Item</button>
+            <div class="btn-group">
+                <button class="btn-secondary" onclick="closeCreate()">Cancel</button>
+                <button onclick="saveRFQ()">Save RFQ</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let suppliers = [];
+async function init() {
+    const sr = await fetch('/api/suppliers');
+    suppliers = await sr.json();
+    document.getElementById('c-supplier').innerHTML = '<option value="">- Select -</option>' +
+        suppliers.map(s => `<option value="${esc(s.supplier_name)}">${esc(s.supplier_name)}</option>`).join('');
+    load();
+}
+async function load() {
+    const res = await fetch('/api/rfq'); const data = await res.json();
+    document.getElementById('body').innerHTML = data.map(r => `
+        <tr><td class="link">${esc(r.rfq_id)}</td><td>${esc(r.date||'').slice(0,10)}</td>
+        <td>${esc(r.supplier||'')}</td><td>${r.items_count||0}</td>
+        <td><button onclick="delRFQ('${esc(r.rfq_id)}')" class="btn-sm btn-danger">Del</button></td></tr>`).join('');
+}
+async function openCreate() {
+    const res = await fetch('/api/rfq/next-id'); const {id} = await res.json();
+    document.getElementById('c-id').value = id;
+    document.getElementById('c-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('c-notes').value = '';
+    document.getElementById('c-items').querySelector('tbody').innerHTML = '';
+    addItem();
+    document.getElementById('create-modal').classList.add('open');
+}
+function closeCreate() { document.getElementById('create-modal').classList.remove('open'); }
+function addItem() {
+    const tbody = document.getElementById('c-items').querySelector('tbody');
+    const row = document.createElement('tr');
+    row.innerHTML = `<td><input style="width:100px" class="ri-stock"></td>
+        <td><input style="width:200px" class="ri-name"></td>
+        <td><input type="number" step="1" value="1" style="width:60px" class="ri-qty"></td>
+        <td><input style="width:60px" class="ri-uom" value="UNIT"></td>
+        <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
+    tbody.appendChild(row);
+}
+async function saveRFQ() {
+    const items = Array.from(document.querySelectorAll('#c-items tbody tr')).map(row => ({
+        stock_id: row.querySelector('.ri-stock')?.value || '',
+        item_name: row.querySelector('.ri-name')?.value || '',
+        qty: parseFloat(row.querySelector('.ri-qty')?.value) || 0,
+        uom: row.querySelector('.ri-uom')?.value || 'UNIT',
+    }));
+    const body = {
+        rfq_id: document.getElementById('c-id').value,
+        supplier: document.getElementById('c-supplier').value,
+        date: document.getElementById('c-date').value,
+        notes: document.getElementById('c-notes').value,
+        items: items,
+    };
+    const res = await fetch('/api/rfq', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await res.json();
+    toast(d.success?'Saved: '+d.rfq_id:d.error, d.success);
+    if (d.success) { closeCreate(); load(); }
+}
+async function delRFQ(id) { if(!confirm('Delete '+id+'?'))return;
+    await fetch('/api/rfq/'+encodeURIComponent(id),{method:'DELETE'}); toast('Deleted',true); load(); }
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+init();
+</script>
+{{end}}

@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <style>
+    @page {
+      size: A4;
+      margin: <?=layout.pageMargin ?>;
+    }
+
+    body {
+      font-family: 'Arial', sans-serif;
+      font-size: <?=layout.fontSize ?>;
+      color: #000;
+      line-height: 1.1;
+    }
+
+    /* Header */
+    .header-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+    }
+
+    .logo-col {
+      vertical-align: top;
+      width: 60%;
+    }
+
+    .info-col {
+      vertical-align: top;
+      width: 40%;
+      text-align: right;
+    }
+
+    .instruction-text {
+      font-size: 7pt;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      color: #333;
+    }
+
+    .po-id-text {
+      font-size: 10pt;
+      font-weight: bold;
+      margin-top: 5px;
+    }
+
+    .po-title {
+      font-family: 'Times New Roman', serif;
+      font-size: 16pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 5px;
+    }
+
+    /* Details Box */
+    .dt-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: <?=layout.fontSize ?>;
+      font-weight: bold;
+    }
+
+    .dt-label {
+      text-align: right;
+      padding-right: 8px;
+      width: 40%;
+    }
+
+    .dt-val {
+      border: 1px solid #000;
+      text-align: center;
+      padding: 2px;
+      width: 60%;
+    }
+
+    /* Address Blocks */
+    .addr-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 10px;
+      margin-top: 10px;
+    }
+
+    .addr-cell {
+      border: 1px solid #000;
+      vertical-align: top;
+      padding: 4px;
+      height: 70px;
+      width: 48%;
+      font-size: <?=layout.fontSize ?>;
+    }
+
+    /* MAIN ITEMS TABLE */
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 5px;
+      table-layout: fixed;
+    }
+
+    .items-table th {
+      border: 1px solid #000;
+      background-color: #ffffff;
+      padding: 3px;
+      font-weight: bold;
+      font-size: <?=layout.fontSize ?>;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .items-table td {
+      border: 1px solid #000;
+      padding: <?=layout.tdPadding ?>;
+      height: <?=layout.tdHeight ?>;
+      font-size: <?=layout.fontSize ?>;
+      vertical-align: middle;
+      overflow: hidden;
+    }
+
+    /* Footer */
+    .footer-note {
+      font-size: 7pt;
+      margin-top: 5px;
+      border: 1px solid #000;
+      padding: 3px;
+    }
+
+    /* SIGNATURE SECTION (UPDATED SPACING) */
+    .sig-table {
+      width: 100%;
+      margin-top: 15px;
+      border-collapse: collapse;
+    }
+
+    .sig-td {
+      vertical-align: top;
+      width: 33%;
+      padding-right: 10px;
+      font-size: 8pt;
+      height: 120px;
+      /* Increased from 80px to fit larger gap */
+    }
+
+    .sig-header {
+      font-weight: bold;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+      border-bottom: 1px solid #000;
+      display: inline-block;
+      min-width: 120px;
+    }
+
+    /* The gap for physical signing */
+    .sig-space {
+      height: 50px;
+    }
+
+    /* Increased from 25px */
+
+    /* Overlap Container for "Prepared By" */
+    .sig-overlap-container {
+      position: relative;
+      height: 100px;
+      width: 100%;
+    }
+
+    .sig-img-layer {
+      position: absolute;
+      top: 0px;
+      left: 0;
+      z-index: 2;
+      opacity: 0.9;
+      /* Adjusted top to sit nicely in the 50px gap */
+    }
+
+    .sig-text-layer {
+      position: absolute;
+      top: 45px;
+      left: 0;
+      z-index: 1;
+      /* Pushed down to match the 50px gap of other signers */
+    }
+  </style>
+</head>
+
+<body>
+
+  <table class="header-table">
+    <tr>
+      <td class="logo-col">
+        <?!= images.logo ?>
+        <div class="instruction-text">
+          The following number must appear on all invoices, bills<br>
+          and acknowledgements relating to this PO:
+        </div>
+        <div class="po-id-text">
+          PURCHASE ORDER: &nbsp;&nbsp;
+          <?= data.poId ?>
+        </div>
+      </td>
+      <td class="info-col">
+        <div class="po-title">PURCHASE ORDER</div>
+        <table class="dt-table" align="right" style="width:220px;">
+          <tr>
+            <td class="dt-label">P.O. DATE</td>
+            <td class="dt-val">
+              <?= data.displayDate ?>
+            </td>
+          </tr>
+          <? if (data.department) { ?>
+          <tr>
+            <td class="dt-label">DEPT</td>
+            <td class="dt-val" style="text-transform: uppercase;">
+              <?= data.department ?>
+            </td>
+          </tr>
+          <? } ?>
+          <tr>
+            <td class="dt-label">TERMS</td>
+            <td class="dt-val">
+              <?= data.paymentTerms || "-" ?>
+            </td>
+          </tr>
+          <? if (data.supplierBRN) { ?>
+          <tr>
+            <td class="dt-label">REG NO.</td>
+            <td class="dt-val" style="font-size:7pt;">
+              <?= data.supplierBRN ?>
+            </td>
+          </tr>
+          <? } ?>
+          <? if (data.supplierBank) { ?>
+          <tr>
+            <td class="dt-label">BANK</td>
+            <td class="dt-val" style="font-size:7pt; text-transform:uppercase;">
+              <?= data.supplierBank ?>
+            </td>
+          </tr>
+          <? } ?>
+          <? if (data.supplierAcc) { ?>
+          <tr>
+            <td class="dt-label">ACC NO.</td>
+            <td class="dt-val" style="font-size:7pt;">
+              <?= data.supplierAcc ?>
+            </td>
+          </tr>
+          <? } ?>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <table class="addr-table">
+    <tr>
+      <td class="addr-cell">
+        <strong>VENDOR:</strong><br>
+        <strong>
+          <?= data.supplierName ?>
+        </strong><br>
+        <? if (data.supplierContact) { ?>
+        <div style="margin-top:1px; font-size:8pt; color:#333;">Attn:
+          <?= data.supplierContact ?>
+        </div>
+        <? } ?>
+        <div style="margin-top:2px; white-space: pre-wrap;">
+          <?= data.supplierAddress || "" ?>
+        </div>
+        <div style="margin-top:2px;">
+          <?= data.supplierPhone || "" ?>
+        </div>
+      </td>
+      <td style="width:4%; border:none;"></td>
+      <td class="addr-cell">
+        <strong>SHIP TO:</strong><br>
+        <strong>
+          <?= myInfo.name ?>
+        </strong><br>
+        <?= myInfo.addr1 ?><br>
+        <?= myInfo.addr2 ?><br>
+        <?= myInfo.addr3 ?>
+      </td>
+    </tr>
+  </table>
+
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th style="width:35px;">No.</th>
+        <th>DESCRIPTION</th>
+        <th style="width:50px;">QTY</th>
+        <th style="width:80px;">UNIT (RM)</th>
+        <th style="width:80px;">TOTAL (RM)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <? for (var i = 0; i < grid.length; i++) { ?>
+      <tr>
+        <td style="text-align:center;">
+          <?= grid[i].no ?>
+        </td>
+        <td>
+          <?= grid[i].desc ?>
+        </td>
+        <td style="text-align:center;">
+          <?= grid[i].qty ?>
+        </td>
+        <td style="text-align:right;">
+          <?= grid[i].cost ?>
+        </td>
+        <td style="text-align:right;">
+          <?= grid[i].total ?>
+        </td>
+      </tr>
+      <? } ?>
+      <tr>
+        <td colspan="4" style="text-align:right; border:1px solid #000; font-weight:bold; background:#f9f9f9;">TOTAL
+        </td>
+        <td style="text-align:right; border:1px solid #000; font-weight:bold; background:#f9f9f9;">
+          <?= data.totalAmount ?>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="footer-note">
+    Please notify us immediately upon determination that fulfillment of this order cannot be completed in its entirety
+    on or before the specified one (1) week deadline.
+  </div>
+
+  <table class="sig-table">
+    <tr>
+      <td class="sig-td">
+        <div class="sig-header">PREPARED BY:</div><br>
+
+        <div class="sig-overlap-container">
+          <img src="data:image/png;base64,<?= images.signData ?>" class="sig-img-layer"
+            style="height: 60px; max-width: 150px;">
+
+          <div class="sig-text-layer">
+            Mohammad Hafiz<br>Procurement Officer<br>Date:
+            <?= data.todaySignature ?>
+          </div>
+        </div>
+
+      </td>
+      <td class="sig-td">
+        <div class="sig-header">APPROVED BY:</div><br>
+        <div class="sig-space"></div>Dr. Felix<br>OPERATION DIRECTOR
+      </td>
+      <td class="sig-td">
+        <div class="sig-header">APPROVED BY:</div><br>
+        <div class="sig-space"></div>Dr. Anya<br>MANAGING DIRECTOR
+      </td>
+    </tr>
+    <tr>
+      <td class="sig-td" style="padding-top: 10px;">
+        <div class="sig-header">CHECKED BY:</div><br>
+        <div class="sig-space"></div>Mr. BOEY<br>CHIEF FINANCIAL OFFICER
+      </td>
+      <td></td>
+      <td></td>
+    </tr>
+  </table>
+
+</body>
+
+</html>

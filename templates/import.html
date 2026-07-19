@@ -1,0 +1,34 @@
+{{template "base.html" .}}
+{{define "content_import"}}
+<div class="top-bar"><h2>Import Data</h2></div>
+<div class="card" style="max-width:500px;margin:0 auto">
+    <h3>Upload Excel Workbook</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Supports .xlsx files with sheets: DB_Items, DB_Suppliers, PurchaseOrder, Movement</p>
+    <div class="form-group"><label>Select File</label><input type="file" id="file" accept=".xlsx" style="padding:10px"></div>
+    <button onclick="upload()" id="upload-btn">Upload & Import</button>
+    <div id="result" style="margin-top:16px;font-size:13px"></div>
+</div>
+<div id="toast" class="toast" style="display:none"></div>
+
+<script>
+async function upload() {
+    const file = document.getElementById('file').files[0];
+    if (!file) { toast('Select a file', false); return; }
+    const btn = document.getElementById('upload-btn');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Importing...';
+    const form = new FormData(); form.append('file', file);
+    const res = await fetch('/api/import', {method:'POST', body: form});
+    const d = await res.json();
+    btn.disabled = false; btn.textContent = 'Upload & Import';
+    if (d.success) {
+        document.getElementById('result').innerHTML = `<div style="background:rgba(109,183,123,0.1);padding:12px;border-radius:6px;border:1px solid var(--green)">
+            <strong style="color:var(--green)">Import Complete</strong><br>
+            Run ID: ${esc(d.run_id)}<br>Tables: ${d.tables}<br>Rows: ${d.rows}</div>`;
+    } else {
+        document.getElementById('result').innerHTML = `<div style="color:var(--red)">Error: ${esc(d.error)}</div>`;
+    }
+}
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+</script>
+{{end}}

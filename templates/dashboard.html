@@ -1,0 +1,74 @@
+{{template "base.html" .}}
+{{define "content_dashboard"}}
+<div class="grid-3 section">
+    <div class="card">
+        <div class="stat-label">Total Items</div>
+        <div class="stat">{{.Stats.Inventory.TotalItems}}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Critical Stock</div>
+        <div class="stat" style="color:var(--red)">{{.Stats.Inventory.CriticalStock}}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Pending Approvals</div>
+        <div class="stat" style="color:var(--amber)">{{.Stats.Operations.PendingApprovals}}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">Pending Payment</div>
+        <div class="stat" style="color:var(--amber)">{{.Stats.Operations.PendingPayment}}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">YTD Spend</div>
+        <div class="stat money">RM {{printf "%.0f" .Stats.Financials.YTDSpend}}</div>
+    </div>
+    <div class="card">
+        <div class="stat-label">ROP Alerts</div>
+        <div class="stat" style="color:var(--amber)">{{len .Stats.ROPAlerts}}</div>
+    </div>
+</div>
+
+{{if .Stats.ROPAlerts}}
+<div class="section">
+    <h2>ROP Alerts — Top 10</h2>
+    <table>
+        <thead><tr>
+            <th>Stock ID</th><th>Item</th><th>Current</th><th>ROP</th><th>Safety</th><th>Gap</th><th>Cost Impact</th><th>Health</th>
+        </tr></thead>
+        <tbody>
+        {{range .Stats.ROPAlerts}}
+        <tr>
+            <td>{{.ID}}</td>
+            <td>{{.Name}}</td>
+            <td>{{printf "%.0f" .Current}}</td>
+            <td>{{printf "%.0f" .ROP}}</td>
+            <td>{{printf "%.0f" .SafetyQty}}</td>
+            <td>{{printf "%.0f" .Gap}}</td>
+            <td class="money">RM {{printf "%.0f" .Cost}}</td>
+            <td><span class="badge {{if lt .Health 25.0}}badge-red{{else if lt .Health 50.0}}badge-amber{{else}}badge-green{{end}}">{{printf "%.0f" .Health}}%</span></td>
+        </tr>
+        {{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}
+
+<div class="section">
+    <div class="card">
+        <h3 style="margin-bottom:12px">Quick Actions</h3>
+        <div class="quick-actions">
+            <button class="quick-btn" onclick="location.href='/rfq'">
+                <span class="material-icons" style="font-size:20px;color:var(--accent)">add_shopping_cart</span>
+                <div><strong>Create RFQ</strong><br><span style="font-size:11px;color:var(--muted)">Start a new draft</span></div>
+            </button>
+            <button class="quick-btn" onclick="location.href='/workflow'">
+                <span class="material-icons" style="font-size:20px;color:var(--accent)">fact_check</span>
+                <div><strong>Approve POs</strong><br><span style="font-size:11px;color:var(--muted)">Review pending approvals</span></div>
+            </button>
+            <button class="quick-btn" onclick="location.href='/movement'">
+                <span class="material-icons" style="font-size:20px;color:var(--accent)">sync_alt</span>
+                <div><strong>Stock Movement</strong><br><span style="font-size:11px;color:var(--muted)">Record in/out</span></div>
+            </button>
+        </div>
+    </div>
+</div>
+{{end}}

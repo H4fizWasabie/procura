@@ -1,0 +1,616 @@
+<!-- TASK REMINDER MODULE -->
+<section id="view-tasks" class="view-section hidden">
+  <style>
+    /* Task Module Styles */
+    .task-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .task-header h2 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--text-main);
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .task-header h2 .material-icons {
+      color: var(--primary);
+    }
+
+    .task-filters {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .task-filter-btn {
+      padding: 6px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      background: var(--card-bg);
+      color: var(--text);
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .task-filter-btn.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    .task-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 16px;
+    }
+
+    .task-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      transition: box-shadow 0.2s, transform 0.15s;
+      position: relative;
+    }
+
+    .task-card:hover {
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+      transform: translateY(-1px);
+    }
+
+    .task-card.done {
+      opacity: 0.55;
+    }
+
+    .task-card.done .task-title {
+      text-decoration: line-through;
+      color: var(--text-muted);
+    }
+
+    .task-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .task-title {
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--text);
+      flex: 1;
+      word-break: break-word;
+    }
+
+    .task-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .task-action-btn {
+      width: 30px;
+      height: 30px;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .task-action-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+
+    .task-action-btn.done-btn:hover { color: #10b981; }
+    .task-action-btn.edit-btn:hover { color: #6366f1; }
+    .task-action-btn.share-btn:hover { color: #f59e0b; }
+    .task-action-btn.delete-btn:hover { color: #ef4444; }
+
+    .task-notes {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      white-space: pre-wrap;
+      line-height: 1.5;
+      max-height: 60px;
+      overflow: hidden;
+    }
+
+    .task-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .task-attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .task-attachment-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      background: var(--bg-hover);
+      border-radius: 6px;
+      font-size: 0.75rem;
+      color: var(--primary);
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+
+    .task-attachment-chip:hover {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .task-empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .task-empty .material-icons {
+      font-size: 48px;
+      margin-bottom: 12px;
+      opacity: 0.4;
+    }
+
+    /* Task-specific form styles */
+    #task-modal .modal-content {
+      width:600px;
+    }
+
+    .task-form-group {
+      margin-bottom: 16px;
+    }
+
+    .task-form-group label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .task-form-group input,
+    .task-form-group textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.92rem;
+      background: var(--bg-app);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .task-form-group input:focus,
+    .task-form-group textarea:focus {
+      border-color: var(--primary);
+    }
+
+    .task-form-group textarea {
+      min-height: 100px;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .task-file-upload-area {
+      border: 2px dashed var(--text-muted);
+      border-radius: 8px;
+      padding: 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 500;
+      background: var(--bg-hover);
+    }
+
+    .task-file-upload-area:hover {
+      border-color: var(--primary);
+      background: var(--card-bg);
+      color: var(--primary);
+    }
+
+    .task-file-upload-area .material-icons {
+      font-size: 36px;
+      display: block;
+      margin-bottom: 8px;
+      color: var(--primary);
+    }
+
+    .task-file-list {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .task-file-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      background: var(--bg-hover);
+      border-radius: 6px;
+      font-size: 0.78rem;
+      color: var(--text);
+    }
+
+    .task-file-chip .remove-file {
+      cursor: pointer;
+      color: var(--danger);
+      font-weight: bold;
+      margin-left: 2px;
+    }
+
+    @media (max-width: 600px) {
+      .task-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .task-main{
+      height:630px;
+    }
+  </style>
+
+  <!-- Header -->
+  <div class="task-main">
+  <div class="task-header">
+    <h2>
+      <span class="material-icons">task_alt</span>
+      Task Reminders
+    </h2>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <div class="task-filters">
+        <button class="task-filter-btn active" onclick="filterTasks('all')">All</button>
+        <button class="task-filter-btn" onclick="filterTasks('pending')">Pending</button>
+        <button class="task-filter-btn" onclick="filterTasks('done')">Done</button>
+      </div>
+      <button onclick="openTaskModal()" style="padding:8px 18px; background:var(--primary); color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer; font-size:0.88rem;">
+        <span class="material-icons" style="font-size:18px; vertical-align:middle;">add</span> New Task
+      </button>
+    </div>
+  </div>
+
+  <!-- Task Grid -->
+  <div id="task-grid" class="task-grid">
+    <div class="task-empty">
+      <span class="material-icons">assignment</span>
+      <p>Loading tasks...</p>
+    </div>
+  </div>
+
+  <!-- Create/Edit Modal -->
+  <div id="task-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span id="task-modal-title" style="font-weight:700; font-size:1.1rem; color:var(--text-main);">New Task</span>
+        <span class="close" onclick="closeTaskModal()">&times;</span>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="task-edit-id" value="">
+        <div class="task-form-group">
+          <label>Title</label>
+          <input type="text" id="task-input-title" placeholder="e.g. Follow up on PO-235 delivery">
+        </div>
+        <div class="task-form-group">
+          <label>Notes</label>
+          <textarea id="task-input-notes" placeholder="Add details, instructions, or reminders..."></textarea>
+        </div>
+        <div class="task-form-group">
+          <label>Attachments (PDF, Images)</label>
+          <div class="task-file-upload-area" onclick="document.getElementById('task-file-input').click()">
+            <span class="material-icons">upload_file</span>
+            Click to select files or drag & drop
+          </div>
+          <input type="file" id="task-file-input" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp" style="display:none" onchange="handleTaskFileSelect(this)">
+          <div id="task-file-list" class="task-file-list"></div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
+        <button class="btn btn-secondary" onclick="closeTaskModal()">Cancel</button>
+        <button id="task-save-btn" class="btn btn-primary" onclick="saveTask()">Save Task</button>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <script>
+    // --- TASK MODULE STATE ---
+    let TASK_STORE = {
+      tasks: [],
+      currentFilter: 'all',
+      pendingFiles: [] // Files staged for upload
+    };
+
+    // --- LOAD TASKS ---
+    async function loadTasksModule() {
+      const grid = document.getElementById('task-grid');
+      grid.innerHTML = '<div class="task-empty"><span class="material-icons">hourglass_empty</span><p>Loading tasks...</p></div>';
+
+      try {
+        TASK_STORE.tasks = await runServer('apiGetTasks');
+        renderTaskGrid();
+      } catch (e) {
+        grid.innerHTML = `<div class="task-empty"><span class="material-icons">error</span><p>Failed to load tasks: ${e.message}</p></div>`;
+      }
+    }
+
+    // --- RENDER GRID ---
+    function renderTaskGrid() {
+      const grid = document.getElementById('task-grid');
+      let tasks = TASK_STORE.tasks;
+
+      // Apply filter
+      if (TASK_STORE.currentFilter === 'pending') {
+        tasks = tasks.filter(t => t.status !== 'Done');
+      } else if (TASK_STORE.currentFilter === 'done') {
+        tasks = tasks.filter(t => t.status === 'Done');
+      }
+
+      if (tasks.length === 0) {
+        const msg = TASK_STORE.currentFilter === 'done' ? 'No completed tasks yet.' :
+          TASK_STORE.currentFilter === 'pending' ? 'All tasks are done! 🎉' :
+            'No tasks yet. Create your first task!';
+        grid.innerHTML = `<div class="task-empty"><span class="material-icons">assignment</span><p>${msg}</p></div>`;
+        return;
+      }
+
+      grid.innerHTML = tasks.map(task => {
+        const isDone = task.status === 'Done';
+        const attachHtml = task.attachments.map(a =>
+          `<a href="${a.url}" target="_blank" class="task-attachment-chip">
+            <span class="material-icons" style="font-size:14px;">${a.type && a.type.includes('pdf') ? 'picture_as_pdf' : 'image'}</span>
+            ${APP.Utils.escapeHtml(a.name)}
+          </a>`
+        ).join('');
+
+        return `
+        <div class="task-card ${isDone ? 'done' : ''}" data-id="${task.id}">
+          <div class="task-title-row">
+            <div class="task-title">${APP.Utils.escapeHtml(task.title)}</div>
+            <div class="task-actions">
+              <button class="task-action-btn done-btn" title="${isDone ? 'Mark Pending' : 'Mark Done'}" onclick="toggleTaskStatus('${task.id}')">
+                <span class="material-icons" style="font-size:20px;">${isDone ? 'undo' : 'check_circle'}</span>
+              </button>
+              <button class="task-action-btn edit-btn" title="Edit" onclick="editTask('${task.id}')">
+                <span class="material-icons" style="font-size:18px;">edit</span>
+              </button>
+              <button class="task-action-btn share-btn" title="Export PDF" onclick="exportTaskPdf('${task.id}')">
+                <span class="material-icons" style="font-size:18px;">share</span>
+              </button>
+              <button class="task-action-btn delete-btn" title="Delete" onclick="deleteTask('${task.id}')">
+                <span class="material-icons" style="font-size:18px;">delete</span>
+              </button>
+            </div>
+          </div>
+          ${task.notes ? `<div class="task-notes">${APP.Utils.escapeHtml(task.notes)}</div>` : ''}
+          ${attachHtml ? `<div class="task-attachments">${attachHtml}</div>` : ''}
+          <div class="task-meta">
+            <span>${task.id}</span>
+            <span>${task.createdDate}</span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // --- FILTER ---
+    function filterTasks(filter) {
+      TASK_STORE.currentFilter = filter;
+      document.querySelectorAll('.task-filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.toLowerCase().includes(filter) || (filter === 'all' && btn.textContent === 'All'));
+      });
+      renderTaskGrid();
+    }
+
+    // --- MODAL ---
+    function openTaskModal(taskId) {
+      TASK_STORE.pendingFiles = [];
+      document.getElementById('task-file-list').innerHTML = '';
+      document.getElementById('task-input-title').value = '';
+      document.getElementById('task-input-notes').value = '';
+      document.getElementById('task-edit-id').value = '';
+      document.getElementById('task-modal-title').textContent = 'New Task';
+      document.getElementById('task-modal').style.display = 'block';
+      document.getElementById('task-input-title').focus();
+    }
+
+    function closeTaskModal() {
+      document.getElementById('task-modal').style.display = 'none';
+      TASK_STORE.pendingFiles = [];
+    }
+
+    // --- EDIT TASK ---
+    function editTask(taskId) {
+      const task = TASK_STORE.tasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      document.getElementById('task-edit-id').value = task.id;
+      document.getElementById('task-input-title').value = task.title;
+      document.getElementById('task-input-notes').value = task.notes;
+      document.getElementById('task-modal-title').textContent = 'Edit Task';
+      TASK_STORE.pendingFiles = [];
+      document.getElementById('task-file-list').innerHTML = '';
+
+      // Show existing attachments
+      if (task.attachments && task.attachments.length > 0) {
+        const listEl = document.getElementById('task-file-list');
+        task.attachments.forEach(a => {
+          const chip = document.createElement('div');
+          chip.className = 'task-file-chip';
+          chip.innerHTML = `<span class="material-icons" style="font-size:14px;">${a.type && a.type.includes('pdf') ? 'picture_as_pdf' : 'image'}</span> ${APP.Utils.escapeHtml(a.name)}`;
+          listEl.appendChild(chip);
+        });
+      }
+
+      document.getElementById('task-modal').style.display = 'block';
+    }
+
+    // --- FILE HANDLING ---
+    function handleTaskFileSelect(input) {
+      const files = Array.from(input.files);
+      const listEl = document.getElementById('task-file-list');
+
+      files.forEach(file => {
+        if (file.size > 5 * 1024 * 1024) {
+          APP.Utils.showToast(`${file.name} is too large (max 5MB)`, 'failed');
+          return;
+        }
+        TASK_STORE.pendingFiles.push(file);
+
+        const chip = document.createElement('div');
+        chip.className = 'task-file-chip';
+        chip.innerHTML = `<span class="material-icons" style="font-size:14px;">${file.type.includes('pdf') ? 'picture_as_pdf' : 'image'}</span> ${APP.Utils.escapeHtml(file.name)} <span class="remove-file" onclick="removePendingFile(this, '${file.name}')">&times;</span>`;
+        listEl.appendChild(chip);
+      });
+
+      input.value = '';
+    }
+
+    function removePendingFile(el, fileName) {
+      TASK_STORE.pendingFiles = TASK_STORE.pendingFiles.filter(f => f.name !== fileName);
+      el.parentElement.remove();
+    }
+
+    // --- SAVE TASK ---
+    async function saveTask() {
+      const title = document.getElementById('task-input-title').value.trim();
+      const notes = document.getElementById('task-input-notes').value.trim();
+      const editId = document.getElementById('task-edit-id').value;
+
+      if (!title) {
+        APP.Utils.showToast('Please enter a title', 'failed');
+        return;
+      }
+
+      const btn = document.getElementById('task-save-btn');
+      APP.Utils.setBtnLoading(btn, true);
+
+      try {
+        // Save task first
+        const res = await runServer('apiSaveTask', {
+          id: editId || null,
+          title: title,
+          notes: notes
+        });
+
+        if (!res.success) throw new Error(res.error);
+
+        const taskId = res.taskId;
+
+        // Upload pending files
+        for (const file of TASK_STORE.pendingFiles) {
+          const base64 = await fileToBase64(file);
+          const uploadRes = await runServer('apiUploadTaskAttachment', taskId, base64, file.type, file.name);
+          if (!uploadRes.success) {
+            APP.Utils.showToast(`Failed to upload ${file.name}: ${uploadRes.error}`, 'failed');
+          }
+        }
+
+        APP.Utils.showToast(editId ? 'Task updated!' : 'Task created!', 'success');
+        closeTaskModal();
+        await loadTasksModule();
+      } catch (e) {
+        APP.Utils.showToast('Error: ' + e.message, 'failed');
+      } finally {
+        APP.Utils.setBtnLoading(btn, false);
+      }
+    }
+
+    // --- TOGGLE STATUS ---
+    async function toggleTaskStatus(taskId) {
+      try {
+        const res = await runServer('apiToggleTaskStatus', taskId);
+        if (res.success) {
+          APP.Utils.showToast(res.status === 'Done' ? 'Task completed! ✅' : 'Task reopened', 'success');
+          await loadTasksModule();
+        } else {
+          APP.Utils.showToast(res.error, 'failed');
+        }
+      } catch (e) {
+        APP.Utils.showToast('Error: ' + e.message, 'failed');
+      }
+    }
+
+    // --- DELETE TASK ---
+    async function deleteTask(taskId) {
+      if (!confirm('Delete this task and its attachments?')) return;
+
+      try {
+        const res = await runServer('apiDeleteTask', taskId);
+        if (res.success) {
+          APP.Utils.showToast('Task deleted', 'saved');
+          await loadTasksModule();
+        } else {
+          APP.Utils.showToast(res.error, 'failed');
+        }
+      } catch (e) {
+        APP.Utils.showToast('Error: ' + e.message, 'failed');
+      }
+    }
+
+    // --- EXPORT PDF ---
+    async function exportTaskPdf(taskId) {
+      APP.Utils.showLoading(true);
+      try {
+        const res = await runServer('apiExportTaskPdf', taskId);
+        if (res.success) {
+          // Trigger download
+          const link = document.createElement('a');
+          link.href = `data:application/pdf;base64,${res.base64}`;
+          link.download = res.fileName;
+          link.click();
+          APP.Utils.showToast('PDF downloaded!', 'success');
+        } else {
+          APP.Utils.showToast('Export failed: ' + res.error, 'failed');
+        }
+      } catch (e) {
+        APP.Utils.showToast('Error: ' + e.message, 'failed');
+      } finally {
+        APP.Utils.showLoading(false);
+      }
+    }
+
+    // --- UTILS ---
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+  </script>
+</section>

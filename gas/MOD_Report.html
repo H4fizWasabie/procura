@@ -1,0 +1,1432 @@
+<div id="view-report" class="view-section hidden">
+
+  <style>
+    /* Report Sub-Tabs */
+    .rpt-sub-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 20px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .rpt-sub-tab-btn {
+      flex: 1;
+      padding: 12px 20px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      border: none;
+      background: var(--bg-app);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .rpt-sub-tab-btn.active {
+      background: var(--primary);
+      color: white;
+    }
+    .rpt-sub-tab-btn:hover:not(.active) {
+      background: var(--bg-card);
+      color: var(--text-main);
+    }
+
+    /* Item History Report Styles */
+    .ih-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .ih-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .ih-panel-header {
+      padding: 15px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-app);
+    }
+    .ih-panel-title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ih-panel-body {
+      padding: 15px;
+    }
+    .ih-search-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.9rem;
+      margin-bottom: 10px;
+    }
+    .ih-search-results {
+      max-height: 250px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .ih-search-item {
+      padding: 10px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: background 0.15s;
+    }
+    .ih-search-item:hover {
+      background: var(--bg-app);
+    }
+    .ih-search-item:last-child {
+      border-bottom: none;
+    }
+    .ih-item-name {
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+    .ih-item-id {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      background: var(--bg-app);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .ih-add-new-item {
+      padding: 10px 12px;
+      cursor: pointer;
+      border-bottom: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.15s;
+      color: var(--primary);
+      font-weight: 600;
+      font-size: 0.85rem;
+      border-top: 1px dashed var(--border);
+    }
+    .ih-add-new-item:hover {
+      background: var(--bg-app);
+    }
+    .ih-selected-list {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .ih-selected-item {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .ih-selected-item:last-child {
+      border-bottom: none;
+    }
+    .ih-remove-btn {
+      color: var(--danger);
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: none;
+      border: 1px solid var(--danger);
+      transition: all 0.15s;
+    }
+    .ih-remove-btn:hover {
+      background: var(--danger);
+      color: white;
+    }
+    .ih-empty {
+      text-align: center;
+      padding: 30px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+    .ih-actions {
+      padding: 15px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      background: var(--bg-app);
+    }
+    .ih-report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .ih-report-table th {
+      text-align: left;
+      padding: var(--spacing-xl);
+      border-bottom: 2px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .ih-report-table td {
+      padding: var(--spacing-lg) var(--spacing-xl);
+      border-bottom: 1px solid var(--border);
+      line-height: 1.5;
+    }
+    .ih-report-table tr:hover {
+      background: var(--bg-app);
+    }
+
+    @media (max-width: 900px) {
+      .ih-container {
+        grid-template-columns: 1fr;
+      }
+    }
+    .rpt-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+
+    .rpt-filters {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .rpt-filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .rpt-filter-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .rpt-card {
+      background: var(--bg-card);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      overflow: visible;
+    }
+
+    .rpt-card-header {
+      padding: 15px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .rpt-card-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .rpt-card-body {
+      padding: var(--spacing-3xl);
+    }
+
+    .rpt-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: var(--spacing-lg);
+      margin-bottom: var(--spacing-xl);
+    }
+
+    .rpt-summary-item {
+      background: var(--bg-app);
+      padding: var(--spacing-lg);
+      border-radius: 8px;
+      border-left: 4px solid var(--primary);
+    }
+
+    .rpt-summary-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .rpt-summary-value {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--text-main);
+    }
+
+    .rpt-table-container {
+      overflow-x: auto;
+    }
+
+    .rpt-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .rpt-table th {
+      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 2px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+
+    .rpt-table th.text-right {
+      text-align: right;
+    }
+
+    .rpt-table td {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-main);
+    }
+
+    .rpt-table td.text-right {
+      text-align: right;
+      font-family: 'Roboto Mono', monospace;
+    }
+
+    .rpt-table tr:hover {
+      background: var(--bg-app);
+    }
+
+    .rpt-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .rpt-category-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--bg-app);
+      color: var(--text-muted);
+    }
+
+    .rpt-type-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .rpt-type-pharma {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .rpt-type-consumable {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .rpt-type-equipment {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .rpt-empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+
+    .rpt-empty-icon {
+      font-size: 48px;
+      opacity: 0.3;
+      margin-bottom: 10px;
+    }
+
+    .rpt-loading {
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    .rpt-footer {
+      padding: 15px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-app);
+    }
+
+    .rpt-count {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .rpt-total {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    @media (max-width: 768px) {
+      .rpt-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .rpt-filters {
+        width: 100%;
+      }
+
+      .rpt-summary {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+
+  <!-- Report Sub-Tabs -->
+  <div class="rpt-sub-tabs">
+    <button class="rpt-sub-tab-btn active" id="rpt-tab-general" onclick="switchReportTab('general')">
+      <span class="material-icons" style="font-size:18px; vertical-align:middle;">analytics</span> General Reports
+    </button>
+    <button class="rpt-sub-tab-btn" id="rpt-tab-history" onclick="switchReportTab('history')">
+      <span class="material-icons" style="font-size:18px; vertical-align:middle;">history</span> Item History Report
+    </button>
+  </div>
+
+  <!-- General Reports Tab Content -->
+  <div id="rpt-content-general">
+  <div class="rpt-header">
+    <h2 style="margin:0;"><span class="material-icons" style="vertical-align: text-bottom;">assessment</span> Itemized Reports</h2>
+    <div class="rpt-filters">
+      <div class="rpt-filter-group">
+        <label class="rpt-filter-label">Metric Type</label>
+        <select id="rpt-metric" class="filter-select" onchange="loadReport()" style="width:150px;">
+          <option value="closing_stock">Closing Stock</option>
+          <option value="consumption">Consumption</option>
+          <option value="restock">Restock Needed</option>
+        </select>
+      </div>
+      <div class="rpt-filter-group">
+        <label class="rpt-filter-label">Year</label>
+        <select id="rpt-year" class="filter-select" onchange="loadReport()" style="width:100px;"></select>
+      </div>
+      <div class="rpt-filter-group" id="rpt-month-group">
+        <label class="rpt-filter-label">Month</label>
+        <select id="rpt-month" class="filter-select" onchange="loadReport()" style="width:120px;"></select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="loadReport()" style="margin-top:18px;">
+        <span class="material-icons">refresh</span> Load
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="downloadReportExcel()" style="margin-top:18px;">
+        <span class="material-icons">download</span> Excel
+      </button>
+    </div>
+  </div>
+
+  <div class="rpt-card">
+    <div class="rpt-card-header">
+      <div class="rpt-card-title">
+        <span class="material-icons">inventory_2</span>
+        <span id="rpt-title">Closing Stock Report</span>
+      </div>
+      <div id="rpt-period" style="font-size:0.85rem; color:var(--text-muted);"></div>
+    </div>
+
+    <div class="rpt-card-body">
+      <div class="rpt-summary" id="rpt-summary">
+        <div class="rpt-summary-item">
+          <div class="rpt-summary-label">Total Items</div>
+          <div class="rpt-summary-value" id="rpt-total-items">--</div>
+        </div>
+        <div class="rpt-summary-item" style="border-left-color: #10b981;">
+          <div class="rpt-summary-label">Total Quantity</div>
+          <div class="rpt-summary-value" id="rpt-total-qty">--</div>
+        </div>
+        <div class="rpt-summary-item" style="border-left-color: #f59e0b;">
+          <div class="rpt-summary-label">Total Value</div>
+          <div class="rpt-summary-value" id="rpt-total-value">--</div>
+        </div>
+      </div>
+
+      <div id="rpt-loading" class="rpt-loading hidden">
+        <div class="btn-spinner" style="width:30px; height:30px; border-color:var(--primary); display:inline-block;"></div>
+        <p style="margin-top:10px; color:var(--text-muted);">Loading report data...</p>
+      </div>
+
+      <div id="rpt-empty" class="rpt-empty hidden">
+        <div class="rpt-empty-icon"><span class="material-icons">inbox</span></div>
+        <p>No data available for the selected period.</p>
+      </div>
+
+      <div class="rpt-table-container" id="rpt-table-container">
+        <table class="rpt-table">
+          <thead>
+            <tr>
+              <th style="width:100px;">SKU</th>
+              <th>Item Name</th>
+              <th style="width:120px;">Type</th>
+              <th style="width:120px;">Category</th>
+              <th class="text-right" style="width:100px;">Qty</th>
+              <th class="text-right" style="width:120px;">Unit Cost</th>
+              <th class="text-right" style="width:130px;">Total Value</th>
+            </tr>
+          </thead>
+          <tbody id="rpt-tbody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="rpt-footer">
+      <div class="rpt-count" id="rpt-count">0 items</div>
+      <div id="rpt-scroll-loading" style="display:none; color:var(--text-muted); font-size:0.85rem;">
+        <span class="btn-spinner" style="width:16px; height:16px; border-width:2px; display:inline-block; vertical-align:middle;"></span>
+        <span style="margin-left:8px;">Loading more...</span>
+      </div>
+      <div class="rpt-total" id="rpt-grand-total">Total: RM 0.00</div>
+    </div>
+  </div>
+
+  </div> <!-- End rpt-content-general -->
+
+  <!-- Item History Report Tab Content -->
+  <div id="rpt-content-history" class="hidden">
+    <div class="ih-container">
+      <!-- Left Panel: Search & Add Items -->
+      <div class="ih-panel">
+        <div class="ih-panel-header">
+          <div class="ih-panel-title">
+            <span class="material-icons">search</span> Search & Add Items
+          </div>
+        </div>
+        <div class="ih-panel-body">
+          <input type="text" id="ih-search-input" class="ih-search-input" placeholder="Search by item name or Stock ID..." oninput="ih_searchItems(this.value)">
+          <div id="ih-search-results" class="ih-search-results" style="display:none;"></div>
+        </div>
+      </div>
+
+      <!-- Right Panel: Selected Items & Actions -->
+      <div class="ih-panel">
+        <div class="ih-panel-header">
+          <div class="ih-panel-title">
+            <span class="material-icons">checklist</span> Selected Items (<span id="ih-selected-count">0</span>)
+          </div>
+        </div>
+        <div class="ih-panel-body" style="padding:0;">
+          <div id="ih-selected-list" class="ih-selected-list">
+            <div class="ih-empty">
+              <span class="material-icons" style="font-size:32px; opacity:0.5;">add_circle_outline</span>
+              <p>Search and add items to generate a report</p>
+            </div>
+          </div>
+        </div>
+        <div class="ih-actions">
+          <button class="btn btn-secondary btn-sm" onclick="ih_clearAll()">
+            <span class="material-icons" style="font-size:16px;">delete_sweep</span> Clear All
+          </button>
+          <button class="btn btn-primary" onclick="ih_generateReport()">
+            <span class="material-icons">download</span> Generate Report
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Report Preview -->
+    <div id="ih-report-preview" class="hidden" style="margin-top:20px;">
+      <div class="rpt-card">
+        <div class="rpt-card-header">
+          <div class="rpt-card-title">
+            <span class="material-icons">description</span> Item History Report Preview
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="ih_downloadReport()">
+            <span class="material-icons">download</span> Download Excel
+          </button>
+        </div>
+        <div class="rpt-card-body">
+          <div class="rpt-table-container">
+            <table class="ih-report-table">
+              <thead>
+                <tr>
+                  <th style="width:40px;">#</th>
+                  <th>Stock ID</th>
+                  <th>Item Name</th>
+                  <th>Supplier</th>
+                  <th>UOM</th>
+                  <th>Last PO</th>
+                  <th>Matches</th>
+                  <th>Last Buy Date</th>
+                  <th style="text-align:right;">Last Buy Qty</th>
+                  <th style="width:40px;"></th>
+                </tr>
+              </thead>
+              <tbody id="ih-report-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // --- ITEM HISTORY REPORT VARIABLES ---
+  let ih_selectedItems = [];
+  let ih_searchDebounceTimer = null;
+  let ih_reportData = [];
+  let ih_newItemCounter = 0;
+
+  // --- GENERAL REPORT VARIABLES ---
+  let reportData = [];
+  let reportMetric = 'closing_stock';
+  let reportYear = 2026;
+  let reportMonth = 1;
+  let currentPage = 1;
+  let totalPages = 1;
+  let totalItems = 0;
+  let isLoadingMore = false;
+  let allDataLoaded = false;
+
+  function initReportDropdowns() {
+    console.log("Initializing Report Dropdowns...");
+
+    const yearSel = document.getElementById('rpt-year');
+    const monthSel = document.getElementById('rpt-month');
+
+    if (!yearSel || !monthSel) return;
+
+    // Populate years (2025 to current year + 1)
+    const curYear = new Date().getFullYear();
+    yearSel.innerHTML = '';
+    for (let y = 2025; y <= curYear + 1; y++) {
+      yearSel.appendChild(new Option(y, y));
+    }
+    yearSel.value = curYear;
+
+    // Populate months
+    const months = ["January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"];
+    monthSel.innerHTML = '';
+    months.forEach((m, i) => monthSel.appendChild(new Option(m, i + 1)));
+    monthSel.value = new Date().getMonth() + 1;
+
+    // Set initial values
+    reportYear = parseInt(yearSel.value);
+    reportMonth = parseInt(monthSel.value);
+
+    // Load initial report
+    loadReport();
+  }
+
+  window.initReportDropdowns = initReportDropdowns;
+
+  function updateMonthVisibility() {
+    const metric = document.getElementById('rpt-metric').value;
+    const monthGroup = document.getElementById('rpt-month-group');
+    const titleEl = document.getElementById('rpt-title');
+    const periodEl = document.getElementById('rpt-period');
+
+    if (metric === 'restock') {
+      monthGroup.style.display = 'none';
+      titleEl.textContent = 'Restock Needed Report';
+      periodEl.textContent = 'Current State';
+    } else {
+      monthGroup.style.display = 'flex';
+      const monthNames = ["January", "February", "March", "April", "May", "June",
+                          "July", "August", "September", "October", "November", "December"];
+      const month = parseInt(document.getElementById('rpt-month').value);
+      const year = document.getElementById('rpt-year').value;
+
+      if (metric === 'closing_stock') {
+        titleEl.textContent = 'Closing Stock Report';
+      } else {
+        titleEl.textContent = 'Consumption Report';
+      }
+      periodEl.textContent = `${monthNames[month - 1]} ${year}`;
+    }
+  }
+
+  async function loadReport(page, append) {
+    page = page || 1;
+    append = append || false;
+    
+    // Reset state if not appending
+    if (!append) {
+      currentPage = 1;
+      reportData = [];
+      allDataLoaded = false;
+      isLoadingMore = false;
+    }
+
+    const metric = document.getElementById('rpt-metric').value;
+    const year = parseInt(document.getElementById('rpt-year').value);
+    const month = parseInt(document.getElementById('rpt-month').value);
+
+    reportMetric = metric;
+    reportYear = year;
+    reportMonth = month;
+
+    updateMonthVisibility();
+
+    // Show loading only for initial load
+    if (!append) {
+      document.getElementById('rpt-loading').classList.remove('hidden');
+      document.getElementById('rpt-empty').classList.add('hidden');
+      document.getElementById('rpt-table-container').style.display = 'none';
+    } else {
+      document.getElementById('rpt-scroll-loading').style.display = 'flex';
+    }
+
+    try {
+      const result = await runServer('apiGenerateMetricReport', metric, year, month, page, 50);
+
+      document.getElementById('rpt-loading').classList.add('hidden');
+      document.getElementById('rpt-scroll-loading').style.display = 'none';
+
+      if (result.error) {
+        if (!append) {
+          document.getElementById('rpt-empty').classList.remove('hidden');
+          document.getElementById('rpt-empty').innerHTML = `
+            <div class="rpt-empty-icon"><span class="material-icons">error_outline</span></div>
+            <p style="color:var(--danger);">${result.error}</p>
+          `;
+        }
+        return;
+      }
+
+      const newData = result.data || [];
+      const pagination = result.pagination || { page: 1, totalPages: 1, totalItems: 0 };
+      const totals = result.totals || { totalQty: 0, totalValue: 0 };
+      
+      currentPage = pagination.page;
+      totalPages = pagination.totalPages;
+      totalItems = pagination.totalItems;
+
+      // Check if all data loaded
+      if (currentPage >= totalPages) {
+        allDataLoaded = true;
+      }
+
+      if (newData.length === 0 && !append) {
+        document.getElementById('rpt-empty').classList.remove('hidden');
+        document.getElementById('rpt-total-items').textContent = '0';
+        document.getElementById('rpt-total-qty').textContent = '0';
+        document.getElementById('rpt-total-value').textContent = 'RM 0.00';
+        document.getElementById('rpt-count').textContent = '0 items';
+        document.getElementById('rpt-grand-total').textContent = 'Total: RM 0.00';
+        return;
+      }
+
+      // Append or replace data
+      if (append) {
+        reportData = reportData.concat(newData);
+      } else {
+        reportData = newData;
+      }
+
+      // Use totals from server (shows ALL data totals, not just loaded)
+      const totalQty = totals.totalQty;
+      const totalValue = totals.totalValue;
+
+      // Update summary with TOTAL values (not just loaded data)
+      document.getElementById('rpt-total-items').textContent = totalItems.toLocaleString();
+      document.getElementById('rpt-total-qty').textContent = totalQty.toLocaleString();
+      document.getElementById('rpt-total-value').textContent = 'RM ' + totalValue.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('rpt-count').textContent = `${reportData.length} of ${totalItems} items`;
+      document.getElementById('rpt-grand-total').textContent = `Total: RM ${totalValue.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+      // Render table (append or replace)
+      renderReportTable(append);
+
+      // Setup infinite scroll listener
+      setupInfiniteScroll();
+
+    } catch (err) {
+      document.getElementById('rpt-loading').classList.add('hidden');
+      document.getElementById('rpt-scroll-loading').style.display = 'none';
+      if (!append) {
+        document.getElementById('rpt-empty').classList.remove('hidden');
+        document.getElementById('rpt-empty').innerHTML = `
+          <div class="rpt-empty-icon"><span class="material-icons">error_outline</span></div>
+          <p style="color:var(--danger);">Error loading report: ${err.message}</p>
+        `;
+      }
+    }
+  }
+
+  function setupInfiniteScroll() {
+    const tableContainer = document.getElementById('rpt-table-container');
+    
+    // Remove existing listener if any
+    tableContainer.removeEventListener('scroll', handleScroll);
+    
+    // Add scroll listener
+    tableContainer.addEventListener('scroll', handleScroll);
+    
+    // Also add listener to window for when table is shorter than viewport
+    window.removeEventListener('scroll', handleWindowScroll);
+    window.addEventListener('scroll', handleWindowScroll);
+  }
+
+  function handleScroll(e) {
+    const container = e.target;
+    const scrollPosition = container.scrollTop + container.clientHeight;
+    const scrollThreshold = container.scrollHeight - 100;
+    
+    if (scrollPosition >= scrollThreshold) {
+      loadMoreData();
+    }
+  }
+
+  function handleWindowScroll() {
+    const scrollPosition = window.innerHeight + window.scrollY;
+    const scrollThreshold = document.documentElement.scrollHeight - 200;
+    
+    if (scrollPosition >= scrollThreshold) {
+      loadMoreData();
+    }
+  }
+
+  async function loadMoreData() {
+    if (isLoadingMore || allDataLoaded) return;
+    
+    isLoadingMore = true;
+    const nextPage = currentPage + 1;
+    
+    await loadReport(nextPage, true);
+    
+    isLoadingMore = false;
+  }
+
+  function renderReportTable(append) {
+    const tbody = document.getElementById('rpt-tbody');
+    
+    // Clear table only if not appending
+    if (!append) {
+      tbody.innerHTML = '';
+    }
+
+    // Get items to render (only new items if appending)
+    const itemsToRender = append ? reportData.slice(-50) : reportData;
+
+    itemsToRender.forEach(item => {
+      const typeClass = item.type?.toLowerCase().includes('pharma') ? 'rpt-type-pharma' :
+                        item.type?.toLowerCase().includes('consumable') ? 'rpt-type-consumable' :
+                        item.type?.toLowerCase().includes('equipment') ? 'rpt-type-equipment' : '';
+
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td style="font-family:'Roboto Mono',monospace; font-size:0.8rem; color:var(--text-muted);">${item.sku || ''}</td>
+        <td style="font-weight:600;">${item.name || ''}</td>
+        <td><span class="rpt-type-badge ${typeClass}">${item.type || ''}</span></td>
+        <td><span class="rpt-category-badge">${item.category || ''}</span></td>
+        <td class="text-right">${(item.qty || 0).toLocaleString()}</td>
+        <td class="text-right">RM ${(item.cost || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td class="text-right" style="font-weight:700;">RM ${(item.totalValue || 0).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      `;
+      tbody.appendChild(row);
+    });
+
+    document.getElementById('rpt-table-container').style.display = 'block';
+  }
+
+  async function downloadReportExcel() {
+    if (reportData.length === 0) {
+      APP.Utils.showToast('No data to export');
+      return;
+    }
+
+    APP.Utils.showToast('Preparing full report for download...');
+
+    const metricNames = {
+      'closing_stock': 'Closing Stock',
+      'consumption': 'Consumption',
+      'restock': 'Restock Needed'
+    };
+
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+                        "July", "August", "September", "October", "November", "December"];
+
+    let period = reportMetric === 'restock' ? 'Current State' : `${monthNames[reportMonth - 1]} ${reportYear}`;
+
+    try {
+      // Fetch ALL data from server (page 1 with large page size)
+      const result = await runServer('apiGenerateMetricReport', reportMetric, reportYear, reportMonth, 1, 10000);
+      
+      if (result.error) {
+        APP.Utils.showToast('Error fetching data: ' + result.error);
+        return;
+      }
+
+      const allData = result.data || [];
+      const totals = result.totals || { totalQty: 0, totalValue: 0 };
+
+      // Build CSV content
+      let csv = '\uFEFF'; // BOM for Excel UTF-8
+      csv += `Itemized Report - ${metricNames[reportMetric]}\n`;
+      csv += `Period: ${period}\n`;
+      csv += `Generated: ${new Date().toLocaleString()}\n\n`;
+
+      // Headers
+      csv += 'SKU,Item Name,Type,Category,Quantity,Unit Cost (RM),Total Value (RM)\n';
+
+      // Data rows (ALL data)
+      allData.forEach(item => {
+        csv += `"${item.sku || ''}",`;
+        csv += `"${(item.name || '').replace(/"/g, '""')}",`;
+        csv += `"${item.type || ''}",`;
+        csv += `"${item.category || ''}",`;
+        csv += `${item.qty || 0},`;
+        csv += `${(item.cost || 0).toFixed(2)},`;
+        csv += `${(item.totalValue || 0).toFixed(2)}\n`;
+      });
+
+      // Summary (use totals from server)
+      csv += `\nSummary\n`;
+      csv += `Total Items,${allData.length}\n`;
+      csv += `Total Quantity,${totals.totalQty}\n`;
+      csv += `Total Value (RM),${totals.totalValue.toFixed(2)}\n`;
+
+      // Download
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Report_${reportMetric}_${reportYear}${reportMetric !== 'restock' ? '_' + reportMonth : ''}.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+
+      APP.Utils.showToast('Report downloaded successfully');
+    } catch (err) {
+      APP.Utils.showToast('Error downloading report: ' + err.message);
+    }
+  }
+
+  // ========================================
+  // ITEM HISTORY REPORT FUNCTIONS
+  // ========================================
+
+  /**
+   * Switch between General Reports and Item History Report tabs
+   */
+  function switchReportTab(tab) {
+    // Update tab buttons
+    document.getElementById('rpt-tab-general').classList.toggle('active', tab === 'general');
+    document.getElementById('rpt-tab-history').classList.toggle('active', tab === 'history');
+
+    // Show/hide content
+    document.getElementById('rpt-content-general').classList.toggle('hidden', tab !== 'general');
+    document.getElementById('rpt-content-history').classList.toggle('hidden', tab !== 'history');
+
+    // Load PO history when switching to history tab
+    if (tab === 'history') {
+      fetchData('poHistory', 'apiGetPOHistory');
+    }
+  }
+  window.switchReportTab = switchReportTab;
+
+  /**
+   * Strip special characters for comparison purposes
+   */
+  function ih_stripSpecial(text) {
+    return text.toLowerCase().replace(/['\-\(\)\+\[\]\/\\,%&@#]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Score a word match - partial matching within words
+   */
+  function ih_scoreWordMatch(searchWord, text) {
+    const textClean = ih_stripSpecial(text);
+    const textLower = text.toLowerCase();
+    
+    // Exact word boundary match (highest)
+    const wordBoundaryRegex = new RegExp('\\b' + searchWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    if (wordBoundaryRegex.test(text)) return 10;
+    
+    // Starts with (on cleaned text)
+    if (textClean.startsWith(searchWord)) return 8;
+    
+    // Contains (on cleaned text)
+    if (textClean.includes(searchWord)) return 6;
+    
+    // Partial match - check if any word in cleaned text starts with search word
+    const textWords = textClean.split(/\s+/);
+    for (const tw of textWords) {
+      if (tw.startsWith(searchWord)) return 5;
+      // Also check if search word starts with this text word (reverse)
+      if (searchWord.startsWith(tw) && tw.length >= 2) return 3;
+    }
+
+    return 0;
+  }
+
+  /**
+   * Search PO history only - shows PO number, Qty, Date along with item name
+   * Results sorted by PO date (newest first)
+   */
+  let ih_poSearchCache = [];
+  async function ih_searchItems(query) {
+    clearTimeout(ih_searchDebounceTimer);
+    const resultsDiv = document.getElementById('ih-search-results');
+
+    if (!query || query.trim().length < 1) {
+      resultsDiv.style.display = 'none';
+      return;
+    }
+
+    ih_searchDebounceTimer = setTimeout(async () => {
+      try {
+        // Search PO history from server - returns PO items with PO#, date, qty
+        const results = await runServer('apiGetPOItemSearch', query);
+
+        if (!results || results.length === 0) {
+          resultsDiv.innerHTML = `<div class="ih-search-item"><span style="color:var(--text-muted);">No PO entries found for "${APP.Utils.escapeHtml(query)}"</span></div>
+            <div class="ih-add-new-item" onclick="ih_addNewItem('${APP.Utils.escapeHtml(query.replace(/'/g, "\\'"))}')">
+              <span class="material-icons" style="font-size:18px;">add_circle</span>
+              <span>Add "${APP.Utils.escapeHtml(query)}" as new item</span>
+            </div>`;
+          resultsDiv.style.display = 'block';
+          return;
+        }
+
+        ih_poSearchCache = results;
+        let html = results.map((item, idx) => {
+          const uniqueKey = `${item.poId}__${idx}__${encodeURIComponent(item.name)}`;
+          const isAlreadyAdded = ih_selectedItems.some(s => s._key === uniqueKey);
+          const disabledStyle = isAlreadyAdded ? 'opacity:0.5; pointer-events:none;' : '';
+          
+          // Format cost as currency
+          const costStr = item.cost ? 'RM ' + Number(item.cost).toFixed(2) : '-';
+          
+          return `<div class="ih-search-item" style="${disabledStyle}" onclick="ih_addPOItem(${idx})">
+            <div style="flex:1;">
+              <div class="ih-item-name">${APP.Utils.escapeHtml(item.name)}</div>
+              <div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">
+                PO: <strong>${APP.Utils.escapeHtml(item.poId)}</strong> 
+                | Date: ${APP.Utils.escapeHtml(item.date || '-')} 
+                | Qty: ${Number(item.qty).toLocaleString()} 
+                | Unit: ${costStr}
+                ${item.supplier ? ' | ' + APP.Utils.escapeHtml(item.supplier) : ''}
+              </div>
+            </div>
+            <span class="material-icons" style="font-size:18px; color:var(--primary);">add_circle_outline</span>
+          </div>`;
+        }).join('');
+
+        // Always show "Add as new item" option
+        html += `<div class="ih-add-new-item" onclick="ih_addNewItem('${APP.Utils.escapeHtml(query.replace(/'/g, "\\'"))}')">
+          <span class="material-icons" style="font-size:18px;">add_circle</span>
+          <span>Add "${APP.Utils.escapeHtml(query)}" as new item</span>
+        </div>`;
+
+        resultsDiv.innerHTML = html;
+        resultsDiv.style.display = 'block';
+      } catch (err) {
+        resultsDiv.innerHTML = `<div class="ih-search-item"><span style="color:var(--danger);">Error: ${APP.Utils.escapeHtml(err.message)}</span></div>`;
+        resultsDiv.style.display = 'block';
+      }
+    }, 300);
+  }
+
+  /**
+   * Add a PO item from search results to the selected list
+   */
+  function ih_addPOItem(index) {
+    if (!ih_poSearchCache[index]) return;
+    const poItem = ih_poSearchCache[index];
+    const uniqueKey = `${poItem.poId}__${index}__${encodeURIComponent(poItem.name)}`;
+    
+    // Check if already added
+    if (ih_selectedItems.some(s => s._key === uniqueKey)) {
+      APP.Utils.showToast('Item already added', 'failed');
+      return;
+    }
+
+    ih_selectedItems.push({
+      _key: uniqueKey,
+      id: '',                    // PO items often have no Stock ID
+      name: poItem.name,         // Exact PO name as shown
+      poId: poItem.poId,         // PO number for reference
+      date: poItem.date,         // PO date
+      qty: poItem.qty,           // Quantity ordered
+      cost: poItem.cost,         // Unit cost
+      supplier: poItem.supplier,
+      fromPO: true               // Flag: came directly from PO selection
+    });
+    ih_renderSelectedList();
+
+    // Clear search
+    document.getElementById('ih-search-input').value = '';
+    document.getElementById('ih-search-results').style.display = 'none';
+    ih_poSearchCache = [];
+
+    APP.Utils.showToast(`Added from ${poItem.poId}`, 'success');
+  }
+
+  /**
+   * Add item to selected list
+   */
+  function ih_addItem(stockId, itemName) {
+    // Check if already added (only for items with a real Stock ID)
+    if (stockId && ih_selectedItems.some(s => s.id === stockId)) {
+      APP.Utils.showToast('Item already added', 'failed');
+      return;
+    }
+
+    ih_selectedItems.push({ id: stockId, name: itemName });
+    ih_renderSelectedList();
+
+    // Clear search
+    document.getElementById('ih-search-input').value = '';
+    document.getElementById('ih-search-results').style.display = 'none';
+
+    APP.Utils.showToast(`Added: ${itemName}`, 'success');
+  }
+
+  /**
+   * Add a new custom item (not from inventory)
+   */
+  function ih_addNewItem(itemName) {
+    if (!itemName || !itemName.trim()) return;
+    const trimmedName = itemName.trim();
+    ih_newItemCounter++;
+    const tempId = '__new_' + ih_newItemCounter;
+    ih_selectedItems.push({ id: tempId, name: trimmedName, isNew: true });
+    ih_renderSelectedList();
+
+    // Clear search
+    document.getElementById('ih-search-input').value = '';
+    document.getElementById('ih-search-results').style.display = 'none';
+
+    APP.Utils.showToast(`Added new item: ${trimmedName}`, 'success');
+  }
+
+  /**
+   * Remove item from selected list
+   */
+  function ih_removeItem(stockId) {
+    ih_selectedItems = ih_selectedItems.filter(s => s.id !== stockId);
+    ih_renderSelectedList();
+  }
+
+  /**
+   * Delete item from report preview
+   */
+  function ih_deleteReportItem(idx) {
+    if (idx < 0 || idx >= ih_reportData.length) return;
+    const removed = ih_reportData.splice(idx, 1)[0];
+    ih_renderReportPreview();
+    APP.Utils.showToast(`Removed: ${removed.itemName}`, 'info');
+  }
+
+  /**
+   * Clear all selected items
+   */
+  function ih_clearAll() {
+    ih_selectedItems = [];
+    ih_reportData = [];
+    ih_renderSelectedList();
+    document.getElementById('ih-report-preview').classList.add('hidden');
+  }
+
+  /**
+   * Render the selected items list
+   */
+  function ih_renderSelectedList() {
+    const listDiv = document.getElementById('ih-selected-list');
+    const countSpan = document.getElementById('ih-selected-count');
+
+    countSpan.textContent = ih_selectedItems.length;
+
+    if (ih_selectedItems.length === 0) {
+      listDiv.innerHTML = `<div class="ih-empty">
+        <span class="material-icons" style="font-size:32px; opacity:0.5;">add_circle_outline</span>
+        <p>Search and add items to generate a report</p>
+      </div>`;
+      return;
+    }
+
+    listDiv.innerHTML = ih_selectedItems.map((item, idx) => {
+      const idLabel = item.isNew ? '<span style="color:var(--primary); font-size:0.75rem; margin-left:8px; font-weight:600;">(New Item)</span>' :
+        `<span style="color:var(--text-muted); font-size:0.75rem; margin-left:8px;">[${APP.Utils.escapeHtml(item.id)}]</span>`;
+      return `<div class="ih-selected-item">
+        <div>
+          <span style="color:var(--text-muted); font-size:0.8rem; margin-right:8px;">${idx + 1}.</span>
+          <span style="font-weight:600;">${APP.Utils.escapeHtml(item.name)}</span>
+          ${idLabel}
+        </div>
+        <button class="ih-remove-btn" onclick="ih_removeItem('${item.id}')">Remove</button>
+      </div>`;
+    }).join('');
+  }
+
+  /**
+   * Generate the Item History Report
+   * Simply displays the selected items as-is - no server calls or fuzzy matching
+   */
+  async function ih_generateReport() {
+    if (ih_selectedItems.length === 0) {
+      APP.Utils.showToast('Please add at least one item', 'failed');
+      return;
+    }
+
+    APP.Utils.showLoading(true);
+
+    try {
+      // Map selected items directly without any server calls or matching
+      ih_reportData = ih_selectedItems.map(item => ({
+        stockId: item.id || '(no ID)',
+        itemName: item.name,
+        supplier: item.supplier || '-',
+        uom: 'UNIT',
+        lastPoId: item.poId || 'N/A',
+        lastBuyDate: item.date || 'N/A',
+        lastBuyQty: item.qty || 0,
+        matchedName: item.name,
+        totalMatches: item.fromPO ? 1 : 0,
+        matchStrategy: item.fromPO ? 'direct_po' : 'none',
+        cost: item.cost || 0
+      }));
+
+      ih_renderReportPreview();
+      document.getElementById('ih-report-preview').classList.remove('hidden');
+      APP.Utils.showLoading(false);
+      APP.Utils.showToast('Report generated successfully', 'success');
+
+    } catch (err) {
+      APP.Utils.showLoading(false);
+      APP.Utils.showToast('Error generating report: ' + err.message, 'failed');
+    }
+  }
+
+  // Track which row is being edited
+  let ih_editingIndex = -1;
+
+  /**
+   * Render the report preview table
+   */
+  function ih_renderReportPreview() {
+    const tbody = document.getElementById('ih-report-tbody');
+    tbody.innerHTML = '';
+
+    ih_reportData.forEach((item, idx) => {
+      const row = document.createElement('tr');
+      
+      // Show matched name indicator if different from requested name
+      let nameDisplay = APP.Utils.escapeHtml(item.itemName);
+      if (item.matchedName && item.matchedName !== item.itemName) {
+        nameDisplay += `<br><span style="font-size:0.7rem; color:var(--primary); font-style:italic;">✓ Matched: ${APP.Utils.escapeHtml(item.matchedName)}</span>`;
+      }
+      
+      // Highlight if no purchase history found
+      const dateStyle = item.lastBuyDate === 'Never' ? 'color:var(--danger); font-style:italic;' : '';
+      const poStyle = item.lastPoId === 'N/A' ? 'color:var(--text-muted);' : 'color:var(--primary);';
+      
+       // Determine if this item should be editable (no valid PO reference or temp ID)
+       const isEditable = item.stockId === '(no ID)' || 
+                          (item.stockId && String(item.stockId).startsWith('__new_')) || 
+                          item.lastPoId === 'N/A';
+       
+       // Make stock ID clickable if it needs to be edited (no real PO reference)
+       let stockIdDisplay;
+       if (isEditable) {
+         const displayText = item.stockId === '(no ID)' ? '(no ID)' : 
+                             (item.stockId && String(item.stockId).startsWith('__new_')) ? item.stockId : 
+                             item.stockId || '(no ID)';
+         stockIdDisplay = `<span style="font-family:'Roboto Mono',monospace; font-size:0.8rem; color:var(--danger); cursor:pointer;" onclick="ih_startEdit(${idx})" title="Click to find matching inventory item">${APP.Utils.escapeHtml(displayText)} ✏️</span>`;
+       } else {
+         stockIdDisplay = `<span style="font-family:'Roboto Mono',monospace; font-size:0.8rem; color:var(--text-muted);">${APP.Utils.escapeHtml(item.stockId)}</span>`;
+       }
+      
+      // Make item name editable
+      const itemNameCell = ih_editingIndex === idx 
+        ? `<div id="ih-edit-container-${idx}">
+            <input type="text" id="ih-edit-input-${idx}" class="tbl-input" style="width:100%; font-size:0.8rem;" 
+              placeholder="Search inventory..." oninput="ih_searchForEdit(${idx}, this.value)" value="${APP.Utils.escapeHtml(item.itemName)}">
+            <div id="ih-edit-results-${idx}" style="position:absolute; background:var(--bg-card); border:1px solid var(--border); border-radius:6px; max-height:260px; overflow-y:auto; z-index:100; width:100%; display:none;"></div>
+           </div>`
+        : `<span style="font-weight:600; cursor:pointer;" onclick="ih_startEdit(${idx})" title="Click to edit">${nameDisplay}</span>`;
+      
+      // Format match count with color indicator
+      const matchCount = item.totalMatches || 0;
+      const matchColor = matchCount === 0 ? 'var(--danger)' : matchCount <= 2 ? 'var(--warning)' : 'var(--success)';
+      const matchDisplay = matchCount > 0 
+        ? `<span style="color:${matchColor}; font-weight:600;">${matchCount}</span>`
+        : `<span style="color:var(--text-muted);">0</span>`;
+      
+      row.innerHTML = `
+        <td style="color:var(--text-muted); font-size:0.8rem; text-align:center;">${idx + 1}</td>
+        <td>${stockIdDisplay}</td>
+        <td style="position:relative;">${itemNameCell}</td>
+        <td>${APP.Utils.escapeHtml(item.supplier || '-')}</td>
+        <td>${APP.Utils.escapeHtml(item.uom)}</td>
+        <td style="font-family:'Roboto Mono',monospace; ${poStyle}">${APP.Utils.escapeHtml(item.lastPoId)}</td>
+        <td style="text-align:center;">${matchDisplay}</td>
+        <td style="${dateStyle}">${APP.Utils.escapeHtml(item.lastBuyDate)}</td>
+        <td style="text-align:right; font-weight:600;">${item.lastBuyQty.toLocaleString()}</td>
+        <td style="text-align:center;"><button class="ih-remove-btn" onclick="ih_deleteReportItem(${idx})" title="Remove from report">✕</button></td>
+      `;
+      tbody.appendChild(row);
+    });
+
+    // Focus on input if editing
+    if (ih_editingIndex >= 0) {
+      const input = document.getElementById(`ih-edit-input-${ih_editingIndex}`);
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    }
+  }
+
+  /**
+   * Start editing an item
+   */
+  function ih_startEdit(idx) {
+    ih_editingIndex = idx;
+    ih_renderReportPreview();
+    // Prevent document click handler from immediately closing edit mode
+    event.stopPropagation();
+  }
+
+  /**
+   * Cancel editing
+   */
+  function ih_cancelEdit() {
+    ih_editingIndex = -1;
+    ih_renderReportPreview();
+  }
+
+  /**
+   * Search inventory while editing
+   */
+  let ih_editSearchTimer = null;
+  async function ih_searchForEdit(idx, query) {
+    clearTimeout(ih_editSearchTimer);
+    const resultsDiv = document.getElementById(`ih-edit-results-${idx}`);
+    
+    if (!query || query.trim().length < 1) {
+      resultsDiv.style.display = 'none';
+      return;
+    }
+
+    ih_editSearchTimer = setTimeout(async () => {
+      const matches = await runServer('apiGetInventory', query, 1, 8);
+
+      if (!matches || matches.length === 0) {
+        resultsDiv.innerHTML = '<div style="padding:8px 12px; color:var(--text-muted); font-size:0.8rem;">No items found</div>';
+        resultsDiv.style.display = 'block';
+        return;
+      }
+
+      resultsDiv.innerHTML = matches.map(item => `
+        <div style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:0.8rem;" 
+          onmouseover="this.style.background='var(--bg-app)'" 
+          onmouseout="this.style.background=''"
+          onclick="ih_selectForEdit(${idx}, '${APP.Utils.escapeHtml(item['Stock ID'])}', '${APP.Utils.escapeHtml(item['Item Name'])}')">
+          <div style="font-weight:600;">${APP.Utils.escapeHtml(item['Item Name'])}</div>
+          <div style="color:var(--text-muted); font-size:0.7rem;">${APP.Utils.escapeHtml(item['Stock ID'])}</div>
+        </div>
+      `).join('');
+      resultsDiv.style.display = 'block';
+    }, 200);
+  }
+
+  /**
+   * Select an item from edit search results
+   */
+  function ih_selectForEdit(idx, stockId, itemName) {
+    // Update the report data
+    ih_reportData[idx].stockId = stockId;
+    ih_reportData[idx].itemName = itemName;
+    
+    // Also update the corresponding selected item
+    if (ih_selectedItems[idx]) {
+      ih_selectedItems[idx].id = stockId;
+      ih_selectedItems[idx].name = itemName;
+      // Remove isNew flag since we've now matched it to inventory
+      delete ih_selectedItems[idx].isNew;
+    }
+    
+    // Exit edit mode and re-render
+    ih_editingIndex = -1;
+    ih_renderReportPreview();
+    ih_renderSelectedList();
+    
+    APP.Utils.showToast(`Updated to: ${itemName}`, 'success');
+  }
+
+  // Close edit mode when clicking outside
+  document.addEventListener('click', function(e) {
+    if (ih_editingIndex >= 0) {
+      const editContainer = document.getElementById(`ih-edit-container-${ih_editingIndex}`);
+      if (editContainer && !editContainer.contains(e.target)) {
+        // Check if click was on the td that contains the edit container
+        const td = editContainer.closest('td');
+        if (td && !td.contains(e.target)) {
+          ih_cancelEdit();
+        }
+      }
+    }
+  });
+
+  /**
+   * Download Item History Report as CSV
+   */
+  function ih_downloadReport() {
+    if (ih_reportData.length === 0) {
+      APP.Utils.showToast('No data to export', 'failed');
+      return;
+    }
+
+    // Build CSV content
+    let csv = '\uFEFF'; // BOM for Excel UTF-8
+    csv += `Item History Report\n`;
+    csv += `Generated: ${new Date().toLocaleString()}\n\n`;
+
+    // Headers
+    csv += '#,Stock ID,Item Name,Supplier,UOM,Last PO,Last Buy Date,Last Buy Qty\n';
+
+    // Data rows
+    ih_reportData.forEach((item, idx) => {
+      csv += `${idx + 1},`;
+      csv += `"${item.stockId || ''}",`;
+      csv += `"${(item.itemName || '').replace(/"/g, '""')}",`;
+      csv += `"${(item.supplier || '').replace(/"/g, '""')}",`;
+      csv += `"${item.uom || ''}",`;
+      csv += `"${item.lastPoId || ''}",`;
+      csv += `"${item.lastBuyDate || ''}",`;
+      csv += `${item.lastBuyQty || 0}\n`;
+    });
+
+    // Download
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    const ts = new Date();
+    const stamp = `${ts.toISOString().split('T')[0]}_${String(ts.getHours()).padStart(2,'0')}-${String(ts.getMinutes()).padStart(2,'0')}-${String(ts.getSeconds()).padStart(2,'0')}`;
+    link.download = `Item_History_Report_${stamp}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+
+    APP.Utils.showToast('Report downloaded successfully', 'success');
+  }
+</script>

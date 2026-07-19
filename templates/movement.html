@@ -1,0 +1,203 @@
+{{template "base.html" .}}
+{{define "content_movement"}}
+<div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('view',this)">View Records</button>
+    <button class="tab-btn" onclick="switchTab('upload',this)">Upload Data</button>
+    <button class="tab-btn" onclick="switchTab('analysis',this)">Analysis</button>
+</div>
+
+<div id="tab-view" class="tab-content active">
+<div class="top-bar"><h2>Stock Movement</h2><button onclick="recalcROP()">Recalc ROP</button></div>
+<div class="search-bar">
+    <select id="year" onchange="load()"></select>
+    <select id="month" onchange="load()"><option value="0">All Months</option></select>
+    <input type="text" id="search" placeholder="Search stock ID or item..." oninput="load()">
+    <button onclick="load()">Search</button>
+</div>
+<table><thead><tr><th>Stock ID</th><th>Item</th><th>Year</th><th>Month</th><th>In</th><th>Out</th><th>Adj In</th><th>Adj Out</th><th>Closing</th></tr></thead><tbody id="body"></tbody></table>
+</div>
+
+<div id="tab-upload" class="tab-content">
+<div class="top-bar"><h2>Upload Movement Data</h2></div>
+<div class="card">
+    <div class="form-row">
+        <div class="form-group"><label>Year</label><select id="up-year"></select></div>
+        <div class="form-group"><label>Month</label><select id="up-month"></select></div>
+    </div>
+    <div class="form-group">
+        <label>Upload Mode</label>
+        <select id="up-mode">
+            <option value="FLOW">Movement Flow (In/Out/Adj)</option>
+            <option value="CLOSING">Closing Balance Only</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>Paste Data (tab-delimited from Excel)</label>
+        <textarea id="up-paste" rows="10" style="font-family:monospace;font-size:12px" placeholder="SKU&#9;Name&#9;In&#9;Out&#9;AdjIn&#9;AdjOut&#9;Closing"></textarea>
+    </div>
+    <button onclick="parseAndPreview()">Preview</button>
+    <div id="up-preview" style="margin-top:16px;display:none">
+        <h4>Preview (<span id="up-count"></span> rows)</h4>
+        <div style="max-height:300px;overflow-y:auto"><table id="up-preview-table"></table></div>
+        <div class="btn-group">
+            <button class="btn-secondary" onclick="cancelUpload()">Cancel</button>
+            <button onclick="saveUpload()">Confirm & Save</button>
+        </div>
+    </div>
+</div>
+</div>
+
+<div id="tab-analysis" class="tab-content">
+<div class="top-bar"><h2>Movement Analysis</h2></div>
+<div style="display:grid;grid-template-columns:300px 1fr;gap:14px;height:calc(100vh-160px);overflow:hidden">
+    <div class="card" style="overflow:hidden;display:flex;flex-direction:column;padding:0">
+        <div style="padding:12px;border-bottom:1px solid var(--border)">
+            <input type="text" id="ana-search" placeholder="Search item..." style="width:100%" oninput="filterAnalysisItems()">
+        </div>
+        <div id="ana-item-list" style="flex:1;overflow-y:auto;font-size:13px"></div>
+    </div>
+    <div class="card" style="overflow-y:auto">
+        <div id="ana-detail">
+            <div class="empty"><span class="material-icons">insights</span><p>Select an item to view analysis</p></div>
+        </div>
+    </div>
+</div>
+</div>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+function switchTab(tab, btn) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-'+tab).classList.add('active');
+    btn.classList.add('active');
+    if (tab === 'analysis') initAnalysis();
+}
+
+// ── View tab ──
+async function initView() {
+    const res = await fetch('/api/movement/years'); const years = await res.json();
+    const sel = document.getElementById('year');
+    sel.innerHTML = '<option value="0">All Years</option>' + years.map(y => `<option>${y}</option>`).join('');
+    for(let m=1;m<=12;m++) document.getElementById('month').innerHTML += `<option value="${m}">${new Date(2000,m-1).toLocaleString('default',{month:'short'})}</option>`;
+    load();
+}
+async function load() {
+    const p = new URLSearchParams({year: document.getElementById('year').value, month: document.getElementById('month').value, search: document.getElementById('search').value, limit: '500'});
+    const res = await fetch('/api/movement?'+p); const data = await res.json();
+    document.getElementById('body').innerHTML = data.map(r => `
+        <tr><td>${esc(r.stock_id)}</td><td>${esc(r.item_name)}</td><td>${r.year}</td><td>${r.month}</td>
+        <td>${r.in_qty||0}</td><td>${r.out_qty||0}</td><td>${r.adj_in||0}</td><td>${r.adj_out||0}</td><td>${r.report_closing||0}</td></tr>`).join('');
+}
+async function recalcROP() {
+    const res = await fetch('/api/movement/rop', {method:'POST'}); const d = await res.json();
+    toast(d.success ? `Updated ${d.updated} items` : d.error, d.success);
+}
+
+// ── Upload tab ──
+let stagedRows = [];
+function initUpload() {
+    const ySel = document.getElementById('up-year'), mSel = document.getElementById('up-month');
+    for (let y = new Date().getFullYear(); y >= 2020; y--) ySel.innerHTML += `<option value="${y}">${y}</option>`;
+    for (let m = 1; m <= 12; m++) mSel.innerHTML += `<option value="${m}">${new Date(2000,m-1).toLocaleString('default',{month:'short'})}</option>`;
+}
+function parseAndPreview() {
+    const raw = document.getElementById('up-paste').value.trim();
+    if (!raw) { toast('Paste data first', false); return; }
+    const mode = document.getElementById('up-mode').value;
+    const lines = raw.split('\n'); stagedRows = [];
+    lines.forEach(line => {
+        const cols = line.split('\t'); if (cols.length < 2) return;
+        const row = {stock_id: cols[0].trim(), item_name: cols[1].trim(), in:0, out:0, adj_in:0, adj_out:0, closing:0};
+        if (mode === 'FLOW') { row.in = parseFloat(cols[2])||0; row.out = parseFloat(cols[3])||0; row.adj_in = parseFloat(cols[4])||0; row.adj_out = parseFloat(cols[5])||0; }
+        else { row.closing = parseFloat(cols[2])||0; }
+        stagedRows.push(row);
+    });
+    document.getElementById('up-count').textContent = stagedRows.length;
+    document.getElementById('up-preview-table').innerHTML = `<thead><tr><th>SKU</th><th>Name</th><th>In</th><th>Out</th><th>AdjIn</th><th>AdjOut</th><th>Closing</th></tr></thead><tbody>` +
+        stagedRows.slice(0,50).map(r => `<tr><td>${esc(r.stock_id)}</td><td>${esc(r.item_name)}</td><td>${r.in}</td><td>${r.out}</td><td>${r.adj_in}</td><td>${r.adj_out}</td><td>${r.closing}</td></tr>`).join('') +
+        (stagedRows.length>50?`<tr><td colspan="7" style="color:var(--muted);text-align:center">...and ${stagedRows.length-50} more</td></tr>`:'') + '</tbody>';
+    document.getElementById('up-preview').style.display = 'block';
+}
+function cancelUpload() { stagedRows = []; document.getElementById('up-preview').style.display = 'none'; }
+async function saveUpload() {
+    if (!stagedRows.length) return;
+    const body = { year: parseInt(document.getElementById('up-year').value), month: parseInt(document.getElementById('up-month').value), rows: stagedRows };
+    const res = await fetch('/api/movement/bulk', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await res.json();
+    toast(d.success ? `Saved ${d.count} rows` : d.error, d.success);
+    if (d.success) cancelUpload();
+}
+
+// ── Analysis tab ──
+let allItems = [], analysisChart = null;
+async function initAnalysis() {
+    if (allItems.length) return;
+    const res = await fetch('/api/inventory/basic'); allItems = await res.json();
+    filterAnalysisItems();
+}
+function filterAnalysisItems() {
+    const q = (document.getElementById('ana-search')?.value || '').toLowerCase();
+    const filtered = q ? allItems.filter(i => (i['Stock ID']||'').toLowerCase().includes(q) || (i['Item Name']||'').toLowerCase().includes(q)) : allItems.slice(0, 100);
+    document.getElementById('ana-item-list').innerHTML = filtered.map(i => `
+        <div style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer" onclick="loadItemAnalysis('${esc(i['Stock ID'])}','${esc(i['Item Name'])}','${esc(i['Category']||'')}')">
+            <strong style="color:var(--accent);font-family:monospace">${esc(i['Stock ID'])}</strong>
+            <div style="font-size:12px">${esc(i['Item Name'])}</div>
+        </div>`).join('');
+}
+async function loadItemAnalysis(stockId, name, category) {
+    const detailDiv = document.getElementById('ana-detail');
+    detailDiv.innerHTML = '<div class="spinner" style="margin:40px auto"></div>';
+    const res = await fetch('/api/movement/timeline?stock_id=' + encodeURIComponent(stockId));
+    const data = await res.json();
+    if (!data.success) { detailDiv.innerHTML = '<div class="empty"><p>No data</p></div>'; return; }
+    const tl = data.timeline || [];
+    const cost = data.itemCost || 0, selling = data.itemSelling || 0;
+    const totalIn = tl.reduce((s,r)=>s+(r.in||0)+(r.adjIn||0),0);
+    const totalOut = tl.reduce((s,r)=>s+(r.out||0)+(r.adjOut||0),0);
+    const fmt = v => 'RM '+(v||0).toLocaleString('en-MY',{minimumFractionDigits:2});
+    const profit = totalOut*selling - totalIn*cost;
+
+    detailDiv.innerHTML = `
+        <h3>${esc(name)}</h3>
+        <div style="color:var(--muted);font-size:12px;margin-bottom:12px">
+            <span style="background:var(--bg);padding:2px 8px;border-radius:4px;font-family:monospace">${esc(stockId)}</span>
+            ${category ? ' &middot; '+esc(category) : ''}
+        </div>
+        <div class="ana-kpi-grid" style="grid-template-columns:repeat(5,1fr)">
+            <div class="ana-kpi"><div class="lbl">Total IN</div><div class="val" style="color:#06b6d4">${totalIn}</div></div>
+            <div class="ana-kpi"><div class="lbl">Total OUT</div><div class="val" style="color:#ef4444">${totalOut}</div></div>
+            <div class="ana-kpi"><div class="lbl">Capital Cost</div><div class="val" style="font-size:16px">${fmt(totalIn*cost)}</div></div>
+            <div class="ana-kpi"><div class="lbl">Revenue</div><div class="val" style="font-size:16px">${fmt(totalOut*selling)}</div></div>
+            <div class="ana-kpi"><div class="lbl">Gross Profit</div><div class="val" style="font-size:16px;color:${profit>=0?'var(--green)':'var(--red)'}">${fmt(profit)}</div></div>
+        </div>
+        <h4 style="margin:16px 0 8px">Monthly Trend</h4>
+        <div class="chart-box"><canvas id="ana-chart"></canvas></div>`;
+
+    setTimeout(() => {
+        const ctx = document.getElementById('ana-chart'); if (!ctx) return;
+        if (analysisChart) analysisChart.destroy();
+        const labels = tl.map(r => r.label);
+        analysisChart = new Chart(ctx, {
+            type: 'line', data: {
+                labels,
+                datasets: [
+                    {label:'IN',data:tl.map(r=>r.in+r.adjIn),borderColor:'#06b6d4',tension:0.3,pointRadius:3},
+                    {label:'OUT',data:tl.map(r=>r.out+r.adjOut),borderColor:'#ef4444',tension:0.3,pointRadius:3},
+                    {label:'Closing',data:tl.map(r=>r.closing),borderColor:'#3b82f6',tension:0.3,pointRadius:3},
+                ]},
+            options: {responsive:true,maintainAspectRatio:false,
+                plugins:{legend:{position:'bottom',labels:{color:'#7a828e'}}},
+                scales:{x:{ticks:{color:'#7a828e'}},y:{ticks:{color:'#7a828e'},min:0}}}
+        });
+    }, 100);
+}
+
+initView(); initUpload();
+</script>
+{{end}}

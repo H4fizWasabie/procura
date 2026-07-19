@@ -1,0 +1,152 @@
+{{template "base.html" .}}
+{{define "content_inventory"}}
+<div class="top-bar">
+    <h2>Items</h2>
+</div>
+<div class="search-bar">
+    <input type="text" id="search" placeholder="Search stock ID, item name, or supplier..." oninput="loadPage(1)">
+    <button onclick="loadPage(1)">Search</button>
+</div>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<table>
+    <thead><tr>
+        <th>Stock ID</th><th>Item Name</th><th>Supplier</th><th>Cost</th>
+        <th>Stock</th><th>ROP</th><th>Exclude</th><th>Behaviour</th><th>Actions</th>
+    </tr></thead>
+    <tbody id="items-body"></tbody>
+</table>
+
+<div class="pagination">
+    <button onclick="loadPage(page-1)" id="prev-btn" disabled>Prev</button>
+    <span id="page-info">Page 1</span>
+    <button onclick="loadPage(page+1)" id="next-btn">Next</button>
+</div>
+
+<div id="edit-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Edit Item: <span id="em-title"></span></h3>
+            <span class="close" onclick="closeModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="em-stock-id">
+            <div class="form-row">
+                <div class="form-group"><label>Item Name</label><input id="em-name" disabled></div>
+                <div class="form-group"><label>Supplier</label><input id="em-supplier" disabled></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Cost (RM)</label><input type="number" step="0.01" id="em-cost"></div>
+                <div class="form-group"><label>ROP</label><input type="number" step="1" id="em-rop"></div>
+                <div class="form-group"><label>Current Stock</label><input id="em-stock" disabled></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Item Behaviour</label>
+                    <select id="em-behaviour">
+                        <option value="">Standard / Pack</option>
+                        <option value="Service">Service</option>
+                        <option value="Asset">Asset</option>
+                        <option value="In-House Use">In-House Use</option>
+                        <option value="Unavailable Item">Unavailable Item</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>UOM</label><input id="em-uom"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Selling Price (RM)</label><input type="number" step="0.01" id="em-selling"></div>
+                <div class="form-group"><label>Pack Size</label><input id="em-pack"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Exclude</label><select id="em-exclude"><option value="">No</option><option value="1">Yes</option></select></div>
+                <div class="form-group"><label>Velocity Override</label><select id="em-velocity"><option value="">Default</option><option value="FAST">FAST</option><option value="MEDIUM">MEDIUM</option><option value="SLOW">SLOW</option></select></div>
+            </div>
+            <div class="btn-group">
+                <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+                <button onclick="saveItem()">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let page = 1, pageSize = 50;
+
+async function loadPage(p) {
+    page = Math.max(1, p);
+    const q = document.getElementById('search').value;
+    const res = await fetch(`/api/inventory?search=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`);
+    const items = await res.json();
+    document.getElementById('items-body').innerHTML = items.map(it => `
+        <tr>
+            <td>${esc(it.stock_id)}</td>
+            <td>${esc(it.item_name)}</td>
+            <td>${esc(it.supplier_name || '-')}</td>
+            <td class="money">${it.cost ? 'RM '+it.cost.toFixed(2) : '-'}</td>
+            <td>${it.current_stock || 0}</td>
+            <td>${it.rop || 0}</td>
+            <td>${it.exclude ? 'Yes' : '-'}</td>
+            <td>${esc(it.item_behaviour) || 'Standard'}</td>
+            <td><button onclick="openEdit('${esc(it.stock_id)}')" class="btn-sm">Edit</button></td>
+        </tr>`).join('');
+    document.getElementById('page-info').textContent = `Page ${page}`;
+    document.getElementById('prev-btn').disabled = page <= 1;
+    document.getElementById('next-btn').disabled = items.length < pageSize;
+}
+
+function openEdit(stockId) {
+    fetch(`/api/inventory?search=${encodeURIComponent(stockId)}&page=1&pageSize=1`)
+        .then(r => r.json()).then(items => {
+            if (!items || !items.length) { toast('Item not found', false); return; }
+            const it = items[0];
+            document.getElementById('em-stock-id').value = it.stock_id;
+            document.getElementById('em-title').textContent = it.stock_id;
+            document.getElementById('em-name').value = it.item_name || '';
+            document.getElementById('em-supplier').value = it.supplier_name || '';
+            document.getElementById('em-cost').value = it.cost || 0;
+            document.getElementById('em-rop').value = it.rop || 0;
+            document.getElementById('em-stock').value = it.current_stock || 0;
+            document.getElementById('em-behaviour').value = it.item_behaviour || '';
+            document.getElementById('em-uom').value = it.uom || '';
+            document.getElementById('em-selling').value = it.selling_price || 0;
+            document.getElementById('em-pack').value = it.pack_size || '';
+            document.getElementById('em-exclude').value = it.exclude || '';
+            document.getElementById('em-velocity').value = it.velocity_override || '';
+            document.getElementById('edit-modal').classList.add('open');
+        });
+}
+
+function closeModal() { document.getElementById('edit-modal').classList.remove('open'); }
+
+async function saveItem() {
+    const stockId = document.getElementById('em-stock-id').value;
+    const updates = {
+        cost: parseFloat(document.getElementById('em-cost').value) || 0,
+        rop: parseFloat(document.getElementById('em-rop').value) || 0,
+        item_behaviour: document.getElementById('em-behaviour').value,
+        uom: document.getElementById('em-uom').value,
+        selling_price: parseFloat(document.getElementById('em-selling').value) || 0,
+        pack_size: document.getElementById('em-pack').value,
+        exclude: document.getElementById('em-exclude').value,
+        velocity_override: document.getElementById('em-velocity').value,
+    };
+    try {
+        const res = await fetch('/api/inventory/' + encodeURIComponent(stockId), {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(updates)
+        });
+        const data = await res.json();
+        toast(data.success ? 'Updated' : data.error, data.success);
+        if (data.success) { closeModal(); loadPage(page); }
+    } catch(e) { toast('Error: ' + e.message, false); }
+}
+
+function toast(msg, ok) {
+    const t = document.getElementById('toast'); t.textContent = msg;
+    t.className = 'toast ' + (ok ? 'toast-ok' : 'toast-err');
+    t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500);
+}
+function esc(s) { if(!s)return''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+loadPage(1);
+</script>
+{{end}}
