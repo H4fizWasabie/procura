@@ -99,10 +99,21 @@ func (s *Service) Names() []string {
 func scanSuppliers(rows *sql.Rows) []Supplier {
 	out := []Supplier{}
 	for rows.Next() {
-		var s Supplier
-		rows.Scan(&s.SupplierName, &s.ContactPerson, &s.Phone, &s.Email,
-			&s.Address, &s.PaymentTerms, &s.BRN, &s.AccountNo, &s.BankName)
-		out = append(out, s)
+		var name, contact, phone, email, address, terms, brn, acc, bank sql.NullString
+		rows.Scan(&name, &contact, &phone, &email, &address, &terms, &brn, &acc, &bank)
+		out = append(out, Supplier{
+			SupplierName:  str(name),
+			ContactPerson: str(contact),
+			Phone:         str(phone),
+			Email:         str(email),
+			Address:       str(address),
+			PaymentTerms:  str(terms),
+			BRN:           str(brn),
+			AccountNo:     str(acc),
+			BankName:      str(bank),
+		})
 	}
 	return out
 }
+
+func str(s sql.NullString) string { if s.Valid { return s.String }; return "" }

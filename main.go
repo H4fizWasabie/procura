@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"html/template"
@@ -27,6 +28,7 @@ import (
 	"procura/internal/suppliers"
 	"procura/internal/tasks"
 	"procura/internal/uom"
+	"procura/internal/validation"
 	"procura/internal/workflow"
 )
 
@@ -40,7 +42,9 @@ func main() {
 	}
 
 	authSvc := &auth.Service{DB: db}
-	authSvc.CreateTestUser()
+	if pin := authSvc.BootstrapAdmin(); pin != "" {
+		log.Printf("*** FIRST RUN: admin user created — email: admin@procura.local  PIN: %s ***", pin)
+	}
 
 	dashSvc := &dashboard.Service{DB: db}
 	invSvc := &inventory.Service{DB: db}
@@ -57,6 +61,7 @@ func main() {
 	catalogueSvc := &catalogue.Service{DB: db}
 	uomSvc := &uom.Service{DB: db}
 	importSvc := &ximport.Service{DB: db, ImportsDir: "data/imports"}
+	validationSvc := &validation.Service{DB: db}
 
 	tmpl := template.Must(template.ParseFS(assets, "templates/*.html"))
 
@@ -92,8 +97,94 @@ func main() {
 		})
 	})
 
+	// ── Logout ──
+	mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name: "token", Value: "", Path: "/",
+			HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteLaxMode,
+		})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+	})
+
 	// ── Protected pages ──
 	protected := authSvc.Middleware
+	adminOnly := func(next http.HandlerFunc) http.HandlerFunc {
+		return protected(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-User-Role") != "ADMIN" {
+				writeJSON(w, http.StatusForbidden, map[string]interface{}{"error": "Admin only"})
+				return
+			}
+			next(w, r)
+		})
+	}
+
+	// ── Users page ──
+	mux.HandleFunc("GET /users", protected(func(w http.ResponseWriter, r *http.Request) {
+		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
+			"Active": "users", "ContentBlock": "content_users",
+			"User": userFromReq(r), "Users": authSvc.ListUsers(),
+		})
+	}))
+
+	// ── User API (admin only) ──
+	mux.HandleFunc("GET /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, authSvc.ListUsers())
+	}))
+	mux.HandleFunc("POST /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Email string `json:"email"`
+			Name  string `json:"name"`
+			Role  string `json:"role"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Role == "" {
+			body.Role = "VIEWER"
+		}
+		pin, err := authSvc.AddUser(body.Email, body.Name, body.Role)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "pin": pin})
+	}))
+	mux.HandleFunc("PUT /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Email string `json:"email"`
+			Name  string `json:"name"`
+			Role  string `json:"role"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if err := authSvc.UpdateUser(body.Email, body.Name, body.Role); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+	}))
+	mux.HandleFunc("POST /api/users/reset-pin", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Email string `json:"email"` }
+		json.NewDecoder(r.Body).Decode(&body)
+		pin, err := authSvc.ResetUserPIN(body.Email)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "pin": pin})
+	}))
+	mux.HandleFunc("DELETE /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Email string `json:"email"` }
+		json.NewDecoder(r.Body).Decode(&body)
+		if err := authSvc.DeleteUser(body.Email); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+	}))
+
+	mux.HandleFunc("GET /change-pin", protected(func(w http.ResponseWriter, r *http.Request) {
+		tmpl.ExecuteTemplate(w, "change_pin.html", map[string]interface{}{
+			"User": userFromReq(r),
+		})
+	}))
 
 	mux.HandleFunc("GET /", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
@@ -169,7 +260,6 @@ func main() {
 	mux.HandleFunc("GET /api/suppliers", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, supSvc.List(r.URL.Query().Get("search")))
 	}))
-
 	mux.HandleFunc("POST /api/suppliers", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Supplier     suppliers.Supplier `json:"supplier"`
@@ -339,6 +429,131 @@ func main() {
 	mux.HandleFunc("GET /import", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "import", "ContentBlock": "content_import", "User": userFromReq(r)})
 	}))
+
+	// ── Validation ──
+	mux.HandleFunc("GET /validation", protected(func(w http.ResponseWriter, r *http.Request) {
+		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "validation", "ContentBlock": "content_validation", "User": userFromReq(r)})
+	}))
+	mux.HandleFunc("GET /api/validation", protected(func(w http.ResponseWriter, r *http.Request) {
+		nz := r.URL.Query().Get("nonzero") == "1"
+		writeJSON(w, 200, validationSvc.Run(nz))
+	}))
+	mux.HandleFunc("GET /api/validation/report", protected(func(w http.ResponseWriter, r *http.Request) {
+		nz := r.URL.Query().Get("nonzero") == "1"
+		report := validationSvc.ReportMD(nz)
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=validation_report.md")
+		w.WriteHeader(200)
+		w.Write([]byte(report))
+	}))
+
+	// ── Import History ──
+	mux.HandleFunc("GET /api/import/history", protected(func(w http.ResponseWriter, r *http.Request) {
+		rows, _ := db.Query(`SELECT r.run_id, r.source_file, r.imported_at, r.row_counts_json
+			FROM import_runs r ORDER BY r.run_id DESC LIMIT 50`)
+		if rows == nil {
+			writeJSON(w, 200, []interface{}{})
+			return
+		}
+		defer rows.Close()
+		type Run struct {
+			RunID      int             `json:"run_id"`
+			SourceFile string          `json:"source_file"`
+			ImportedAt string          `json:"imported_at"`
+			TableRows  json.RawMessage `json:"table_rows"`
+		}
+		var runs []Run
+		for rows.Next() {
+			var r Run
+			var counts sql.NullString
+			rows.Scan(&r.RunID, &r.SourceFile, &r.ImportedAt, &counts)
+			if counts.Valid {
+				r.TableRows = json.RawMessage(counts.String)
+			}
+			runs = append(runs, r)
+		}
+		if runs == nil { runs = []Run{} }
+		writeJSON(w, 200, runs)
+	}))
+
+	// ── Extended Items API ──
+	mux.HandleFunc("GET /api/inventory/filter-options", protected(func(w http.ResponseWriter, r *http.Request) {
+		suppliers := supSvc.Names()
+		rows, _ := db.Query("SELECT DISTINCT category FROM items WHERE category IS NOT NULL AND category != '' ORDER BY category")
+		var categories []string
+		if rows != nil {
+			defer rows.Close()
+			for rows.Next() { var c string; rows.Scan(&c); categories = append(categories, c) }
+		}
+		if categories == nil { categories = []string{} }
+		writeJSON(w, 200, map[string]interface{}{"suppliers": suppliers, "categories": categories})
+	}))
+	mux.HandleFunc("GET /api/inventory/detail", protected(func(w http.ResponseWriter, r *http.Request) {
+		stockID := r.URL.Query().Get("stock_id")
+		if stockID == "" {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "stock_id required"})
+			return
+		}
+		// Item detail
+		var id, name, cat, ptype, supplier, uom, status, updated, beh sql.NullString
+		var cost, selling, current, rop sql.NullFloat64
+		var velOv sql.NullString
+		db.QueryRow(`SELECT stock_id, item_name, category, product_type, supplier_name, uom,
+			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override
+			FROM items WHERE stock_id = ?`, stockID).Scan(&id, &name, &cat, &ptype, &supplier, &uom,
+			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv)
+
+		// Supplier UOM mapping
+		var supUom sql.NullString
+		db.QueryRow(`SELECT supplier_uom FROM supplier_item_mappings WHERE stock_id = ? AND supplier_name = ? LIMIT 1`,
+			stockID, strv(supplier)).Scan(&supUom)
+
+		// Latest movements
+		movRows, _ := db.Query(`SELECT year, month, in_qty, out_qty, adj_in, adj_out, report_closing
+			FROM stock_movements WHERE stock_id = ? ORDER BY year DESC, month DESC LIMIT 5`, stockID)
+		movements := []map[string]interface{}{}
+		if movRows != nil {
+			defer movRows.Close()
+			for movRows.Next() {
+				var yr, mo int
+				var in, out, ai, ao, rc sql.NullFloat64
+				movRows.Scan(&yr, &mo, &in, &out, &ai, &ao, &rc)
+				movements = append(movements, map[string]interface{}{
+					"year": yr, "month": mo, "in_qty": f64v(in), "out_qty": f64v(out),
+					"adj_in": f64v(ai), "adj_out": f64v(ao), "closing": f64v(rc),
+				})
+			}
+		}
+
+		// PO history
+		poRows, _ := db.Query(`SELECT poi.po_id, po.date, po.supplier, poi.quantity, poi.cost, poi.total
+			FROM purchase_order_items poi JOIN purchase_orders po ON po.po_id = poi.po_id
+			WHERE LOWER(poi.stock_id) = LOWER(?) OR LOWER(poi.item_name) = LOWER(?)
+			ORDER BY po.date DESC LIMIT 10`, stockID, strv(name))
+		poHistory := []map[string]interface{}{}
+		if poRows != nil {
+			defer poRows.Close()
+			for poRows.Next() {
+				var poID, date, sup sql.NullString
+				var qty, cst, tot sql.NullFloat64
+				poRows.Scan(&poID, &date, &sup, &qty, &cst, &tot)
+				poHistory = append(poHistory, map[string]interface{}{
+					"po_id": strv(poID), "date": strv(date), "supplier": strv(sup),
+					"qty": f64v(qty), "cost": f64v(cst), "total": f64v(tot),
+				})
+			}
+		}
+
+		writeJSON(w, 200, map[string]interface{}{
+			"stock_id": strv(id), "item_name": strv(name), "category": strv(cat),
+			"product_type": strv(ptype), "supplier_name": strv(supplier), "uom": strv(uom),
+			"product_status": strv(status), "last_updated": strv(updated),
+			"item_behaviour": strv(beh), "cost": f64v(cost), "selling_price": f64v(selling),
+			"current_stock": f64v(current), "rop": f64v(rop), "velocity_override": strv(velOv),
+			"supplier_uom": strv(supUom),
+			"movements": movements, "po_history": poHistory,
+		})
+	}))
 	mux.HandleFunc("GET /api/reports/restock", protected(func(w http.ResponseWriter, r *http.Request) {
 		p, _ := strconv.Atoi(r.URL.Query().Get("page")); sz, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
 		writeJSON(w, 200, repSvc.RestockReport(p, sz))
@@ -348,6 +563,35 @@ func main() {
 		yr, _ := strconv.Atoi(q.Get("year")); mo, _ := strconv.Atoi(q.Get("month"))
 		p, _ := strconv.Atoi(q.Get("page")); sz, _ := strconv.Atoi(q.Get("pageSize"))
 		writeJSON(w, 200, repSvc.HistoricalReport(q.Get("type"), yr, mo, p, sz))
+	}))
+	mux.HandleFunc("GET /api/reports/search-po-items", protected(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		if q == "" {
+			writeJSON(w, 200, []interface{}{})
+			return
+		}
+		term := "%" + strings.ToLower(q) + "%"
+		rows, _ := db.Query(`
+			SELECT DISTINCT poi.stock_id, COALESCE(poi.item_name, '')
+			FROM purchase_order_items poi
+			WHERE LOWER(COALESCE(poi.item_name,'')) LIKE ?
+			   OR LOWER(COALESCE(poi.stock_id,'')) LIKE ?
+			ORDER BY poi.item_name
+			LIMIT 50
+		`, term, term)
+		if rows == nil {
+			writeJSON(w, 200, []interface{}{})
+			return
+		}
+		defer rows.Close()
+		var items []map[string]string
+		for rows.Next() {
+			var id, name string
+			rows.Scan(&id, &name)
+			items = append(items, map[string]string{"stock_id": id, "item_name": name})
+		}
+		if items == nil { items = []map[string]string{} }
+		writeJSON(w, 200, items)
 	}))
 	mux.HandleFunc("POST /api/reports/item-history", protected(func(w http.ResponseWriter, r *http.Request) {
 		var body []struct{ID string `json:"id"`; Name string `json:"name"`}
@@ -467,3 +711,6 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
 }
+
+func strv(s sql.NullString) string { if s.Valid { return s.String }; return "" }
+func f64v(f sql.NullFloat64) float64 { if f.Valid { return f.Float64 }; return 0 }

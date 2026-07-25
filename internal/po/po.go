@@ -33,6 +33,38 @@ type Item struct {
 	UOM     string  `json:"uom"`
 }
 
+func (it *Item) UnmarshalJSON(data []byte) error {
+	// Detect GAS legacy short-format keys (id/n/q/c/t/u)
+	var probe map[string]json.RawMessage
+	json.Unmarshal(data, &probe)
+	if _, ok := probe["id"]; ok {
+		var si struct {
+			StockID string  `json:"id"`
+			Name    string  `json:"n"`
+			Qty     float64 `json:"q"`
+			Cost    float64 `json:"c"`
+			Total   float64 `json:"t"`
+			UOM     string  `json:"u"`
+		}
+		json.Unmarshal(data, &si)
+		it.StockID = si.StockID
+		it.Name = si.Name
+		it.Qty = si.Qty
+		it.Cost = si.Cost
+		it.Total = si.Total
+		it.UOM = si.UOM
+		return nil
+	}
+	// Go long-format — use type alias to avoid recursion
+	type ItemAlias Item
+	var ai ItemAlias
+	if err := json.Unmarshal(data, &ai); err != nil {
+		return err
+	}
+	*it = Item(ai)
+	return nil
+}
+
 type Service struct {
 	DB *sql.DB
 }

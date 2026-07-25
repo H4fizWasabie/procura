@@ -9,12 +9,14 @@
     <input type="text" id="search" placeholder="Search by name or contact..." oninput="loadList()">
 </div>
 
+<div style="overflow-x:auto">
 <table>
     <thead><tr>
-        <th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>Terms</th><th>Actions</th>
+        <th>Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>Terms</th><th>BRN</th><th>Acc No</th><th>Bank</th><th>Actions</th>
     </tr></thead>
     <tbody id="sup-body"></tbody>
 </table>
+</div>
 
 <div id="toast" class="toast" style="display:none"></div>
 
@@ -56,6 +58,9 @@ async function loadList() {
             <td>${esc(s.phone || '-')}</td>
             <td>${esc(s.email || '-')}</td>
             <td>${esc(s.payment_terms || '-')}</td>
+            <td>${esc(s.brn || '-')}</td>
+            <td>${esc(s.account_no || '-')}</td>
+            <td>${esc(s.bank_name || '-')}</td>
             <td>
                 <button onclick="editSupplier('${esc(s.supplier_name)}')" style="font-size:11px;padding:3px 8px;margin-right:4px">Edit</button>
                 <button onclick="deleteSupplier('${esc(s.supplier_name)}')" style="font-size:11px;padding:3px 8px;background:var(--red)">Del</button>

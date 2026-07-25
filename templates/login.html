@@ -29,7 +29,11 @@ async function login() {
         });
         const data = await res.json();
         if (data.success) {
-            window.location.href = '/';
+            if (data.mustChangePin) {
+                window.location.href = '/change-pin';
+            } else {
+                window.location.href = '/';
+            }
         } else {
             err.textContent = data.error;
             err.style.display = 'block';

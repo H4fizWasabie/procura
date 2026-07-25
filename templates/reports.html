@@ -1,83 +1,167 @@
 {{template "base.html" .}}
 {{define "content_reports"}}
-<h2>Reports</h2>
-<div class="grid-3 section" style="grid-template-columns:1fr 1fr">
-    <div class="card">
-        <h3>Restock Report</h3>
-        <p style="color:var(--muted);font-size:13px">Items below ROP sorted by cost impact</p>
-        <button onclick="loadRestock()" style="margin-top:8px">Generate</button>
-        <table style="margin-top:12px" id="restock-table"></table>
+<div class="top-bar"><h2>Reports</h2></div>
+
+<!-- Tabs -->
+<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
+    <button class="sub-tab active" onclick="switchTab('general')">General Reports</button>
+    <button class="sub-tab" onclick="switchTab('history')">Item History</button>
+</div>
+
+<!-- General Reports Tab -->
+<div id="tab-general">
+    <div class="search-bar">
+        <select id="r-type" onchange="loadReport()">
+            <option value="restock">Restock Needed</option>
+            <option value="closing_stock">Closing Stock</option>
+            <option value="consumption">Consumption</option>
+        </select>
+        <select id="r-year" onchange="loadReport()"></select>
+        <select id="r-month" onchange="loadReport()">
+            <option value="0">All Months</option>
+        </select>
+        <button class="btn-secondary" onclick="exportReportCSV()">Export CSV</button>
     </div>
-    <div class="card">
-        <h3>Historical Report</h3>
-        <div class="search-bar"><select id="h-type"><option value="closing_stock">Closing Stock</option><option value="consumption">Consumption</option></select>
-        <select id="h-year"></select><select id="h-month"></select><button onclick="loadHistorical()">Load</button></div>
-        <table style="margin-top:8px" id="hist-table"></table>
+
+    <div class="card" style="padding:0;overflow-x:auto">
+        <table>
+            <thead><tr><th>SKU</th><th>Item</th><th>Type</th><th>Category</th><th class="text-right">Qty</th><th class="text-right">Cost</th><th class="text-right">Total Value</th></tr></thead>
+            <tbody id="report-body"></tbody>
+            <tfoot id="report-foot"></tfoot>
+        </table>
+    </div>
+    <div class="pagination">
+        <button onclick="goRepPage(repPage-1)" id="rep-prev">Prev</button>
+        <span id="rep-info"></span>
+        <button onclick="goRepPage(repPage+1)" id="rep-next">Next</button>
     </div>
 </div>
 
-<div class="card section">
-    <h3>Item History Report</h3>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Select items to view history across POs</p>
-    <div class="form-group"><label>Search Items</label><input type="text" id="ih-search" placeholder="Type stock ID or name..." oninput="searchItems()"></div>
-    <div id="ih-item-list" style="max-height:200px;overflow-y:auto;margin-bottom:12px"></div>
-    <button onclick="loadItemHistory()">Generate Report</button>
-    <div id="ih-result" style="margin-top:12px"></div>
+<!-- Item History Tab -->
+<div id="tab-history" style="display:none">
+    <div class="search-bar">
+        <input type="text" id="ih-search" placeholder="Type item name and press Enter..." style="width:300px" onkeydown="if(event.key==='Enter')searchPoItems()">
+        <button onclick="searchPoItems()">Search PO Items</button>
+    </div>
+    <div id="ih-results" style="margin-bottom:12px"></div>
+    <button onclick="runItemHistory()" id="ih-run-btn" style="display:none">Run Item History Report</button>
+    <div id="ih-report" class="card" style="padding:0;overflow-x:auto;margin-top:12px">
+        <table>
+            <thead><tr><th>Stock ID</th><th>Item</th><th>Last PO</th><th>Last Buy Date</th><th class="text-right">Qty</th><th class="text-right">Cost</th><th class="text-right">Total</th></tr></thead>
+            <tbody id="ih-body"></tbody>
+        </table>
+    </div>
 </div>
 
 <div id="toast" class="toast" style="display:none"></div>
+
+<style>
+.sub-tab{padding:10px 20px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-2px}
+.sub-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.text-right{text-align:right}
+.btn-secondary{background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+</style>
+
 <script>
-async function init() {
+const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let repPage=1, repPageSize=50, repType='restock', selectedPOItems=[];
+
+async function initReports() {
+    // Populate years from movement data
+    const yrRes = await fetch('/api/movement/years');
+    let years = await yrRes.json();
+    if (!years.length) years = [new Date().getFullYear()];
+    document.getElementById('r-year').innerHTML = years.map(y => `<option>${y}</option>`).join('');
+    document.getElementById('r-month').innerHTML = '<option value="0">All Months</option>' +
+        months.map((m,i) => `<option value="${i+1}">${m}</option>`).join('');
+    // Set current month
     const now = new Date();
-    const ySel = document.getElementById('h-year');
-    for(let y=now.getFullYear(); y>=2020; y--) ySel.innerHTML += `<option value="${y}">${y}</option>`;
-    for(let m=1; m<=12; m++) document.getElementById('h-month').innerHTML += `<option value="${m}">${new Date(2000,m-1).toLocaleString('default',{month:'short'})}</option>`;
-    document.getElementById('h-month').value = now.getMonth()+1;
+    document.getElementById('r-year').value = now.getFullYear();
+    document.getElementById('r-month').value = now.getMonth()+1;
+    loadReport();
 }
-async function loadRestock() {
-    const res = await fetch('/api/reports/restock?page=1&pageSize=50'); const d = await res.json();
-    document.getElementById('restock-table').innerHTML = `<thead><tr><th>SKU</th><th>Item</th><th>Gap</th><th>Cost</th><th>Total</th></tr></thead><tbody>`+
-        (d.data||[]).map(r => `<tr><td>${esc(r.sku)}</td><td>${esc(r.name)}</td><td>${r.qty}</td><td>RM ${r.cost.toFixed(2)}</td><td>RM ${r.totalValue.toFixed(2)}</td></tr>`).join('')+'</tbody>';
-}
-async function loadHistorical() {
-    const p = new URLSearchParams({type:document.getElementById('h-type').value, year:document.getElementById('h-year').value, month:document.getElementById('h-month').value, page:'1', pageSize:'50'});
-    const res = await fetch('/api/reports/historical?'+p); const d = await res.json();
-    document.getElementById('hist-table').innerHTML = `<thead><tr><th>SKU</th><th>Item</th><th>Qty</th><th>Cost</th><th>Total</th></tr></thead><tbody>`+
-        (d.data||[]).map(r => `<tr><td>${esc(r.sku)}</td><td>${esc(r.name)}</td><td>${r.qty}</td><td>RM ${r.cost.toFixed(2)}</td><td>RM ${r.totalValue.toFixed(2)}</td></tr>`).join('')+'</tbody>';
-}
-function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
-function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 
-// ── Item History ──
-let allItems = [], selectedItems = new Set();
-async function loadItemsForHistory() {
-    const res = await fetch('/api/inventory/basic');
-    allItems = await res.json();
+function switchTab(name) {
+    document.getElementById('tab-general').style.display = name==='general'?'block':'none';
+    document.getElementById('tab-history').style.display = name==='history'?'block':'none';
+    document.querySelectorAll('.sub-tab').forEach((b,i) => b.classList.toggle('active', i===['general','history'].indexOf(name)));
 }
-function searchItems() {
-    const q = (document.getElementById('ih-search').value||'').toLowerCase();
-    const filtered = q ? allItems.filter(i => (i['Stock ID']||'').toLowerCase().includes(q) || (i['Item Name']||'').toLowerCase().includes(q)) : [];
-    if (!filtered.length) { document.getElementById('ih-item-list').innerHTML = q ? '<p style="color:var(--muted)">No matches</p>' : ''; return; }
-    document.getElementById('ih-item-list').innerHTML = filtered.slice(0,20).map(i => `
-        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
-            <input type="checkbox" ${selectedItems.has(i['Stock ID'])?'checked':''} onchange="toggleItem('${esc(i['Stock ID'])}','${esc(i['Item Name'])}',this.checked)">
-            <span style="font-family:monospace;color:var(--accent)">${esc(i['Stock ID'])}</span> ${esc(i['Item Name'])}
-        </label>`).join('');
+
+async function loadReport() {
+    repType = document.getElementById('r-type').value;
+    const year = parseInt(document.getElementById('r-year').value)||0;
+    const month = parseInt(document.getElementById('r-month').value)||0;
+
+    let url;
+    if (repType === 'restock') {
+        url = `/api/reports/restock?page=${repPage}&pageSize=${repPageSize}`;
+    } else {
+        url = `/api/reports/historical?type=${repType}&year=${year}&month=${month}&page=${repPage}&pageSize=${repPageSize}`;
+    }
+    const res = await fetch(url);
+    const d = await res.json();
+    const data = d.data || [];
+    document.getElementById('report-body').innerHTML = data.map(r => `
+        <tr><td style="font-family:monospace;font-weight:600">${esc(r.sku)}</td><td>${esc(r.name)}</td>
+        <td>${esc(r.type)}</td><td>${esc(r.category)}</td>
+        <td class="text-right">${r.qty.toFixed(0)}</td>
+        <td class="text-right">RM ${r.cost.toFixed(2)}</td>
+        <td class="text-right" style="font-weight:600">RM ${r.totalValue.toFixed(2)}</td></tr>`).join('');
+    document.getElementById('report-foot').innerHTML = data.length ? `
+        <tr style="font-weight:700;background:var(--surface)">
+            <td colspan="4" style="text-align:right;color:var(--muted)">Page Totals:</td>
+            <td class="text-right">${d.totalQty.toFixed(0)}</td>
+            <td></td>
+            <td class="text-right">RM ${d.totalValue.toFixed(2)}</td>
+        </tr>` : '';
+    document.getElementById('rep-info').textContent = `Page ${d.page||1} of ${d.totalPages||1}`;
+    document.getElementById('rep-prev').disabled = repPage <= 1;
+    document.getElementById('rep-next').disabled = repPage >= (d.totalPages||1);
 }
-function toggleItem(id, name, on) { if (on) selectedItems.add(id); else selectedItems.delete(id); }
-async function loadItemHistory() {
-    if (!selectedItems.size) { toast('Select at least one item', false); return; }
-    const items = Array.from(selectedItems).map(id => {
-        const item = allItems.find(i => i['Stock ID'] === id);
-        return {id, name: item ? item['Item Name'] : id};
+
+function goRepPage(p) { repPage = p; loadReport(); }
+
+function exportReportCSV() {
+    const rows = document.querySelectorAll('#report-body tr');
+    let csv = 'SKU,Item,Type,Category,Qty,Cost,Total Value\n';
+    rows.forEach(r => {
+        const cells = r.querySelectorAll('td');
+        csv += Array.from(cells).map(c=>'"'+c.textContent.trim().replace(/"/g,'""')+'"').join(',')+'\n';
     });
-    const res = await fetch('/api/reports/item-history', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(items)});
-    const data = await res.json();
-    if (!data || !data.length) { document.getElementById('ih-result').innerHTML = '<p style="color:var(--muted)">No history found</p>'; return; }
-    document.getElementById('ih-result').innerHTML = '<table><thead><tr><th>Item</th><th>PO ID</th><th>Date</th><th>Qty</th><th>Cost</th><th>Total</th></tr></thead><tbody>' +
-        data.map(r => `<tr><td>${esc(r.item_name)}</td><td>${esc(r.po_id)}</td><td>${esc(r.date||'').slice(0,10)}</td><td>${r.qty}</td><td>RM ${(r.cost||0).toFixed(2)}</td><td>RM ${(r.total||0).toFixed(2)}</td></tr>`).join('') + '</tbody></table>';
+    const b = new Blob([csv],{type:'text/csv'}); const a = document.createElement('a');
+    a.href=URL.createObjectURL(b); a.download='report.csv'; a.click();
 }
 
-init(); loadRestock(); loadItemsForHistory();
+// Item History
+async function searchPoItems() {
+    const q = document.getElementById('ih-search').value.trim();
+    if (!q) return;
+    const res = await fetch('/api/reports/search-po-items?q='+encodeURIComponent(q));
+    selectedPOItems = await res.json();
+    const div = document.getElementById('ih-results');
+    if (!selectedPOItems.length) { div.innerHTML='<p style="color:var(--muted)">No items found</p>'; return; }
+    div.innerHTML = `<p style="margin-bottom:8px">Found ${selectedPOItems.length} items. Select items below and click "Run Item History Report":</p>
+        <div style="max-height:200px;overflow-y:auto;margin-bottom:8px">` +
+        selectedPOItems.map((it,i) => `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px">
+            <input type="checkbox" checked onchange="updateSelectedItems()" data-idx="${i}"> ${esc(it.stock_id)} — ${esc(it.item_name)}</label>`).join('') + '</div>';
+    document.getElementById('ih-run-btn').style.display = 'inline-block';
+}
+
+async function runItemHistory() {
+    const checked = [...document.querySelectorAll('#ih-results input:checked')].map(cb => selectedPOItems[cb.dataset.idx]);
+    if (!checked.length) return toast('Select at least one item', false);
+    const body = checked.map(it => ({id: it.stock_id, name: it.item_name}));
+    const res = await fetch('/api/reports/item-history', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data = await res.json();
+    document.getElementById('ih-body').innerHTML = data.map(r => `
+        <tr><td style="font-family:monospace">${esc(r.stockId)}</td><td>${esc(r.itemName)}</td>
+        <td>${esc(r.lastPoId)}</td><td>${esc(r.lastBuyDate)}</td>
+        <td class="text-right">${r.lastBuyQty||'-'}</td><td class="text-right">${r.lastBuyCost||'-'}</td><td class="text-right">${r.lastBuyTotal||'-'}</td></tr>`).join('');
+    document.getElementById('ih-report').scrollIntoView({behavior:'smooth'});
+}
+
+function toast(m,ok){const t=document.getElementById('toast');t.textContent=m;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+initReports();
 </script>
 {{end}}

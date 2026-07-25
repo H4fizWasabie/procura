@@ -1,0 +1,134 @@
+{{template "base.html" .}}
+{{define "content_users"}}
+<div class="top-bar">
+    <h2>Users</h2>
+    <button onclick="showAddUser()">+ Add User</button>
+</div>
+<div id="toast" class="toast" style="display:none"></div>
+<table id="userTable">
+    <thead>
+        <tr><th>Email</th><th>Name</th><th>Role</th><th>Last Access</th><th></th></tr>
+    </thead>
+    <tbody>
+        {{range .Users}}
+        <tr>
+            <td>{{.Email}}</td>
+            <td>{{.Name}}</td>
+            <td><span class="role-badge {{.Role}}">{{.Role}}</span></td>
+            <td class="muted">{{.LastAccess}}</td>
+            <td class="actions">
+                <button class="btn-sm" onclick="showEditUser('{{.Email}}','{{.Name}}','{{.Role}}')">Edit</button>
+                <button class="btn-sm" onclick="resetPin('{{.Email}}')">Reset PIN</button>
+                <button class="btn-sm danger" onclick="deleteUser('{{.Email}}')">Delete</button>
+            </td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+
+<!-- Add/Edit Modal -->
+<div id="userModal" class="modal" style="display:none">
+    <div class="modal-card">
+        <div class="modal-header"><h3 id="modalTitle">Add User</h3><span class="close" onclick="closeModal()">&times;</span></div>
+        <div class="modal-body">
+            <div id="modalError" class="error-msg" style="display:none"></div>
+            <div id="modalPin" class="success-msg" style="display:none;font-size:16px;font-weight:bold"></div>
+            <input type="hidden" id="editEmail">
+            <div class="form-group"><label>Email</label><input type="email" id="userEmail" placeholder="user@example.com"></div>
+            <div class="form-group"><label>Name</label><input type="text" id="userName" placeholder="Full name"></div>
+            <div class="form-group"><label>Role</label>
+                <select id="userRole">
+                    <option value="VIEWER">Viewer</option>
+                    <option value="ADMIN">Admin</option>
+                </select>
+            </div>
+            <button onclick="saveUser()" style="width:100%">Save</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.role-badge { font-size:11px; padding:2px 8px; border-radius:4px; font-weight:600; }
+.role-badge.ADMIN { background:var(--accent); color:#fff; }
+.role-badge.VIEWER { background:var(--border); color:var(--text); }
+.actions { display:flex; gap:6px; flex-wrap:wrap; }
+.btn-sm { font-size:11px; padding:3px 10px; }
+.btn-sm.danger { background:var(--red); color:#fff; border:1px solid var(--red); }
+.muted { font-size:12px; color:var(--muted); }
+.modal { position:fixed; top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:100; }
+.modal-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; width:400px; max-width:90%; }
+</style>
+
+<script>
+function showAddUser() {
+    document.getElementById('modalTitle').textContent = 'Add User';
+    document.getElementById('editEmail').value = '';
+    document.getElementById('userEmail').value = '';
+    document.getElementById('userEmail').disabled = false;
+    document.getElementById('userName').value = '';
+    document.getElementById('userRole').value = 'VIEWER';
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modalPin').style.display = 'none';
+    document.getElementById('userModal').style.display = 'flex';
+}
+function showEditUser(email, name, role) {
+    document.getElementById('modalTitle').textContent = 'Edit User';
+    document.getElementById('editEmail').value = email;
+    document.getElementById('userEmail').value = email;
+    document.getElementById('userEmail').disabled = true;
+    document.getElementById('userName').value = name;
+    document.getElementById('userRole').value = role;
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modalPin').style.display = 'none';
+    document.getElementById('userModal').style.display = 'flex';
+}
+function closeModal() { document.getElementById('userModal').style.display = 'none'; }
+function toast(msg, ok) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast ' + (ok ? 'toast-ok' : 'toast-err');
+    t.style.display = 'block';
+    setTimeout(() => t.style.display = 'none', 3000);
+}
+async function saveUser() {
+    const editEmail = document.getElementById('editEmail').value;
+    const email = document.getElementById('userEmail').value;
+    const name = document.getElementById('userName').value;
+    const role = document.getElementById('userRole').value;
+    const err = document.getElementById('modalError');
+    const pinEl = document.getElementById('modalPin');
+    err.style.display = 'none';
+    pinEl.style.display = 'none';
+    try {
+        const url = editEmail ? '/api/users' : '/api/users';
+        const method = editEmail ? 'PUT' : 'POST';
+        const res = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify({email, name, role})});
+        const data = await res.json();
+        if (data.success) {
+            if (data.pin) pinEl.innerHTML = 'Temp PIN: <b>' + data.pin + '</b> (user must change on login)';
+            pinEl.style.display = data.pin ? 'block' : 'none';
+            if (!data.pin) { closeModal(); location.reload(); }
+        } else {
+            err.textContent = data.error;
+            err.style.display = 'block';
+        }
+    } catch(e) {
+        err.textContent = 'Connection error';
+        err.style.display = 'block';
+    }
+}
+async function resetPin(email) {
+    if (!confirm('Reset PIN for ' + email + '?')) return;
+    const res = await fetch('/api/users/reset-pin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email})});
+    const data = await res.json();
+    if (data.success) toast('New PIN: ' + data.pin + ' (user must change on login)', true);
+    else toast(data.error, false);
+}
+async function deleteUser(email) {
+    if (!confirm('Delete user ' + email + '?')) return;
+    const res = await fetch('/api/users', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email})});
+    const data = await res.json();
+    if (data.success) { toast('User deleted', true); setTimeout(() => location.reload(), 800); }
+    else toast(data.error, false);
+}
+</script>
+{{end}}

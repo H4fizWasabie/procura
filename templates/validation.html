@@ -1,0 +1,72 @@
+{{template "base.html" .}}
+{{define "content_validation"}}
+<div class="top-bar">
+    <h2>Validation</h2>
+    <div style="display:flex;gap:8px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)">
+            <input type="checkbox" id="nonzero-only" onchange="loadIssues()"> Show only nonzero issues
+        </label>
+        <button onclick="loadIssues()">Refresh</button>
+        <button class="btn-secondary" onclick="exportReport()">Export .md</button>
+    </div>
+</div>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<div class="card" style="padding:0;overflow-x:auto">
+    <table>
+        <thead><tr>
+            <th style="width:180px">Issue Type</th>
+            <th style="width:140px">Stock ID</th>
+            <th>Item Name</th>
+            <th>Detail</th>
+        </tr></thead>
+        <tbody id="issues-body"></tbody>
+    </table>
+</div>
+
+<div id="summary" style="margin-top:12px;font-size:13px;color:var(--muted)"></div>
+
+<script>
+async function loadIssues() {
+    const nz = document.getElementById('nonzero-only').checked ? '1' : '0';
+    const res = await fetch('/api/validation?nonzero=' + nz);
+    const issues = await res.json();
+    const tbody = document.getElementById('issues-body');
+    if (!issues.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--green)">✅ No issues found</td></tr>';
+        document.getElementById('summary').textContent = '';
+        return;
+    }
+    const counts = {};
+    issues.forEach(i => counts[i.type] = (counts[i.type]||0) + 1);
+    document.getElementById('summary').innerHTML = Object.entries(counts)
+        .map(([k,v]) => '<span class="badge badge-amber" style="margin-right:8px">'+k+': '+v+'</span>').join('');
+
+    const typeColors = {
+        'MISSING_MOVEMENT': 'badge-amber',
+        'ORPHAN_MOVEMENT': 'badge-red',
+        'ORPHAN_PO_ITEM': 'badge-red',
+        'NEGATIVE_STOCK': 'badge-red',
+        'ZERO_STOCK_WITH_ROP': 'badge-amber',
+        'DUPLICATE_STOCK_ID': 'badge-red',
+    };
+
+    tbody.innerHTML = issues.map(i => `
+        <tr>
+            <td><span class="badge ${typeColors[i.type]||'badge-blue'}">${i.type}</span></td>
+            <td style="font-family:monospace">${esc(i.stock_id)}</td>
+            <td>${esc(i.item_name)}</td>
+            <td style="color:var(--muted)">${esc(i.detail)}</td>
+        </tr>`).join('');
+}
+
+function exportReport() {
+    const nz = document.getElementById('nonzero-only').checked ? '1' : '0';
+    window.open('/api/validation/report?nonzero=' + nz, '_blank');
+}
+
+function esc(s) { if(!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+loadIssues();
+</script>
+{{end}}

@@ -30,6 +30,7 @@ type Item struct {
 	VelocityOv    string  `json:"velocity_override"`
 	SupplierName  string  `json:"supplier_name"`
 	ItemBehaviour string  `json:"item_behaviour"`
+	SupplierUOM   string  `json:"supplier_uom,omitempty"`
 }
 
 type Service struct {
@@ -63,11 +64,13 @@ func (s *Service) List(search string, page, pageSize int) []Item {
 		}
 
 		rows, err := s.DB.Query(`
-			SELECT stock_id, item_name, cost, uom, product_type, category,
-			       current_stock, rop, selling_price, last_updated, pack_size,
-			       exclude, product_status, velocity_override, supplier_name, item_behaviour
-			FROM items
-			ORDER BY stock_id DESC
+			SELECT i.stock_id, i.item_name, i.cost, i.uom, i.product_type, i.category,
+			       i.current_stock, i.rop, i.selling_price, i.last_updated, i.pack_size,
+			       i.exclude, i.product_status, i.velocity_override, i.supplier_name, i.item_behaviour,
+			       COALESCE(m.supplier_uom, '')
+			FROM items i
+			LEFT JOIN supplier_item_mappings m ON m.stock_id = i.stock_id AND m.supplier_name = i.supplier_name
+			ORDER BY i.stock_id DESC
 			LIMIT ? OFFSET ?
 		`, limit, startRow)
 		if err != nil {
@@ -80,14 +83,16 @@ func (s *Service) List(search string, page, pageSize int) []Item {
 	// Search: filter all matching rows, then paginate
 	term := "%" + strings.ToLower(search) + "%"
 	rows, err := s.DB.Query(`
-		SELECT stock_id, item_name, cost, uom, product_type, category,
-		       current_stock, rop, selling_price, last_updated, pack_size,
-		       exclude, product_status, velocity_override, supplier_name, item_behaviour
-		FROM items
-		WHERE LOWER(COALESCE(stock_id,'')) LIKE ?
-		   OR LOWER(COALESCE(item_name,'')) LIKE ?
-		   OR LOWER(COALESCE(supplier_name,'')) LIKE ?
-		ORDER BY item_name
+		SELECT i.stock_id, i.item_name, i.cost, i.uom, i.product_type, i.category,
+		       i.current_stock, i.rop, i.selling_price, i.last_updated, i.pack_size,
+		       i.exclude, i.product_status, i.velocity_override, i.supplier_name, i.item_behaviour,
+		       COALESCE(m.supplier_uom, '')
+		FROM items i
+		LEFT JOIN supplier_item_mappings m ON m.stock_id = i.stock_id AND m.supplier_name = i.supplier_name
+		WHERE LOWER(COALESCE(i.stock_id,'')) LIKE ?
+		   OR LOWER(COALESCE(i.item_name,'')) LIKE ?
+		   OR LOWER(COALESCE(i.supplier_name,'')) LIKE ?
+		ORDER BY i.item_name
 		LIMIT ? OFFSET ?
 	`, term, term, term, pageSize, (page-1)*pageSize)
 	if err != nil {
@@ -153,9 +158,9 @@ func scanItems(rows *sql.Rows) []Item {
 	for rows.Next() {
 		var it Item
 		var cost, current, rop, selling sql.NullFloat64
-		var stockID, name, uom, ptype, cat, updated, pack, exclude, status, velOv, supplier, beh sql.NullString
+		var stockID, name, uom, ptype, cat, updated, pack, exclude, status, velOv, supplier, beh, supUom sql.NullString
 		rows.Scan(&stockID, &name, &cost, &uom, &ptype, &cat, &current, &rop,
-			&selling, &updated, &pack, &exclude, &status, &velOv, &supplier, &beh)
+			&selling, &updated, &pack, &exclude, &status, &velOv, &supplier, &beh, &supUom)
 
 		it = Item{
 			StockID: str(stockID), ItemName: str(name),
@@ -166,6 +171,7 @@ func scanItems(rows *sql.Rows) []Item {
 			PackSize: str(pack), Exclude: str(exclude),
 			ProductStatus: str(status), VelocityOv: str(velOv),
 			SupplierName: str(supplier), ItemBehaviour: str(beh),
+			SupplierUOM: str(supUom),
 		}
 		out = append(out, it)
 	}

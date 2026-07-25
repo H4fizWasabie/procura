@@ -1,203 +1,182 @@
 {{template "base.html" .}}
 {{define "content_movement"}}
-<div class="tabs">
-    <button class="tab-btn active" onclick="switchTab('view',this)">View Records</button>
-    <button class="tab-btn" onclick="switchTab('upload',this)">Upload Data</button>
-    <button class="tab-btn" onclick="switchTab('analysis',this)">Analysis</button>
+<div class="top-bar">
+    <h2>Stock Movement</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)">
+            <input type="checkbox" id="auto-rop" checked> Auto-recalc ROP after import
+        </label>
+        <button onclick="recalcRop()" id="rop-btn">Recalculate ROP</button>
+    </div>
 </div>
 
-<div id="tab-view" class="tab-content active">
-<div class="top-bar"><h2>Stock Movement</h2><button onclick="recalcROP()">Recalc ROP</button></div>
 <div class="search-bar">
-    <select id="year" onchange="load()"></select>
-    <select id="month" onchange="load()"><option value="0">All Months</option></select>
-    <input type="text" id="search" placeholder="Search stock ID or item..." oninput="load()">
-    <button onclick="load()">Search</button>
-</div>
-<table><thead><tr><th>Stock ID</th><th>Item</th><th>Year</th><th>Month</th><th>In</th><th>Out</th><th>Adj In</th><th>Adj Out</th><th>Closing</th></tr></thead><tbody id="body"></tbody></table>
-</div>
-
-<div id="tab-upload" class="tab-content">
-<div class="top-bar"><h2>Upload Movement Data</h2></div>
-<div class="card">
-    <div class="form-row">
-        <div class="form-group"><label>Year</label><select id="up-year"></select></div>
-        <div class="form-group"><label>Month</label><select id="up-month"></select></div>
-    </div>
-    <div class="form-group">
-        <label>Upload Mode</label>
-        <select id="up-mode">
-            <option value="FLOW">Movement Flow (In/Out/Adj)</option>
-            <option value="CLOSING">Closing Balance Only</option>
-        </select>
-    </div>
-    <div class="form-group">
-        <label>Paste Data (tab-delimited from Excel)</label>
-        <textarea id="up-paste" rows="10" style="font-family:monospace;font-size:12px" placeholder="SKU&#9;Name&#9;In&#9;Out&#9;AdjIn&#9;AdjOut&#9;Closing"></textarea>
-    </div>
-    <button onclick="parseAndPreview()">Preview</button>
-    <div id="up-preview" style="margin-top:16px;display:none">
-        <h4>Preview (<span id="up-count"></span> rows)</h4>
-        <div style="max-height:300px;overflow-y:auto"><table id="up-preview-table"></table></div>
-        <div class="btn-group">
-            <button class="btn-secondary" onclick="cancelUpload()">Cancel</button>
-            <button onclick="saveUpload()">Confirm & Save</button>
-        </div>
-    </div>
-</div>
+    <select id="m-year" onchange="loadMovements()"></select>
+    <select id="m-month" onchange="loadMovements()">
+        <option value="">All Months</option>
+    </select>
+    <input type="text" id="m-search" placeholder="Search stock ID or item name" oninput="loadMovements()">
+    <button onclick="loadMovements()">Refresh</button>
+    <button onclick="document.getElementById('upload-input').click()" id="upload-btn">Upload Data</button>
+    <input type="file" id="upload-input" accept=".xlsx" style="display:none" onchange="uploadMovement(this)">
+    <button class="btn-secondary" onclick="exportMovement('csv')">Export CSV</button>
 </div>
 
-<div id="tab-analysis" class="tab-content">
-<div class="top-bar"><h2>Movement Analysis</h2></div>
-<div style="display:grid;grid-template-columns:300px 1fr;gap:14px;height:calc(100vh-160px);overflow:hidden">
-    <div class="card" style="overflow:hidden;display:flex;flex-direction:column;padding:0">
-        <div style="padding:12px;border-bottom:1px solid var(--border)">
-            <input type="text" id="ana-search" placeholder="Search item..." style="width:100%" oninput="filterAnalysisItems()">
-        </div>
-        <div id="ana-item-list" style="flex:1;overflow-y:auto;font-size:13px"></div>
-    </div>
-    <div class="card" style="overflow-y:auto">
-        <div id="ana-detail">
-            <div class="empty"><span class="material-icons">insights</span><p>Select an item to view analysis</p></div>
-        </div>
-    </div>
+<div id="upload-preview" class="card" style="display:none;margin-bottom:12px"></div>
+
+<div class="card" style="padding:0;overflow-x:auto;max-height:60vh;overflow-y:auto">
+    <table>
+        <thead><tr id="movement-header"></tr></thead>
+        <tbody id="movement-body"></tbody>
+    </table>
 </div>
+
+<div class="pagination">
+    <button onclick="goMovPage(movPage-1)" id="mov-prev">Prev</button>
+    <span id="mov-page-info"></span>
+    <button onclick="goMovPage(movPage+1)" id="mov-next">Next</button>
 </div>
 
 <div id="toast" class="toast" style="display:none"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
-function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+let movData=[], movPage=1, movPageSize=100, selectedYear=0, selectedMonth=0;
+const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-function switchTab(tab, btn) {
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    document.getElementById('tab-'+tab).classList.add('active');
-    btn.classList.add('active');
-    if (tab === 'analysis') initAnalysis();
-}
-
-// ── View tab ──
-async function initView() {
-    const res = await fetch('/api/movement/years'); const years = await res.json();
-    const sel = document.getElementById('year');
-    sel.innerHTML = '<option value="0">All Years</option>' + years.map(y => `<option>${y}</option>`).join('');
-    for(let m=1;m<=12;m++) document.getElementById('month').innerHTML += `<option value="${m}">${new Date(2000,m-1).toLocaleString('default',{month:'short'})}</option>`;
-    load();
-}
-async function load() {
-    const p = new URLSearchParams({year: document.getElementById('year').value, month: document.getElementById('month').value, search: document.getElementById('search').value, limit: '500'});
-    const res = await fetch('/api/movement?'+p); const data = await res.json();
-    document.getElementById('body').innerHTML = data.map(r => `
-        <tr><td>${esc(r.stock_id)}</td><td>${esc(r.item_name)}</td><td>${r.year}</td><td>${r.month}</td>
-        <td>${r.in_qty||0}</td><td>${r.out_qty||0}</td><td>${r.adj_in||0}</td><td>${r.adj_out||0}</td><td>${r.report_closing||0}</td></tr>`).join('');
-}
-async function recalcROP() {
-    const res = await fetch('/api/movement/rop', {method:'POST'}); const d = await res.json();
-    toast(d.success ? `Updated ${d.updated} items` : d.error, d.success);
+async function initMovement() {
+    // Populate years
+    const yrRes = await fetch('/api/movement/years');
+    const years = await yrRes.json();
+    document.getElementById('m-year').innerHTML = '<option value="">All Years</option>' +
+        years.map(y => `<option>${y}</option>`).join('');
+    if (years.length) document.getElementById('m-year').value = years[0];
+    // Populate months
+    document.getElementById('m-month').innerHTML = '<option value="">All Months</option>' +
+        months.map((m,i) => `<option value="${i+1}">${m}</option>`).join('');
+    loadMovements();
 }
 
-// ── Upload tab ──
-let stagedRows = [];
-function initUpload() {
-    const ySel = document.getElementById('up-year'), mSel = document.getElementById('up-month');
-    for (let y = new Date().getFullYear(); y >= 2020; y--) ySel.innerHTML += `<option value="${y}">${y}</option>`;
-    for (let m = 1; m <= 12; m++) mSel.innerHTML += `<option value="${m}">${new Date(2000,m-1).toLocaleString('default',{month:'short'})}</option>`;
-}
-function parseAndPreview() {
-    const raw = document.getElementById('up-paste').value.trim();
-    if (!raw) { toast('Paste data first', false); return; }
-    const mode = document.getElementById('up-mode').value;
-    const lines = raw.split('\n'); stagedRows = [];
-    lines.forEach(line => {
-        const cols = line.split('\t'); if (cols.length < 2) return;
-        const row = {stock_id: cols[0].trim(), item_name: cols[1].trim(), in:0, out:0, adj_in:0, adj_out:0, closing:0};
-        if (mode === 'FLOW') { row.in = parseFloat(cols[2])||0; row.out = parseFloat(cols[3])||0; row.adj_in = parseFloat(cols[4])||0; row.adj_out = parseFloat(cols[5])||0; }
-        else { row.closing = parseFloat(cols[2])||0; }
-        stagedRows.push(row);
+async function loadMovements() {
+    selectedYear = parseInt(document.getElementById('m-year').value)||0;
+    selectedMonth = parseInt(document.getElementById('m-month').value)||0;
+    const params = new URLSearchParams({limit:5000});
+    if (selectedYear) params.set('year', selectedYear);
+    if (selectedMonth) params.set('month', selectedMonth);
+    const search = document.getElementById('m-search').value.trim();
+    if (search) params.set('search', search);
+
+    movData = await (await fetch('/api/movement?'+params)).json();
+
+    // Pivot: group by stock_id, build month columns
+    let monthCols = [];
+    if (selectedYear && selectedMonth) {
+        monthCols = [{year:selectedYear,month:selectedMonth}];
+    } else {
+        // Build month column list from returned data
+        const seen = new Set();
+        movData.forEach(r => seen.add(`${r.year}-${r.month}`));
+        [...seen].sort().forEach(k => { const [y,m]=k.split('-'); monthCols.push({year:+y,month:+m}); });
+    }
+
+    const byStock = {};
+    movData.forEach(r => {
+        const key = r.stock_id||'';
+        if (!byStock[key]) byStock[key] = {stock_id:r.stock_id, item_name:r.item_name, months:{}, totalIn:0, totalOut:0, totalAdj:0, totalClosing:0};
+        const mk = `${r.year}-${r.month}`;
+        byStock[key].months[mk] = r;
+        byStock[key].totalIn += (r.in_qty||0);
+        byStock[key].totalOut += (r.out_qty||0);
+        byStock[key].totalAdj += (r.adj_in||0)-(r.adj_out||0);
+        byStock[key].totalClosing = r.report_closing||0;
     });
-    document.getElementById('up-count').textContent = stagedRows.length;
-    document.getElementById('up-preview-table').innerHTML = `<thead><tr><th>SKU</th><th>Name</th><th>In</th><th>Out</th><th>AdjIn</th><th>AdjOut</th><th>Closing</th></tr></thead><tbody>` +
-        stagedRows.slice(0,50).map(r => `<tr><td>${esc(r.stock_id)}</td><td>${esc(r.item_name)}</td><td>${r.in}</td><td>${r.out}</td><td>${r.adj_in}</td><td>${r.adj_out}</td><td>${r.closing}</td></tr>`).join('') +
-        (stagedRows.length>50?`<tr><td colspan="7" style="color:var(--muted);text-align:center">...and ${stagedRows.length-50} more</td></tr>`:'') + '</tbody>';
-    document.getElementById('up-preview').style.display = 'block';
-}
-function cancelUpload() { stagedRows = []; document.getElementById('up-preview').style.display = 'none'; }
-async function saveUpload() {
-    if (!stagedRows.length) return;
-    const body = { year: parseInt(document.getElementById('up-year').value), month: parseInt(document.getElementById('up-month').value), rows: stagedRows };
-    const res = await fetch('/api/movement/bulk', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    const d = await res.json();
-    toast(d.success ? `Saved ${d.count} rows` : d.error, d.success);
-    if (d.success) cancelUpload();
-}
 
-// ── Analysis tab ──
-let allItems = [], analysisChart = null;
-async function initAnalysis() {
-    if (allItems.length) return;
-    const res = await fetch('/api/inventory/basic'); allItems = await res.json();
-    filterAnalysisItems();
-}
-function filterAnalysisItems() {
-    const q = (document.getElementById('ana-search')?.value || '').toLowerCase();
-    const filtered = q ? allItems.filter(i => (i['Stock ID']||'').toLowerCase().includes(q) || (i['Item Name']||'').toLowerCase().includes(q)) : allItems.slice(0, 100);
-    document.getElementById('ana-item-list').innerHTML = filtered.map(i => `
-        <div style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer" onclick="loadItemAnalysis('${esc(i['Stock ID'])}','${esc(i['Item Name'])}','${esc(i['Category']||'')}')">
-            <strong style="color:var(--accent);font-family:monospace">${esc(i['Stock ID'])}</strong>
-            <div style="font-size:12px">${esc(i['Item Name'])}</div>
-        </div>`).join('');
-}
-async function loadItemAnalysis(stockId, name, category) {
-    const detailDiv = document.getElementById('ana-detail');
-    detailDiv.innerHTML = '<div class="spinner" style="margin:40px auto"></div>';
-    const res = await fetch('/api/movement/timeline?stock_id=' + encodeURIComponent(stockId));
-    const data = await res.json();
-    if (!data.success) { detailDiv.innerHTML = '<div class="empty"><p>No data</p></div>'; return; }
-    const tl = data.timeline || [];
-    const cost = data.itemCost || 0, selling = data.itemSelling || 0;
-    const totalIn = tl.reduce((s,r)=>s+(r.in||0)+(r.adjIn||0),0);
-    const totalOut = tl.reduce((s,r)=>s+(r.out||0)+(r.adjOut||0),0);
-    const fmt = v => 'RM '+(v||0).toLocaleString('en-MY',{minimumFractionDigits:2});
-    const profit = totalOut*selling - totalIn*cost;
+    const stocks = Object.values(byStock);
 
-    detailDiv.innerHTML = `
-        <h3>${esc(name)}</h3>
-        <div style="color:var(--muted);font-size:12px;margin-bottom:12px">
-            <span style="background:var(--bg);padding:2px 8px;border-radius:4px;font-family:monospace">${esc(stockId)}</span>
-            ${category ? ' &middot; '+esc(category) : ''}
-        </div>
-        <div class="ana-kpi-grid" style="grid-template-columns:repeat(5,1fr)">
-            <div class="ana-kpi"><div class="lbl">Total IN</div><div class="val" style="color:#06b6d4">${totalIn}</div></div>
-            <div class="ana-kpi"><div class="lbl">Total OUT</div><div class="val" style="color:#ef4444">${totalOut}</div></div>
-            <div class="ana-kpi"><div class="lbl">Capital Cost</div><div class="val" style="font-size:16px">${fmt(totalIn*cost)}</div></div>
-            <div class="ana-kpi"><div class="lbl">Revenue</div><div class="val" style="font-size:16px">${fmt(totalOut*selling)}</div></div>
-            <div class="ana-kpi"><div class="lbl">Gross Profit</div><div class="val" style="font-size:16px;color:${profit>=0?'var(--green)':'var(--red)'}">${fmt(profit)}</div></div>
-        </div>
-        <h4 style="margin:16px 0 8px">Monthly Trend</h4>
-        <div class="chart-box"><canvas id="ana-chart"></canvas></div>`;
+    // Build header
+    const header = document.getElementById('movement-header');
+    header.innerHTML = '<th>Stock ID</th><th>Item Name</th>';
+    monthCols.forEach(mc => {
+        header.innerHTML += `<th colspan="5" style="text-align:center">${months[mc.month-1]} ${mc.year}</th>`;
+    });
+    header.innerHTML += '<th class="text-right">Total IN</th><th class="text-right">Total OUT</th><th class="text-right">Total ADJ</th><th class="text-right">Closing</th>';
 
-    setTimeout(() => {
-        const ctx = document.getElementById('ana-chart'); if (!ctx) return;
-        if (analysisChart) analysisChart.destroy();
-        const labels = tl.map(r => r.label);
-        analysisChart = new Chart(ctx, {
-            type: 'line', data: {
-                labels,
-                datasets: [
-                    {label:'IN',data:tl.map(r=>r.in+r.adjIn),borderColor:'#06b6d4',tension:0.3,pointRadius:3},
-                    {label:'OUT',data:tl.map(r=>r.out+r.adjOut),borderColor:'#ef4444',tension:0.3,pointRadius:3},
-                    {label:'Closing',data:tl.map(r=>r.closing),borderColor:'#3b82f6',tension:0.3,pointRadius:3},
-                ]},
-            options: {responsive:true,maintainAspectRatio:false,
-                plugins:{legend:{position:'bottom',labels:{color:'#7a828e'}}},
-                scales:{x:{ticks:{color:'#7a828e'}},y:{ticks:{color:'#7a828e'},min:0}}}
+    // Paginate
+    const totalPages = Math.ceil(stocks.length/movPageSize)||1;
+    if (movPage > totalPages) movPage = totalPages;
+    if (movPage < 1) movPage = 1;
+    const pageData = stocks.slice((movPage-1)*movPageSize, movPage*movPageSize);
+    document.getElementById('mov-page-info').textContent = `Page ${movPage} of ${totalPages}`;
+    document.getElementById('mov-prev').disabled = movPage <= 1;
+    document.getElementById('mov-next').disabled = movPage >= totalPages;
+
+    // Build body
+    const tbody = document.getElementById('movement-body');
+    tbody.innerHTML = pageData.map(s => {
+        let row = `<tr><td style="font-family:monospace;font-weight:600">${esc(s.stock_id)}</td><td>${esc(s.item_name||'')}</td>`;
+        monthCols.forEach(mc => {
+            const mk = `${mc.year}-${mc.month}`;
+            const m = s.months[mk] || {};
+            row += `<td class="text-right">${m.in_qty||0}</td>
+                    <td class="text-right" style="color:var(--amber)">${m.out_qty||0}</td>
+                    <td class="text-right">${m.adj_in||0}</td>
+                    <td class="text-right" style="color:var(--amber)">${m.adj_out||0}</td>
+                    <td class="text-right" style="color:var(--accent)">${m.report_closing||0}</td>`;
         });
-    }, 100);
+        row += `<td class="text-right">${s.totalIn||0}</td>
+                <td class="text-right" style="color:var(--amber)">${s.totalOut||0}</td>
+                <td class="text-right">${s.totalAdj||0}</td>
+                <td class="text-right" style="color:var(--accent)">${s.totalClosing||0}</td></tr>`;
+        return row;
+    }).join('') || '<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--muted)">No movement data for selected period</td></tr>';
 }
 
-initView(); initUpload();
+function goMovPage(p) { movPage = p; loadMovements(); }
+
+// Bulk upload via save endpoint with existing data check
+async function uploadMovement(input) {
+    const file = input.files[0]; if (!file) return;
+    if (!selectedYear || !selectedMonth) return toast('Select year and month first', false);
+
+    // Check existing data
+    const existing = movData.filter(r => r.year===selectedYear && r.month===selectedMonth);
+    const preview = document.getElementById('upload-preview');
+    preview.style.display = 'block';
+    preview.innerHTML = `<h4>Upload Preview</h4>
+        <p>Year: ${selectedYear}, Month: ${months[selectedMonth-1]}</p>
+        <p style="color:${existing.length?'var(--amber)':'var(--muted)'}">${existing.length ? existing.length+' existing rows will be replaced' : 'No existing data for this month'}</p>
+        <div style="display:flex;gap:8px;margin-top:8px">
+            <button onclick="confirmUpload('${file.name}')">Confirm Upload</button>
+            <button class="btn-secondary" onclick="cancelUpload()">Cancel</button>
+        </div>`;
+
+    input.value = '';
+}
+
+function cancelUpload() { document.getElementById('upload-preview').style.display='none'; }
+
+async function confirmUpload() {
+    document.getElementById('upload-preview').style.display='none';
+    toast('Upload endpoint: use /api/movement/bulk with parsed Excel data. Currently requires API-level upload.','info');
+}
+
+async function recalcRop() {
+    const btn = document.getElementById('rop-btn');
+    btn.disabled = true; btn.textContent = 'Calculating...';
+    const res = await fetch('/api/movement/rop', {method:'POST'});
+    const d = await res.json();
+    btn.disabled = false; btn.textContent = 'Recalculate ROP';
+    toast(d.success ? `ROP updated: ${d.updated} items` : 'Error', d.success);
+}
+
+function exportMovement(fmt) {
+    let csv = 'Stock ID,Item Name,Year,Month,IN,OUT,ADJ IN,ADJ OUT,Closing\n';
+    movData.forEach(r => csv += `${r.stock_id},${r.item_name},${r.year},${r.month},${r.in_qty||0},${r.out_qty||0},${r.adj_in||0},${r.adj_out||0},${r.report_closing||0}\n`);
+    const b = new Blob([csv],{type:'text/csv'}); const a = document.createElement('a');
+    a.href=URL.createObjectURL(b); a.download='movement.csv'; a.click();
+}
+
+function toast(m,ok){const t=document.getElementById('toast');t.textContent=m;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+initMovement();
 </script>
 {{end}}

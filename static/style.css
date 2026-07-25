@@ -43,6 +43,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .login-box input { width: 100%; margin-bottom: 12px; }
 .login-box button { width: 100%; }
 .error-msg { color: var(--red); font-size: 13px; margin-bottom: 10px; }
+.success-msg { color: var(--green); font-size: 13px; margin-bottom: 10px; }
+.muted { color: var(--muted); font-size: 13px; }
 .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .toast { position: fixed; top: 16px; right: 16px; padding: 12px 20px; border-radius: 8px; font-size: 13px; z-index: 999; }
 .toast-ok { background: var(--green); color: #fff; }

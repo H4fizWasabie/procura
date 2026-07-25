@@ -1,33 +1,84 @@
 {{template "base.html" .}}
 {{define "content_import"}}
 <div class="top-bar"><h2>Import Data</h2></div>
-<div class="card" style="max-width:500px;margin:0 auto">
-    <h3>Upload Excel Workbook</h3>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Supports .xlsx files with sheets: DB_Items, DB_Suppliers, PurchaseOrder, Movement</p>
-    <div class="form-group"><label>Select File</label><input type="file" id="file" accept=".xlsx" style="padding:10px"></div>
-    <button onclick="upload()" id="upload-btn">Upload & Import</button>
-    <div id="result" style="margin-top:16px;font-size:13px"></div>
+
+<!-- Tabs -->
+<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
+    <button class="sub-tab active" onclick="switchTab('upload')">Upload</button>
+    <button class="sub-tab" onclick="switchTab('history')">Import History</button>
 </div>
+
+<!-- Upload Tab -->
+<div id="tab-upload">
+    <div class="card" style="max-width:500px;margin:0 auto">
+        <h3>Upload Excel Workbook</h3>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Supports .xlsx files with sheets: DB_Items, DB_Suppliers, PurchaseOrder, Movement YYYY</p>
+        <div class="form-group"><label>Select File</label><input type="file" id="file" accept=".xlsx" style="padding:10px"></div>
+        <button onclick="upload()" id="upload-btn">Upload &amp; Import</button>
+        <div id="result" style="margin-top:16px;font-size:13px"></div>
+    </div>
+</div>
+
+<!-- History Tab -->
+<div id="tab-history" style="display:none">
+    <div class="card" style="padding:0;overflow-x:auto">
+        <table>
+            <thead><tr>
+                <th>Run ID</th><th>Source File</th><th>Imported At</th><th>Tables</th>
+            </tr></thead>
+            <tbody id="history-body"></tbody>
+        </table>
+    </div>
+</div>
+
 <div id="toast" class="toast" style="display:none"></div>
 
+<style>
+.sub-tab{padding:10px 20px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-2px}
+.sub-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+</style>
+
 <script>
+function switchTab(name) {
+    document.getElementById('tab-upload').style.display = name==='upload'?'block':'none';
+    document.getElementById('tab-history').style.display = name==='history'?'block':'none';
+    document.querySelectorAll('.sub-tab').forEach((b,i) => {
+        b.classList.toggle('active', (i===0&&name==='upload')||(i===1&&name==='history'));
+    });
+    if (name==='history') loadHistory();
+}
+
 async function upload() {
-    const file = document.getElementById('file').files[0];
-    if (!file) { toast('Select a file', false); return; }
-    const btn = document.getElementById('upload-btn');
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Importing...';
-    const form = new FormData(); form.append('file', file);
-    const res = await fetch('/api/import', {method:'POST', body: form});
-    const d = await res.json();
-    btn.disabled = false; btn.textContent = 'Upload & Import';
-    if (d.success) {
-        document.getElementById('result').innerHTML = `<div style="background:rgba(109,183,123,0.1);padding:12px;border-radius:6px;border:1px solid var(--green)">
-            <strong style="color:var(--green)">Import Complete</strong><br>
-            Run ID: ${esc(d.run_id)}<br>Tables: ${d.tables}<br>Rows: ${d.rows}</div>`;
+    const file=document.getElementById('file').files[0];
+    if(!file){toast('Select a file',false);return}
+    const btn=document.getElementById('upload-btn');btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Importing...';
+    const form=new FormData();form.append('file',file);
+    const res=await fetch('/api/import',{method:'POST',body:form});
+    const d=await res.json();
+    btn.disabled=false;btn.textContent='Upload & Import';
+    if(d.success){
+        document.getElementById('result').innerHTML=`<div style="background:rgba(109,183,123,0.1);padding:12px;border-radius:6px;border:1px solid var(--green)">
+            <strong style="color:var(--green)">Import Complete</strong><br>Run ID: ${esc(d.run_id)}<br>Tables: ${d.tables}<br>Rows: ${d.rows}</div>`;
+        loadHistory();
     } else {
-        document.getElementById('result').innerHTML = `<div style="color:var(--red)">Error: ${esc(d.error)}</div>`;
+        document.getElementById('result').innerHTML=`<div style="color:var(--red)">Error: ${esc(d.error)}</div>`;
     }
 }
+
+async function loadHistory() {
+    const res=await fetch('/api/import/history');
+    const runs=await res.json();
+    document.getElementById('history-body').innerHTML = runs.map(r => {
+        let tables='';
+        try{const o=typeof r.table_rows==='string'?JSON.parse(r.table_rows):r.table_rows||{};
+            tables=Object.entries(o).map(([k,v])=>k+': '+v).join(', ')}catch(e){}
+        return `<tr>
+            <td>${r.run_id}</td><td>${esc(r.source_file)}</td>
+            <td>${esc(r.imported_at)}</td><td style="font-size:12px;color:var(--muted)">${esc(tables)}</td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="4" style="padding:40px;text-align:center;color:var(--muted)">No imports yet</td></tr>';
+}
+
 function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 </script>

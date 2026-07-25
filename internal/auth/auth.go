@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -166,15 +168,27 @@ func (s *Service) recordFailure(email string) {
 	}
 }
 
-// CreateTestUser bootstraps an admin user if no users exist.
-func (s *Service) CreateTestUser() {
+// BootstrapAdmin creates an admin user if no users exist. Returns the generated PIN.
+func (s *Service) BootstrapAdmin() string {
 	var count int
 	s.DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-	if count == 0 {
-		hash, _ := bcrypt.GenerateFromPassword([]byte("000000"), bcrypt.DefaultCost)
-		s.DB.Exec("INSERT INTO users (email, role, name, pin_hash) VALUES (?, 'ADMIN', 'Admin', ?)",
-			"admin@procura.local", string(hash))
+	if count > 0 {
+		return ""
 	}
+	pin := randomPIN(6)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+	s.DB.Exec("INSERT INTO users (email, role, name, pin_hash, must_change_pin) VALUES (?, 'ADMIN', 'Hafiz', ?, 1)",
+		"kisame350@gmail.com", string(hash))
+	return pin
+}
+
+func randomPIN(n int) string {
+	p := make([]byte, n)
+	for i := range p {
+		r, _ := rand.Int(rand.Reader, big.NewInt(10))
+		p[i] = byte('0' + r.Int64())
+	}
+	return string(p)
 }
 
 type apiError struct{ msg string }
@@ -182,3 +196,75 @@ type apiError struct{ msg string }
 func (e *apiError) Error() string { return e.msg }
 
 func fmtError(msg string) error { return &apiError{msg} }
+
+// ── User CRUD ──
+
+type UserRecord struct {
+	Email         string `json:"email"`
+	Name          string `json:"name"`
+	Role          string `json:"role"`
+	LastAccess    string `json:"lastAccess"`
+	MustChangePIN bool   `json:"mustChangePin"`
+}
+
+func (s *Service) ListUsers() []UserRecord {
+	rows, err := s.DB.Query("SELECT email, name, role, last_access, must_change_pin FROM users ORDER BY email")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var users []UserRecord
+	for rows.Next() {
+		var u UserRecord
+		var last sql.NullString
+		var must int
+		rows.Scan(&u.Email, &u.Name, &u.Role, &last, &must)
+		if last.Valid {
+			u.LastAccess = last.String
+		}
+		u.MustChangePIN = must != 0
+		users = append(users, u)
+	}
+	return users
+}
+
+func (s *Service) AddUser(email, name, role string) (string, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" || name == "" {
+		return "", fmtError("Email and name required")
+	}
+	pin := randomPIN(6)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+	_, err := s.DB.Exec("INSERT INTO users (email, name, role, pin_hash, must_change_pin) VALUES (?, ?, ?, ?, 1)",
+		email, name, role, string(hash))
+	if err != nil {
+		return "", fmtError("Email already exists")
+	}
+	return pin, nil
+}
+
+func (s *Service) UpdateUser(email, name, role string) error {
+	_, err := s.DB.Exec("UPDATE users SET name = ?, role = ? WHERE email = ?", name, role, email)
+	return err
+}
+
+func (s *Service) ResetUserPIN(email string) (string, error) {
+	pin := randomPIN(6)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+	res, err := s.DB.Exec("UPDATE users SET pin_hash = ?, must_change_pin = 1 WHERE email = ?", string(hash), email)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", fmtError("User not found")
+	}
+	return pin, nil
+}
+
+func (s *Service) DeleteUser(email string) error {
+	res, _ := s.DB.Exec("DELETE FROM users WHERE email = ?", email)
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmtError("User not found")
+	}
+	return nil
+}

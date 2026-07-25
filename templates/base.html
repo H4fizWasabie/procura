@@ -25,7 +25,9 @@
         <a href="/catalogue" class="{{if eq .Active "catalogue"}}active{{end}}">Catalogue</a>
         <a href="/uom" class="{{if eq .Active "uom"}}active{{end}}">UOM</a>
         <a href="/import" class="{{if eq .Active "import"}}active{{end}}">Import</a>
-        <span style="margin-left:auto;color:var(--muted);font-size:12px">{{.User.name}}</span>
+        <a href="/validation" class="{{if eq .Active "validation"}}active{{end}}">Validation</a>
+        <a href="/users" class="{{if eq .Active "users"}}active{{end}}">Users</a>
+        <span style="margin-left:auto;color:var(--muted);font-size:12px">{{.User.name}} · <a href="/change-pin" style="color:var(--muted)">Change PIN</a> · <a href="#" onclick="logout()" style="color:var(--muted)">Logout</a></span>
     </nav>
     <main>
         {{if eq .ContentBlock "content_dashboard"}}{{template "content_dashboard" .}}
@@ -43,7 +45,15 @@
         {{else if eq .ContentBlock "content_catalogue"}}{{template "content_catalogue" .}}
         {{else if eq .ContentBlock "content_uom"}}{{template "content_uom" .}}
         {{else if eq .ContentBlock "content_import"}}{{template "content_import" .}}
+        {{else if eq .ContentBlock "content_validation"}}{{template "content_validation" .}}
+        {{else if eq .ContentBlock "content_users"}}{{template "content_users" .}}
         {{else}}{{template "content_dashboard" .}}{{end}}
     </main>
+<script>
+async function logout() {
+    await fetch('/api/logout', {method:'POST'});
+    window.location.href = '/login';
+}
+</script>
 </body>
 </html>

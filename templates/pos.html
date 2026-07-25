@@ -1,226 +1,344 @@
 {{template "base.html" .}}
 {{define "content_pos"}}
-<div class="top-bar"><h2>Purchase Orders</h2><button onclick="openCreate()">+ New PO</button></div>
-<div class="search-bar">
-    <input type="text" id="search" placeholder="Search PO ID or supplier..." oninput="load()">
-    <input type="text" id="supplier" placeholder="Supplier filter">
-    <select id="status"><option value="">All Status</option>
-        <option>Pending Approval</option><option>Approved</option>
-        <option>Pending Payment</option><option>Paid</option><option>Partial</option><option>Void</option>
-    </select>
-    <button onclick="load()">Search</button>
+<div class="top-bar">
+    <h2>Purchase Orders</h2>
+    <button onclick="switchTab('new')">+ New PO</button>
 </div>
-<table><thead><tr>
-    <th>PO ID</th><th>Date</th><th>Supplier</th><th>Total</th><th>Status</th><th>Ship</th><th>Actions</th>
-</tr></thead><tbody id="body"></tbody></table>
+
+<!-- Tabs -->
+<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
+    <button class="sub-tab active" onclick="switchTab('history')">Order History</button>
+    <button class="sub-tab" onclick="switchTab('new')">New PO</button>
+</div>
+
+<!-- Order History Tab -->
+<div id="tab-history">
+    <div class="search-bar">
+        <input type="text" id="search" placeholder="PO ID or supplier..." style="width:180px" oninput="loadPos()">
+        <select id="f-supplier" style="width:160px" onchange="loadPos()"><option value="">All Suppliers</option></select>
+        <select id="f-status" style="width:130px" onchange="loadPos()">
+            <option value="">All Status</option><option>Pending Approval</option><option>Approved</option>
+            <option>Pending Payment</option><option>Paid</option><option>Partial</option><option>Void</option>
+        </select>
+        <select id="f-ship" style="width:120px" onchange="loadPos()">
+            <option value="">All Ship</option><option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)">
+            <input type="checkbox" id="f-unpaid" onchange="loadPos()"> Unpaid only
+        </label>
+        <button onclick="loadPos()">Search</button>
+        <button class="btn-secondary" onclick="resetPoFilters()">Reset</button>
+        <button class="btn-secondary" onclick="exportPoCSV()">Export CSV</button>
+        <button onclick="editSelectedPo()">Edit Selected</button>
+    </div>
+
+    <div class="card" style="padding:0;overflow-x:auto;max-height:50vh;overflow-y:auto">
+        <table>
+            <thead><tr>
+                <th>PO ID</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Balance</th><th>Eff Balance</th>
+                <th>Status</th><th>Ship</th><th>Terms</th><th>Dept</th><th>Invoice Date</th>
+            </tr></thead>
+            <tbody id="po-body"></tbody>
+        </table>
+    </div>
+
+    <!-- PO Detail Panel -->
+    <div id="po-detail" style="display:none;margin-top:12px">
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <h3 id="po-detail-title">PO Details</h3>
+                <span style="cursor:pointer;color:var(--muted);font-size:20px" onclick="closePoDetail()">&times;</span>
+            </div>
+            <div class="grid-3" style="margin-bottom:12px" id="po-detail-grid"></div>
+            <!-- Status / Ship / Invoice row -->
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                <select id="po-edit-status" style="width:150px" onchange="updatePoField('status')">
+                    <option value="">Status</option><option>Pending Approval</option><option>Approved</option>
+                    <option>Pending Payment</option><option>Paid</option><option>Void</option>
+                </select>
+                <select id="po-edit-ship" style="width:130px" onchange="updatePoField('ship')">
+                    <option value="">Ship Status</option><option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option>
+                </select>
+                <input type="date" id="po-edit-invdate" style="width:150px" placeholder="Invoice Date">
+                <button class="btn-secondary btn-sm" onclick="updatePoField('invdate')">Set Inv Date</button>
+            </div>
+            <h4 style="margin-bottom:8px">Items</h4>
+            <table><thead><tr><th>Stock ID</th><th>Item</th><th class="text-right">Qty</th><th class="text-right">Cost</th><th class="text-right">Total</th><th>UOM</th></tr></thead>
+                <tbody id="po-detail-items"></tbody></table>
+        </div>
+    </div>
+</div>
+
+<!-- New PO Tab -->
+<div id="tab-new" style="display:none">
+    <div class="card">
+        <h3>PO Header</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+            <div class="form-group"><label>PO ID</label><input id="npo-id" style="font-family:monospace;font-weight:700;color:var(--accent)" placeholder="Auto-generated" onchange="checkPoId()"></div>
+            <div class="form-group"><label>Date</label><input type="date" id="npo-date"></div>
+            <div class="form-group"><label>Department</label><select id="npo-dept"><option value="">-- Select --</option>
+                <option>Pharmacy</option><option>Surgical</option><option>Diagnostic</option><option>Lab</option><option>Medical/Ward</option></select></div>
+            <div class="form-group"><label>Supplier</label><input id="npo-supplier" list="po-sup-list" placeholder="Search supplier..."><datalist id="po-sup-list"></datalist></div>
+            <div class="form-group"><label>Bill #</label><input id="npo-bill" placeholder="Optional invoice ref"></div>
+            <div class="form-group"><label>Invoice Date</label><input type="date" id="npo-inv-date"></div>
+            <div class="form-group"><label>Terms</label><input id="npo-terms" readonly placeholder="Auto from supplier"></div>
+        </div>
+
+        <!-- Add Item Row -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+            <span style="font-size:13px;font-weight:600">Item:</span>
+            <input id="npo-item-search" list="po-item-list" placeholder="Type item name or [STOCK_ID] name..." style="flex:1;min-width:200px">
+            <datalist id="po-item-list"></datalist>
+            <span style="font-size:12px">Sup.UOM:</span><input id="npo-sup-uom" style="width:80px" placeholder="Box/Pack">
+            <span style="font-size:12px">Qty:</span><input id="npo-qty" type="number" step="0.01" style="width:70px">
+            <span style="font-size:12px">Line Total:</span><input id="npo-line-total" type="number" step="0.01" style="width:110px">
+            <button onclick="addPoItem()">+ Add Item</button>
+        </div>
+
+        <table>
+            <thead><tr><th>Stock ID</th><th>Item Name</th><th>UOM</th><th>Sup.UOM</th><th class="text-right">Qty</th><th class="text-right">Cost</th><th class="text-right">Total</th><th></th></tr></thead>
+            <tbody id="npo-items"></tbody>
+        </table>
+        <div id="npo-empty" style="padding:20px;text-align:center;color:var(--muted)">No items added yet</div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px">
+            <div class="stat" id="npo-total" style="color:var(--accent)">RM 0.00</div>
+            <div style="display:flex;gap:8px">
+                <button class="btn-secondary" onclick="resetPoForm()">Reset</button>
+                <button onclick="savePo()">Save Order</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="toast" class="toast" style="display:none"></div>
 
-<!-- Create PO Modal -->
-<div id="create-modal" class="modal">
-    <div class="modal-content" style="max-width:760px">
-        <div class="modal-header"><h3>New Purchase Order</h3><span class="close" onclick="closeCreate()">&times;</span></div>
-        <div class="modal-body">
-            <div class="form-row">
-                <div class="form-group"><label>PO ID</label><input id="c-po-id" disabled></div>
-                <div class="form-group"><label>Date</label><input type="date" id="c-date"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Supplier</label><select id="c-supplier"></select></div>
-                <div class="form-group"><label>Department</label><input id="c-dept"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Terms</label><input id="c-terms" placeholder="e.g. Net 30"></div>
-                <div class="form-group"><label>Invoice Date</label><input type="date" id="c-inv-date"></div>
-            </div>
-            <div class="form-group"><label>Bill No</label><input id="c-bill"></div>
-            <h4 style="margin:12px 0 8px">Line Items</h4>
-            <table id="c-items"><thead><tr>
-                <th>Stock ID</th><th>Name</th><th>Qty</th><th>UOM</th><th>Cost</th><th>Total</th><th></th>
-            </tr></thead><tbody></tbody></table>
-            <button onclick="addItemRow()" style="margin-top:6px;font-size:11px">+ Add Item</button>
-            <div class="btn-group">
-                <button class="btn-secondary" onclick="closeCreate()">Cancel</button>
-                <button onclick="savePO()">Save PO</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Edit PO Modal -->
-<div id="edit-modal" class="modal">
-    <div class="modal-content" style="max-width:760px">
-        <div class="modal-header"><h3>Edit PO: <span id="e-po-id-label"></span></h3><span class="close" onclick="closeEdit()">&times;</span></div>
-        <div class="modal-body">
-            <div class="form-row">
-                <div class="form-group"><label>PO ID</label><input id="e-po-id" disabled></div>
-                <div class="form-group"><label>Date</label><input id="e-date" disabled></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Supplier</label><input id="e-supplier" disabled></div>
-                <div class="form-group"><label>Department</label><input id="e-dept" disabled></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Total</label><input id="e-total" disabled></div>
-                <div class="form-group"><label>Balance</label><input id="e-balance" disabled></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Status</label><select id="e-status">
-                    <option>Pending Approval</option><option>Approved</option>
-                    <option>Pending Payment</option><option>Paid</option>
-                    <option>Partial</option><option>Void</option>
-                </select></div>
-                <div class="form-group"><label>Ship Status</label><select id="e-ship">
-                    <option value="">-</option><option>Shipped</option><option>Partial</option>
-                    <option>Pending</option><option>Delivered</option>
-                </select></div>
-                <div class="form-group"><label>Invoice Date</label><input type="date" id="e-inv-date"></div>
-            </div>
-            <div class="form-group"><label>Bill No</label><input id="e-bill" disabled></div>
-            <h4 style="margin:12px 0 8px">Line Items</h4>
-            <table><thead><tr>
-                <th>Stock ID</th><th>Name</th><th>Qty</th><th>UOM</th><th>Cost</th><th>Total</th>
-            </tr></thead><tbody id="e-items-body"></tbody></table>
-            <div class="btn-group">
-                <button class="btn-secondary" onclick="closeEdit()">Cancel</button>
-                <button onclick="approvePO()" style="background:var(--amber)">Approve</button>
-                <button onclick="payPO()" style="background:var(--green)">Request Payment</button>
-                <button onclick="saveStatus()">Save Status</button>
-            </div>
-        </div>
-    </div>
-</div>
+<style>
+.sub-tab{padding:10px 20px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-2px}
+.sub-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.text-right{text-align:right}
+.btn-sm{padding:4px 10px;font-size:11px;border-radius:4px}
+.btn-secondary{background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+.btn-secondary:hover{background:var(--border)}
+</style>
 
 <script>
-let allSuppliers = [];
-let editPoData = null;
+let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, selectedPoId='';
 
-async function init() {
-    const res = await fetch('/api/suppliers');
-    allSuppliers = await res.json();
-    document.getElementById('c-supplier').innerHTML = '<option value="">- Select -</option>' +
-        allSuppliers.map(s => `<option value="${esc(s.supplier_name)}">${esc(s.supplier_name)}</option>`).join('');
-    load();
-}
-async function load() {
-    const p = new URLSearchParams({search: document.getElementById('search').value,
-        supplier: document.getElementById('supplier').value,
-        status: document.getElementById('status').value});
-    const res = await fetch('/api/pos?' + p);
-    const data = await res.json();
-    document.getElementById('body').innerHTML = data.map(po => `
-        <tr>
-            <td><a href="#" class="link" onclick="openEdit('${esc(po.po_id)}')">${esc(po.po_id)}</a></td>
-            <td>${esc(po.date||'').slice(0,10)}</td><td>${esc(po.supplier||'')}</td>
-            <td class="money">RM ${(po.total||0).toFixed(2)}</td>
-            <td><span class="badge ${(po.status||'').includes('Paid')?'badge-green':(po.status||'').includes('Pending')?'badge-amber':'badge-blue'}">${esc(po.status||'')}</span></td>
-            <td>${esc(po.ship_status||'')}</td>
-            <td><button onclick="openEdit('${esc(po.po_id)}')" class="btn-sm">Edit</button></td>
-        </tr>`).join('');
-}
-async function openCreate() {
-    const res = await fetch('/api/pos/next-id');
-    const {id} = await res.json();
-    document.getElementById('c-po-id').value = id;
-    document.getElementById('c-date').value = new Date().toISOString().slice(0,10);
-    document.getElementById('c-dept').value = '';
-    document.getElementById('c-terms').value = '';
-    document.getElementById('c-inv-date').value = '';
-    document.getElementById('c-bill').value = '';
-    document.getElementById('c-items').querySelector('tbody').innerHTML = '';
-    addItemRow();
-    document.getElementById('create-modal').classList.add('open');
-}
-function closeCreate() { document.getElementById('create-modal').classList.remove('open'); }
-function addItemRow() {
-    const tbody = document.getElementById('c-items').querySelector('tbody');
-    const row = document.createElement('tr');
-    row.innerHTML = `<td><input style="width:100px" class="ci-stock"></td>
-        <td><input style="width:150px" class="ci-name"></td>
-        <td><input type="number" step="1" value="1" style="width:60px" class="ci-qty" oninput="calcRow(this)"></td>
-        <td><input style="width:60px" class="ci-uom" value="UNIT"></td>
-        <td><input type="number" step="0.01" style="width:80px" class="ci-cost" oninput="calcRow(this)"></td>
-        <td><input style="width:90px" class="ci-total" disabled></td>
-        <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
-    tbody.appendChild(row);
-}
-function calcRow(el) {
-    const row = el.closest('tr');
-    const qty = parseFloat(row.querySelector('.ci-qty').value) || 0;
-    const cost = parseFloat(row.querySelector('.ci-cost').value) || 0;
-    row.querySelector('.ci-total').value = (qty * cost).toFixed(2);
-}
-function collectItems(prefix) {
-    const rows = document.querySelectorAll(`#${prefix}-items tbody tr`);
-    return Array.from(rows).map(row => ({
-        stock_id: row.querySelector('.ci-stock')?.value || '',
-        item_name: row.querySelector('.ci-name')?.value || '',
-        quantity: parseFloat(row.querySelector('.ci-qty')?.value) || 0,
-        uom: row.querySelector('.ci-uom')?.value || 'UNIT',
-        cost: parseFloat(row.querySelector('.ci-cost')?.value) || 0,
-        total: parseFloat(row.querySelector('.ci-total')?.value) || 0,
-    }));
-}
-async function savePO() {
-    const body = {
-        po_id: document.getElementById('c-po-id').value,
-        date: document.getElementById('c-date').value,
-        supplier: document.getElementById('c-supplier').value,
-        department: document.getElementById('c-dept').value,
-        terms: document.getElementById('c-terms').value,
-        invoice_date: document.getElementById('c-inv-date').value,
-        bill_no: document.getElementById('c-bill').value,
-        items: collectItems('c'),
-    };
-    const res = await fetch('/api/pos', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    const d = await res.json();
-    toast(d.success ? 'Saved: '+d.po_id : d.error, d.success);
-    if (d.success) { closeCreate(); load(); }
-}
-async function openEdit(poId) {
-    const res = await fetch('/api/pos?search='+encodeURIComponent(poId));
-    const data = await res.json();
-    const po = data.find(p => p.po_id === poId);
-    if (!po) { toast('PO not found', false); return; }
-    editPoData = po;
-    document.getElementById('e-po-id-label').textContent = po.po_id;
-    document.getElementById('e-po-id').value = po.po_id;
-    document.getElementById('e-date').value = (po.date||'').slice(0,10);
-    document.getElementById('e-supplier').value = po.supplier || '';
-    document.getElementById('e-dept').value = po.department || '';
-    document.getElementById('e-total').value = 'RM '+(po.total||0).toFixed(2);
-    document.getElementById('e-balance').value = 'RM '+((po.total||0)-(po.paid||0)).toFixed(2);
-    document.getElementById('e-status').value = po.status || 'Pending Approval';
-    document.getElementById('e-ship').value = po.ship_status || '';
-    document.getElementById('e-inv-date').value = (po.invoice_date||'').slice(0,10);
-    document.getElementById('e-bill').value = po.bill_no || '';
-    document.getElementById('e-items-body').innerHTML = (po.items||[]).map(it => `
-        <tr><td>${esc(it.stock_id)}</td><td>${esc(it.item_name)}</td>
-        <td>${it.quantity}</td><td>${esc(it.uom)}</td>
-        <td>RM ${it.cost.toFixed(2)}</td><td>RM ${it.total.toFixed(2)}</td></tr>`).join('');
-    document.getElementById('edit-modal').classList.add('open');
-}
-function closeEdit() { document.getElementById('edit-modal').classList.remove('open'); }
-async function saveStatus() {
-    const res = await fetch('/api/pos/'+encodeURIComponent(editPoData.po_id)+'/status', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({status: document.getElementById('e-status').value})
+async function initPo() {
+    document.getElementById('npo-date').value = new Date().toISOString().slice(0,10);
+    const [itemRes,supRes,histRes] = await Promise.all([
+        fetch('/api/inventory?page=1&pageSize=5000'),
+        fetch('/api/suppliers'),
+        fetch('/api/pos?limit=200'),
+    ]);
+    poItemMaster = await itemRes.json();
+    document.getElementById('po-item-list').innerHTML = poItemMaster.map(i =>
+        `<option value="[${esc(i.stock_id)}] ${esc(i.item_name)}">`).join('');
+    poItemLookup = {};
+    poItemMaster.forEach(i => {
+        const d = `[${i.stock_id}] ${i.item_name}`;
+        poItemLookup[d.toLowerCase()] = i;
+        if (i.stock_id) poItemLookup[(i.stock_id||'').toLowerCase()] = i;
     });
+    const suppliers = await supRes.json();
+    document.getElementById('po-sup-list').innerHTML = suppliers.map(s => `<option>${esc(s.supplier_name)}</option>`).join('');
+    document.getElementById('f-supplier').innerHTML = '<option value="">All Suppliers</option>' +
+        suppliers.map(s => `<option>${esc(s.supplier_name)}</option>`).join('');
+    // Listen for supplier changes to auto-fill terms
+    document.getElementById('npo-supplier').addEventListener('change', async function() {
+        const name = this.value.trim(); if(!name) return;
+        const match = suppliers.find(s => s.supplier_name.toLowerCase() === name.toLowerCase());
+        if (match) document.getElementById('npo-terms').value = match.payment_terms || '';
+    });
+    loadPos();
+}
+
+function switchTab(name) {
+    document.getElementById('tab-history').style.display = name==='history'?'block':'none';
+    document.getElementById('tab-new').style.display = name==='new'?'block':'none';
+    document.querySelectorAll('.sub-tab').forEach((b,i) => b.classList.toggle('active', (i===0&&name==='history')||(i===1&&name==='new')));
+    if (name==='history') loadPos();
+}
+
+async function loadPos() {
+    const params = new URLSearchParams();
+    const add = (k,v) => {if(v) params.set(k,v)};
+    add('search', document.getElementById('search').value);
+    add('supplier', document.getElementById('f-supplier').value);
+    add('status', document.getElementById('f-status').value);
+    add('ship_status', document.getElementById('f-ship').value);
+    if (document.getElementById('f-unpaid').checked) params.set('unpaid','1');
+    allPos = await (await fetch('/api/pos?'+params)).json();
+    document.getElementById('po-body').innerHTML = allPos.map(p => {
+        const effBalance = (p.total||0) - (p.paid||0) - (p.balance||0);
+        return `<tr style="cursor:pointer" onclick="selectPo('${esc(p.po_id)}')">
+            <td style="font-family:monospace;font-weight:600">${esc(p.po_id)}</td>
+            <td>${(p.date||'').slice(0,10)}</td><td>${esc(p.supplier)||'-'}</td>
+            <td class="text-right">RM ${(p.total||0).toFixed(2)}</td>
+            <td class="text-right">RM ${(p.paid||0).toFixed(2)}</td>
+            <td class="text-right">RM ${(p.balance||0).toFixed(2)}</td>
+            <td class="text-right" style="color:${effBalance>0?'var(--amber)':'var(--green)'}">RM ${effBalance.toFixed(2)}</td>
+            <td><span class="badge ${(p.status||'').toLowerCase().includes('paid')?'badge-green':(p.status||'').toLowerCase().includes('pending')?'badge-amber':'badge-blue'}">${esc(p.status)||'-'}</span></td>
+            <td>${esc(p.ship_status)||'-'}</td><td>${esc(p.terms)||'-'}</td>
+            <td>${esc(p.department)||'-'}</td><td>${esc(p.invoice_date)||'-'}</td>
+        </tr>`;
+    }).join('');
+}
+
+function resetPoFilters() {
+    ['search','f-supplier','f-status','f-ship'].forEach(id => document.getElementById(id).value='');
+    document.getElementById('f-unpaid').checked = false;
+    loadPos();
+}
+
+async function selectPo(poId) {
+    selectedPoId = poId; loadPos();
+    const po = allPos.find(p => p.po_id === poId);
+    if (!po) return;
+    document.getElementById('po-detail').style.display = 'block';
+    document.getElementById('po-detail-title').textContent = po.po_id;
+    document.getElementById('po-detail-grid').innerHTML = `
+        <div class="card"><div class="stat-label">Date</div>${po.date||'-'}</div>
+        <div class="card"><div class="stat-label">Supplier</div>${esc(po.supplier)||'-'}</div>
+        <div class="card"><div class="stat-label">Total</div>RM ${(po.total||0).toFixed(2)}</div>
+        <div class="card"><div class="stat-label">Paid</div>RM ${(po.paid||0).toFixed(2)}</div>
+        <div class="card"><div class="stat-label">Balance</div>RM ${(po.balance||0).toFixed(2)}</div>
+        <div class="card"><div class="stat-label">Eff Balance</div>RM ${((po.total||0)-(po.paid||0)-(po.balance||0)).toFixed(2)}</div>`;
+    document.getElementById('po-edit-status').value = po.status||'';
+    document.getElementById('po-edit-ship').value = po.ship_status||'';
+    document.getElementById('po-edit-invdate').value = (po.invoice_date||'').slice(0,10);
+    document.getElementById('po-detail-items').innerHTML = (po.items||[]).map(it => `
+        <tr><td>${esc(it.stock_id)||'-'}</td><td>${esc(it.item_name)||''}</td>
+        <td class="text-right">${(it.quantity||0).toFixed(2)}</td>
+        <td class="text-right">RM ${(it.cost||0).toFixed(2)}</td>
+        <td class="text-right">RM ${(it.total||0).toFixed(2)}</td><td>${esc(it.uom)||'UNIT'}</td></tr>`).join('');
+    poDetail.scrollIntoView({behavior:'smooth'});
+}
+
+function closePoDetail() { document.getElementById('po-detail').style.display = 'none'; }
+
+async function updatePoField(field) {
+    if (!selectedPoId) return;
+    let body={};
+    if (field==='status') { body = {status: document.getElementById('po-edit-status').value};
+        await fetch('/api/workflow/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po_id:selectedPoId})}).catch(()=>{});
+        await fetch('/api/pos/'+encodeURIComponent(selectedPoId)+'/status',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(body)});
+    } else if (field==='ship') {
+        body = {status: document.getElementById('po-edit-ship').value};
+        await fetch('/api/pos/'+encodeURIComponent(selectedPoId)+'/status',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({field:'ship',status:body.status})});
+    } else if (field==='invdate') {
+        body = {invoice_date: document.getElementById('po-edit-invdate').value};
+    }
+    toast('Updated', true); loadPos();
+}
+
+function editSelectedPo() {
+    if (!selectedPoId) return toast('Select a PO first', false);
+    const po = allPos.find(p => p.po_id === selectedPoId);
+    if (!po) return;
+    switchTab('new');
+    document.getElementById('npo-id').value = po.po_id;
+    document.getElementById('npo-date').value = (po.date||'').slice(0,10);
+    document.getElementById('npo-supplier').value = po.supplier||'';
+    document.getElementById('npo-bill').value = po.bill_no||'';
+    document.getElementById('npo-inv-date').value = (po.invoice_date||'').slice(0,10);
+    document.getElementById('npo-dept').value = po.department||'';
+    document.getElementById('npo-terms').value = po.terms||'';
+    poItems = (po.items||[]).map(it => ({
+        stock_id: it.stock_id, item_name: it.item_name, uom: it.uom||'UNIT',
+        quantity: it.quantity, cost: it.cost, total: it.total,
+    }));
+    renderPoItems();
+}
+
+async function checkPoId() {
+    const id = document.getElementById('npo-id').value.trim();
+    if (!id||id.length<5) return;
+    const po = allPos.find(p => p.po_id === id);
+    if (po) {
+        editSelectedPo();
+    }
+}
+
+function addPoItem() {
+    const text = document.getElementById('npo-item-search').value.trim();
+    if(!text) return;
+    const qty = parseFloat(document.getElementById('npo-qty').value)||0;
+    const lineTotal = parseFloat(document.getElementById('npo-line-total').value)||0;
+    if (qty<=0) return toast('Quantity must be > 0',false);
+    let matched = poItemLookup[text.toLowerCase()];
+    let stockId='', name=text, uom='UNIT', cost=0;
+    if (matched) { stockId=matched.stock_id; name=matched.item_name; uom=matched.uom||'UNIT'; cost=matched.cost||0; }
+    else {
+        const m = text.match(/^\[([^\]]+)\]\s+(.+)/);
+        if (m) { stockId=m[1]; name=m[2]; }
+    }
+    const supUom = document.getElementById('npo-sup-uom').value;
+    const unitCost = qty>0 ? lineTotal/qty : cost;
+    poItems.push({stock_id:stockId, item_name:name, uom:uom, supplier_uom:supUom, quantity:qty, cost:unitCost, total:lineTotal});
+    renderPoItems();
+    ['npo-item-search','npo-qty','npo-line-total','npo-sup-uom'].forEach(id => document.getElementById(id).value='');
+}
+
+function removePoItem(i) { poItems.splice(i,1); renderPoItems(); }
+
+function renderPoItems() {
+    const tbody = document.getElementById('npo-items');
+    if (!poItems.length) { tbody.innerHTML=''; document.getElementById('npo-empty').style.display='block';
+        document.getElementById('npo-total').textContent='RM 0.00'; return; }
+    document.getElementById('npo-empty').style.display='none';
+    const total = poItems.reduce((s,i)=>s+(i.total||0),0);
+    document.getElementById('npo-total').textContent = 'RM '+total.toFixed(2);
+    tbody.innerHTML = poItems.map((it,i)=>`
+        <tr><td>${esc(it.stock_id)}</td><td>${esc(it.item_name)}</td><td>${esc(it.uom)}</td><td>${esc(it.supplier_uom||'')}</td>
+        <td class="text-right">${(it.quantity||0).toFixed(2)}</td>
+        <td class="text-right">RM ${(it.cost||0).toFixed(2)}</td>
+        <td class="text-right">RM ${(it.total||0).toFixed(2)}</td>
+        <td><button class="btn-secondary btn-sm" onclick="removePoItem(${i})" style="color:var(--red)">x</button></td></tr>`).join('');
+}
+
+function resetPoForm() {
+    document.getElementById('npo-id').value='';
+    document.getElementById('npo-date').value=new Date().toISOString().slice(0,10);
+    document.getElementById('npo-supplier').value='';
+    document.getElementById('npo-dept').value='';
+    document.getElementById('npo-bill').value='';
+    document.getElementById('npo-inv-date').value='';
+    document.getElementById('npo-terms').value='';
+    poItems=[]; renderPoItems();
+}
+
+async function savePo() {
+    const supplier = document.getElementById('npo-supplier').value.trim();
+    if(!supplier) return toast('Supplier required',false);
+    if(!poItems.length) return toast('Add at least one item',false);
+    const body = { po_id: document.getElementById('npo-id').value,
+        date: document.getElementById('npo-date').value, supplier: supplier,
+        department: document.getElementById('npo-dept').value,
+        bill_no: document.getElementById('npo-bill').value,
+        invoice_date: document.getElementById('npo-inv-date').value,
+        terms: document.getElementById('npo-terms').value,
+        items: poItems.map(it => ({stock_id:it.stock_id,item_name:it.item_name,name:it.item_name,
+            quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom})),
+    };
+    const res = await fetch('/api/pos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d = await res.json();
-    toast(d.success?'Updated':d.error, d.success);
-    if (d.success) { closeEdit(); load(); }
+    if(d.success){ toast('PO '+d.po_id+' saved!',true); document.getElementById('npo-id').value=d.po_id; loadPos(); }
+    else toast('Error: '+d.error,false);
 }
-async function approvePO() {
-    await fetch('/api/workflow/approve', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({po_id: editPoData.po_id})}).then(r=>r.json()).then(d=>toast(d.success?'Approved':d.error,d.success));
-    closeEdit(); load();
+
+function exportPoCSV() {
+    let csv='PO ID,Date,Supplier,Total,Paid,Balance,Status,Ship,Terms,Department,Invoice Date\n';
+    allPos.forEach(p=>csv+=`${p.po_id},${(p.date||'').slice(0,10)},${p.supplier||''},${p.total||0},${p.paid||0},${p.balance||0},${p.status||''},${p.ship_status||''},${p.terms||''},${p.department||''},${p.invoice_date||''}\n`);
+    const b=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a');
+    a.href=URL.createObjectURL(b); a.download='pos.csv'; a.click();
 }
-async function payPO() {
-    await fetch('/api/workflow/payment', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({po_id: editPoData.po_id})}).then(r=>r.json()).then(d=>toast(d.success?'Payment requested':d.error,d.success));
-    closeEdit(); load();
-}
-function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+
+function toast(m,ok){const t=document.getElementById('toast');t.textContent=m;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
-init();
+initPo();
 </script>
 {{end}}

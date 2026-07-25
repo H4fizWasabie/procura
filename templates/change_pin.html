@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procura — Change PIN</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="login-box card">
+        <h2>Change PIN</h2>
+        <p class="muted">You must change your PIN before continuing.</p>
+        <div id="error" class="error-msg" style="display:none"></div>
+        <div id="success" class="success-msg" style="display:none"></div>
+        <input type="password" id="oldPin" placeholder="Current PIN" autocomplete="current-password">
+        <input type="password" id="newPin" placeholder="New PIN (6 digits)" autocomplete="new-password" minlength="6" maxlength="6">
+        <button onclick="changePin()">Change PIN</button>
+    </div>
+<script>
+async function changePin() {
+    const err = document.getElementById('error');
+    const ok = document.getElementById('success');
+    err.style.display = 'none';
+    ok.style.display = 'none';
+    const oldPin = document.getElementById('oldPin').value;
+    const newPin = document.getElementById('newPin').value;
+    if (newPin.length < 6) {
+        err.textContent = 'PIN must be at least 6 digits';
+        err.style.display = 'block';
+        return;
+    }
+    try {
+        const res = await fetch('/api/change-pin', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({oldPin, newPin})
+        });
+        const data = await res.json();
+        if (data.success) {
+            ok.textContent = 'PIN changed. Redirecting...';
+            ok.style.display = 'block';
+            setTimeout(() => window.location.href = '/', 1000);
+        } else {
+            err.textContent = data.error;
+            err.style.display = 'block';
+        }
+    } catch(e) {
+        err.textContent = 'Connection error';
+        err.style.display = 'block';
+    }
+}
+document.getElementById('newPin').addEventListener('keydown', e => { if (e.key === 'Enter') changePin(); });
+</script>
+</body>
+</html>
