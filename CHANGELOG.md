@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-07-26
+- [ui] Reworked the shared application shell with grouped sidebar navigation, responsive mobile drawer, page context header, user utility footer, and stronger visual hierarchy — to make the growing module set easier to scan and navigate.
+
 ## 2025-07-22
 - [validation] New validation module — cross-references items/movements/POs for 6 issue types (missing movements, orphans, negative stock, zero-stock-with-ROP, duplicates), with markdown export
 - [import] Import history API + UI tab showing last 50 runs with per-table row counts

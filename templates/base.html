@@ -3,32 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Procura</title>
+    <title>Procura{{if eq .Active "dashboard"}} · Overview{{else if eq .Active "inventory"}} · Inventory{{else if eq .Active "suppliers"}} · Suppliers{{else if eq .Active "pos"}} · Purchase orders{{else if eq .Active "planning"}} · Planning{{else if eq .Active "rfq"}} · RFQs{{else if eq .Active "movement"}} · Stock movement{{else if eq .Active "reports"}} · Reports{{else if eq .Active "analytics"}} · Analytics{{else if eq .Active "scorecard"}} · Scorecard{{else if eq .Active "tasks"}} · Tasks{{else if eq .Active "workflow"}} · Workflow{{else if eq .Active "catalogue"}} · Catalogue{{else if eq .Active "uom"}} · UOM{{else if eq .Active "import"}} · Import{{else if eq .Active "validation"}} · Validation{{else if eq .Active "users"}} · Users{{end}}</title>
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
 </head>
 <body>
-    <nav>
-        <a href="/" class="brand">Procura</a>
-        <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
-        <a href="/items" class="{{if eq .Active "inventory"}}active{{end}}">Items</a>
-        <a href="/suppliers" class="{{if eq .Active "suppliers"}}active{{end}}">Suppliers</a>
-        <a href="/pos" class="{{if eq .Active "pos"}}active{{end}}">POs</a>
-        <a href="/planning" class="{{if eq .Active "planning"}}active{{end}}">Planning</a>
-        <a href="/rfq" class="{{if eq .Active "rfq"}}active{{end}}">RFQ</a>
-        <a href="/movement" class="{{if eq .Active "movement"}}active{{end}}">Movement</a>
-        <a href="/reports" class="{{if eq .Active "reports"}}active{{end}}">Reports</a>
-        <a href="/analytics" class="{{if eq .Active "analytics"}}active{{end}}">Analytics</a>
-        <a href="/scorecard" class="{{if eq .Active "scorecard"}}active{{end}}">Scorecard</a>
-        <a href="/tasks" class="{{if eq .Active "tasks"}}active{{end}}">Tasks</a>
-        <a href="/workflow" class="{{if eq .Active "workflow"}}active{{end}}">Workflow</a>
-        <a href="/catalogue" class="{{if eq .Active "catalogue"}}active{{end}}">Catalogue</a>
-        <a href="/uom" class="{{if eq .Active "uom"}}active{{end}}">UOM</a>
-        <a href="/import" class="{{if eq .Active "import"}}active{{end}}">Import</a>
-        <a href="/validation" class="{{if eq .Active "validation"}}active{{end}}">Validation</a>
-        <a href="/users" class="{{if eq .Active "users"}}active{{end}}">Users</a>
-        <span style="margin-left:auto;color:var(--muted);font-size:12px">{{.User.name}} · <a href="/change-pin" style="color:var(--muted)">Change PIN</a> · <a href="#" onclick="logout()" style="color:var(--muted)">Logout</a></span>
-    </nav>
+    <div class="app-shell">
+    <button class="mobile-menu" onclick="toggleNav()" aria-label="Open navigation"><span class="material-icons">menu</span></button>
+    <aside class="sidebar" id="sidebar">
+        <div class="brand-wrap"><a href="/" class="brand"><span class="brand-mark">P</span><span>Procura</span></a><button class="nav-close" onclick="toggleNav()" aria-label="Close navigation">×</button></div>
+        <div class="nav-caption">Workspace</div>
+        <nav class="side-nav">
+            <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}"><span class="material-icons">space_dashboard</span>Overview</a>
+            <a href="/items" class="{{if eq .Active "inventory"}}active{{end}}"><span class="material-icons">inventory_2</span>Inventory</a>
+            <a href="/suppliers" class="{{if eq .Active "suppliers"}}active{{end}}"><span class="material-icons">local_shipping</span>Suppliers</a>
+            <a href="/pos" class="{{if eq .Active "pos"}}active{{end}}"><span class="material-icons">receipt_long</span>Purchase orders</a>
+            <a href="/planning" class="{{if eq .Active "planning"}}active{{end}}"><span class="material-icons">event_note</span>Planning</a>
+            <a href="/rfq" class="{{if eq .Active "rfq"}}active{{end}}"><span class="material-icons">request_quote</span>RFQs</a>
+            <a href="/movement" class="{{if eq .Active "movement"}}active{{end}}"><span class="material-icons">swap_vert</span>Stock movement</a>
+            <div class="nav-caption">Insights</div>
+            <a href="/reports" class="{{if eq .Active "reports"}}active{{end}}"><span class="material-icons">summarize</span>Reports</a>
+            <a href="/analytics" class="{{if eq .Active "analytics"}}active{{end}}"><span class="material-icons">query_stats</span>Analytics</a>
+            <a href="/scorecard" class="{{if eq .Active "scorecard"}}active{{end}}"><span class="material-icons">grade</span>Scorecard</a>
+            <a href="/tasks" class="{{if eq .Active "tasks"}}active{{end}}"><span class="material-icons">task_alt</span>Tasks</a>
+            <a href="/workflow" class="{{if eq .Active "workflow"}}active{{end}}"><span class="material-icons">fact_check</span>Workflow</a>
+            <div class="nav-caption">Data &amp; setup</div>
+            <a href="/catalogue" class="{{if eq .Active "catalogue"}}active{{end}}"><span class="material-icons">menu_book</span>Catalogue</a>
+            <a href="/uom" class="{{if eq .Active "uom"}}active{{end}}"><span class="material-icons">straighten</span>UOM mappings</a>
+            <a href="/import" class="{{if eq .Active "import"}}active{{end}}"><span class="material-icons">upload_file</span>Import data</a>
+            <a href="/validation" class="{{if eq .Active "validation"}}active{{end}}"><span class="material-icons">verified</span>Validation</a>
+            <a href="/users" class="{{if eq .Active "users"}}active{{end}}"><span class="material-icons">group</span>Users</a>
+        </nav>
+        <div class="sidebar-footer"><div class="user-chip"><span class="avatar">{{slice .User.name 0 1}}</span><span class="user-name">{{.User.name}}<small>Signed in</small></span></div><a href="/change-pin" title="Change PIN"><span class="material-icons">settings</span></a><a href="#" onclick="logout()" title="Logout"><span class="material-icons">logout</span></a></div>
+    </aside>
+    <div class="main-shell">
+    <header class="topbar"><div><span class="eyebrow">Procurement workspace</span><h1>{{if eq .Active "dashboard"}}Overview{{else if eq .Active "inventory"}}Inventory{{else if eq .Active "suppliers"}}Suppliers{{else if eq .Active "pos"}}Purchase orders{{else if eq .Active "planning"}}Planning{{else if eq .Active "rfq"}}RFQs{{else if eq .Active "movement"}}Stock movement{{else if eq .Active "reports"}}Reports{{else if eq .Active "analytics"}}Analytics{{else if eq .Active "scorecard"}}Supplier scorecard{{else if eq .Active "tasks"}}Tasks{{else if eq .Active "workflow"}}Workflow{{else if eq .Active "catalogue"}}Catalogue{{else if eq .Active "uom"}}UOM mappings{{else if eq .Active "import"}}Import data{{else if eq .Active "validation"}}Validation{{else if eq .Active "users"}}Users{{else}}Procura{{end}}</h1></div><div class="topbar-status"><span class="status-dot"></span>Workspace online</div></header>
     <main>
         {{if eq .ContentBlock "content_dashboard"}}{{template "content_dashboard" .}}
         {{else if eq .ContentBlock "content_inventory"}}{{template "content_inventory" .}}
@@ -49,7 +58,9 @@
         {{else if eq .ContentBlock "content_users"}}{{template "content_users" .}}
         {{else}}{{template "content_dashboard" .}}{{end}}
     </main>
+    </div></div>
 <script>
+function toggleNav() { document.body.classList.toggle('nav-open'); }
 async function logout() {
     await fetch('/api/logout', {method:'POST'});
     window.location.href = '/login';
