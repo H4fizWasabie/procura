@@ -16,6 +16,9 @@ logs/
 *.swp
 *.swo
 
+# Sensitive config (legacy GAS)
+gas/GS_SecureConfig.js
+
 # OS
 .DS_Store
 Thumbs.db
