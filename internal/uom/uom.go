@@ -66,6 +66,50 @@ func (s *Service) SaveMapping(m Mapping) error {
 	return err
 }
 
+// UpsertItemMapping remembers the supplier unit used for a specific item.
+// It deliberately stores no conversion: supplier quantity and stock quantity
+// remain separate concerns until conversion rules are explicitly supported.
+func (s *Service) UpsertItemMapping(supplier, stockID, itemName, supplierUOM string) error {
+	if supplier == "" || stockID == "" || supplierUOM == "" {
+		return nil
+	}
+
+	var id int
+	err := s.DB.QueryRow(`
+		SELECT id FROM supplier_item_mappings
+		WHERE supplier_name = ? AND stock_id = ?
+		ORDER BY id LIMIT 1
+	`, supplier, stockID).Scan(&id)
+	if err == nil {
+		_, err = s.DB.Exec(`UPDATE supplier_item_mappings
+			SET supplier_item_name = ?, supplier_uom = ? WHERE id = ?`, itemName, supplierUOM, id)
+		return err
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	// Imported mappings may already identify the same item by supplier name.
+	// Reuse that row so the table's existing uniqueness rule is preserved.
+	err = s.DB.QueryRow(`
+		SELECT id FROM supplier_item_mappings
+		WHERE supplier_name = ? AND supplier_item_name = ?
+		ORDER BY id LIMIT 1
+	`, supplier, itemName).Scan(&id)
+	if err == nil {
+		_, err = s.DB.Exec(`UPDATE supplier_item_mappings
+			SET supplier_uom = ?, stock_id = ? WHERE id = ?`, supplierUOM, stockID, id)
+		return err
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+
+	_, err = s.DB.Exec(`INSERT INTO supplier_item_mappings
+		(supplier_name, supplier_item_name, supplier_uom, stock_id, match_priority)
+		VALUES (?, ?, ?, ?, 0)`, supplier, itemName, supplierUOM, stockID)
+	return err
+}
+
 func (s *Service) SaveUOM(u UOM) error {
 	if u.ID > 0 {
 		_, err := s.DB.Exec("UPDATE supplier_uom SET supplier_name=?, supplier_uom=?, standard_uom=? WHERE id=?", u.SupplierName, u.SupplierUOM, u.StandardUOM, u.ID)

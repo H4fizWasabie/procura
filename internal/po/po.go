@@ -25,12 +25,13 @@ type PO struct {
 }
 
 type Item struct {
-	StockID string  `json:"stock_id"`
-	Name    string  `json:"item_name"`
-	Qty     float64 `json:"quantity"`
-	Cost    float64 `json:"cost"`
-	Total   float64 `json:"total"`
-	UOM     string  `json:"uom"`
+	StockID     string  `json:"stock_id"`
+	Name        string  `json:"item_name"`
+	Qty         float64 `json:"quantity"`
+	Cost        float64 `json:"cost"`
+	Total       float64 `json:"total"`
+	UOM         string  `json:"uom"`
+	SupplierUOM string  `json:"supplier_uom"`
 }
 
 func (it *Item) UnmarshalJSON(data []byte) error {
@@ -184,9 +185,9 @@ func (s *Service) Save(p PO) (string, error) {
 	s.DB.Exec("DELETE FROM purchase_order_items WHERE po_id = ?", p.POID)
 	for _, it := range p.Items {
 		s.DB.Exec(`
-			INSERT INTO purchase_order_items (po_id, item_name, quantity, cost, total, uom, stock_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, p.POID, it.Name, it.Qty, it.Cost, it.Total, it.UOM, it.StockID)
+			INSERT INTO purchase_order_items (po_id, item_name, quantity, cost, total, uom, stock_id, supplier_uom)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, p.POID, it.Name, it.Qty, it.Cost, it.Total, it.UOM, it.StockID, it.SupplierUOM)
 	}
 
 	return p.POID, nil

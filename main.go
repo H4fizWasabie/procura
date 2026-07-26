@@ -323,6 +323,12 @@ func main() {
 		var body po.PO; json.NewDecoder(r.Body).Decode(&body)
 		id, err := poSvc.Save(body)
 		if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
+		for _, item := range body.Items {
+			if err := uomSvc.UpsertItemMapping(body.Supplier, item.StockID, item.Name, item.SupplierUOM); err != nil {
+				writeJSON(w, 500, map[string]interface{}{"success":false,"error":"PO saved but supplier UOM mapping failed: " + err.Error()})
+				return
+			}
+		}
 		writeJSON(w, 200, map[string]interface{}{"success":true,"po_id":id})
 	})))
 	mux.HandleFunc("POST /api/pos/{poId}/status", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {

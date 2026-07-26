@@ -63,7 +63,7 @@
                 <button class="btn-secondary btn-sm" onclick="updatePoField('invdate')">Set Inv Date</button>
             </div>
             <h4 style="margin-bottom:8px">Items</h4>
-            <table><thead><tr><th>Stock ID</th><th>Item</th><th class="text-right">Qty</th><th class="text-right">Cost</th><th class="text-right">Total</th><th>UOM</th></tr></thead>
+            <table><thead><tr><th>Stock ID</th><th>Item</th><th class="text-right">Qty</th><th class="text-right">Cost</th><th class="text-right">Total</th><th>Hospital UOM</th><th>Supplier UOM</th></tr></thead>
                 <tbody id="po-detail-items"></tbody></table>
         </div>
     </div>
@@ -123,14 +123,15 @@
 </style>
 
 <script>
-let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, selectedPoId='';
+let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='';
 
 async function initPo() {
     document.getElementById('npo-date').value = new Date().toISOString().slice(0,10);
-    const [itemRes,supRes,histRes] = await Promise.all([
+    const [itemRes,supRes,histRes,uomRes] = await Promise.all([
         fetch('/api/inventory?page=1&pageSize=5000'),
         fetch('/api/suppliers'),
         fetch('/api/pos?limit=200'),
+        fetch('/api/uom/mappings'),
     ]);
     poItemMaster = await itemRes.json();
     document.getElementById('po-item-list').innerHTML = poItemMaster.map(i =>
@@ -141,6 +142,13 @@ async function initPo() {
         poItemLookup[d.toLowerCase()] = i;
         if (i.stock_id) poItemLookup[(i.stock_id||'').toLowerCase()] = i;
     });
+    const mappings = await uomRes.json();
+    poSupplierUOMLookup = {};
+    (mappings||[]).forEach(m => {
+        if (m.supplier && m.stock_id && m.supplier_uom) {
+            poSupplierUOMLookup[(m.supplier+'|'+m.stock_id).toLowerCase()] = m.supplier_uom;
+        }
+    });
     const suppliers = await supRes.json();
     document.getElementById('po-sup-list').innerHTML = suppliers.map(s => `<option>${esc(s.supplier_name)}</option>`).join('');
     document.getElementById('f-supplier').innerHTML = '<option value="">All Suppliers</option>' +
@@ -150,8 +158,22 @@ async function initPo() {
         const name = this.value.trim(); if(!name) return;
         const match = suppliers.find(s => s.supplier_name.toLowerCase() === name.toLowerCase());
         if (match) document.getElementById('npo-terms').value = match.payment_terms || '';
+        fillSupplierUOM();
     });
+    document.getElementById('npo-item-search').addEventListener('change', fillSupplierUOM);
     loadPos();
+}
+
+function lookupSupplierUOM(item) {
+    const supplier = document.getElementById('npo-supplier').value.trim();
+    if (!supplier || !item || !item.stock_id) return '';
+    return poSupplierUOMLookup[(supplier+'|'+item.stock_id).toLowerCase()] || '';
+}
+
+function fillSupplierUOM() {
+    const item = poItemLookup[document.getElementById('npo-item-search').value.trim().toLowerCase()];
+    const mapped = lookupSupplierUOM(item);
+    if (mapped) document.getElementById('npo-sup-uom').value = mapped;
 }
 
 function switchTab(name) {
@@ -212,7 +234,8 @@ async function selectPo(poId) {
         <tr><td>${esc(it.stock_id)||'-'}</td><td>${esc(it.item_name)||''}</td>
         <td class="text-right">${(it.quantity||0).toFixed(2)}</td>
         <td class="text-right">RM ${(it.cost||0).toFixed(2)}</td>
-        <td class="text-right">RM ${(it.total||0).toFixed(2)}</td><td>${esc(it.uom)||'UNIT'}</td></tr>`).join('');
+        <td class="text-right">RM ${(it.total||0).toFixed(2)}</td><td>${esc(it.uom)||'UNIT'}</td>
+        <td>${esc(it.supplier_uom)||'-'}</td></tr>`).join('');
     poDetail.scrollIntoView({behavior:'smooth'});
 }
 
@@ -249,7 +272,7 @@ function editSelectedPo() {
     document.getElementById('npo-terms').value = po.terms||'';
     poItems = (po.items||[]).map(it => ({
         stock_id: it.stock_id, item_name: it.item_name, uom: it.uom||'UNIT',
-        quantity: it.quantity, cost: it.cost, total: it.total,
+        supplier_uom: it.supplier_uom||'', quantity: it.quantity, cost: it.cost, total: it.total,
     }));
     renderPoItems();
 }
@@ -276,7 +299,7 @@ function addPoItem() {
         const m = text.match(/^\[([^\]]+)\]\s+(.+)/);
         if (m) { stockId=m[1]; name=m[2]; }
     }
-    const supUom = document.getElementById('npo-sup-uom').value;
+    const supUom = document.getElementById('npo-sup-uom').value.trim() || lookupSupplierUOM(matched);
     const unitCost = qty>0 ? lineTotal/qty : cost;
     poItems.push({stock_id:stockId, item_name:name, uom:uom, supplier_uom:supUom, quantity:qty, cost:unitCost, total:lineTotal});
     renderPoItems();
@@ -322,7 +345,7 @@ async function savePo() {
         invoice_date: document.getElementById('npo-inv-date').value,
         terms: document.getElementById('npo-terms').value,
         items: poItems.map(it => ({stock_id:it.stock_id,item_name:it.item_name,name:it.item_name,
-            quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom})),
+            quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom,supplier_uom:it.supplier_uom})),
     };
     const res = await fetch('/api/pos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d = await res.json();
