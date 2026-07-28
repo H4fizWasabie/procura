@@ -68,27 +68,34 @@ async function openCreate() {
     document.getElementById('create-modal').classList.add('open');
 }
 function closeCreate() { document.getElementById('create-modal').classList.remove('open'); }
-function openCreateWithDraft(supplier, items) {
-    openCreate();
+async function openCreateWithDraft(supplier, items) {
+    // fetch next ID but skip addItem() — we'll add draft items instead
+    const res = await fetch('/api/rfq/next-id'); const {id} = await res.json();
+    document.getElementById('c-id').value = id;
+    document.getElementById('c-date').value = todayDMY();
+    document.getElementById('c-notes').value = '';
     if (supplier) document.getElementById('c-supplier').value = supplier;
     const tbody = document.getElementById('c-items').querySelector('tbody');
     tbody.innerHTML = '';
-    items.forEach(it => {
-        const row = document.createElement('tr');
-        row.innerHTML = `<td><input style="width:100px" class="ri-stock" value="${esc(it.stock_id||'')}"></td>
-            <td><input style="width:200px" class="ri-name" value="${esc(it.item_name||'')}"></td>
-            <td><input type="number" step="1" style="width:60px" class="ri-qty" value="${it.qty||1}"></td>
-            <td><input style="width:60px" class="ri-uom" value="${esc(it.uom||'UNIT')}"></td>
-            <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
-        tbody.appendChild(row);
-    });
+    if (!items || !items.length) { addItem(); } else {
+        items.forEach(it => {
+            const row = document.createElement('tr');
+            row.innerHTML = `<td><input style="width:100px" class="ri-stock" value="${esc(it.stock_id||'')}"></td>
+                <td><input style="width:200px" class="ri-name" value="${esc(it.item_name||'')}"></td>
+                <td><input type="number" step="0.01" style="width:70px" class="ri-qty" value="${it.qty||1}"></td>
+                <td><input style="width:60px" class="ri-uom" value="${esc(it.uom||'UNIT')}"></td>
+                <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
+            tbody.appendChild(row);
+        });
+    }
+    document.getElementById('create-modal').classList.add('open');
 }
 function addItem() {
     const tbody = document.getElementById('c-items').querySelector('tbody');
     const row = document.createElement('tr');
     row.innerHTML = `<td><input style="width:100px" class="ri-stock"></td>
         <td><input style="width:200px" class="ri-name"></td>
-        <td><input type="number" step="1" value="1" style="width:60px" class="ri-qty"></td>
+        <td><input type="number" step="0.01" value="1" style="width:70px" class="ri-qty"></td>
         <td><input style="width:60px" class="ri-uom" value="UNIT"></td>
         <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
     tbody.appendChild(row);

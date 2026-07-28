@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2025-08-19
+- [planning] Fixed `createRFQ()` — supplier now carried per-item into RFQ draft; mixed-supplier warning added
+- [rfq] Fixed race condition: `openCreateWithDraft()` wasn't awaiting `openCreate()`, causing draft items to be wiped by the async `tbody.innerHTML=''` call
+- [rfq] Fixed qty input: `step="1"` → `step="0.01"` so fractional quantities (e.g. 2.5 boxes) are editable
 - [pos] Fixed `poDetail is not defined` JS error — `selectPo()` referenced undefined variable instead of `document.getElementById('po-detail')`
 - [pos] Fixed `Cannot read properties of null (reading 'map')` when filtering POs — backend `List()` returned `nil` on DB error, now returns empty slice; frontend `allPos.map` also guarded with `(allPos||[])`
 

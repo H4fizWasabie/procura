@@ -82,8 +82,13 @@ function createRFQ() {
         item_name: it.name,
         uom: it.uom || 'UNIT',
         qty: it.suggested > 0 ? it.suggested : 1,
+        supplier: it.supplier || '',
     }));
-    const draftSupplier = draftItems[0]?.supplier || '';
+    const suppliers = [...new Set(draftItems.map(it => it.supplier).filter(Boolean))];
+    const draftSupplier = suppliers.length === 1 ? suppliers[0] : '';
+    if (suppliers.length > 1) {
+        toast('Warning: ' + suppliers.length + ' different suppliers selected. RFQ supplier left blank.', true);
+    }
     sessionStorage.setItem('rfqDraft', JSON.stringify({supplier: draftSupplier, items: draftItems}));
     window.location.href = '/rfq';
 }
