@@ -1,5 +1,30 @@
 # Changelog
 
+## 2025-08-19
+- [pos] Fixed `poDetail is not defined` JS error — `selectPo()` referenced undefined variable instead of `document.getElementById('po-detail')`
+- [pos] Fixed `Cannot read properties of null (reading 'map')` when filtering POs — backend `List()` returned `nil` on DB error, now returns empty slice; frontend `allPos.map` also guarded with `(allPos||[])`
+
+## 2025-07-28
+- [import] Added `ImportStock()` — dedicated daily stock balance import matching Python `items_screen._import_stock_excel`: reads first sheet, fixed columns D (SKU Code) and K (Actual Stock), updates `items.current_stock`. New `POST /api/import-stock` endpoint. Fixed inventory page "Import Stock" button to use this endpoint.
+- [import] Rewrote inventory header matching to use GAS-style substring containment instead of exact map lookup. Multi-word headers like "Qty On Hand" now correctly match patterns. Added `headers_found` diagnostic.
+- [import] Fix stock balance history report import returning 0 rows — two root causes:
+  1. Sheet names were hardcoded (DB_Items, Movement 2024/2025/2026). Now uses flexible discovery:
+     - Inventory: tries DB_Items, then any sheet with "item"/"inventory"/"stock"/"balance" in name, then first sheet
+     - Movement: matches any sheet containing "movement" (case-insensitive), extracts year from name
+  2. Header names were hardcoded (stock_id, item_name, current). Added inventoryAliases map ported from GAS PARSER_CONFIG.INVENTORY_MAP — now recognizes "SKU Code"→stock_id, "Product Name"→item_name, "Balance"→current, and 40+ other common aliases
+  - Added wide-format movement support (GAS-style: one row per item, months as column blocks) alongside existing long format
+  - Added `sheets_found` diagnostic to import response and UI
+
+## 2026-07-27
+- [pdf] New `internal/pdf` package — renders PO and RFQ as HTML with PDF generation via wkhtmltopdf or Chrome headless. Preview/download routes: `/pos/{id}/preview|pdf`, `/rfq/{id}/preview|pdf`.
+- [pdf] PO template: traditional pre-printed form, 20-row items table, single A4.
+- [rfq] RFQ PDF: removed fixed container, matched PO margins, natural footer flow.
+- [po] Fixed `POST /api/pos/{id}/status` — now reads `field` param so ship status updates correct column.
+- [po] Fixed `UnmarshalJSON` to detect short-format items without `id` key.
+- [ui] All date inputs changed to DD/MM/YYYY text fields (PO + RFQ forms).
+- [ui] PO detail panel and RFQ list: Preview and PDF download buttons.
+- [deploy] VPS: installed wkhtmltopdf 0.12.6.1 static binary.
+
 ## 2026-07-26
 - [ui] Reworked the shared application shell with grouped sidebar navigation, responsive mobile drawer, page context header, user utility footer, and stronger visual hierarchy — to make the growing module set easier to scan and navigate.
 - [po] Persisted supplier UOM on PO lines and reused it as the supplier-item mapping for future orders — to support ordering in supplier units without adding quantity conversion.

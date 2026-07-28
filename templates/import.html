@@ -14,6 +14,15 @@
         <h3>Upload Excel Workbook</h3>
         <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Supports .xlsx files with sheets: DB_Items, DB_Suppliers, PurchaseOrder, Movement YYYY</p>
         <div class="form-group"><label>Select File</label><input type="file" id="file" accept=".xlsx" style="padding:10px"></div>
+        <div class="form-row" style="margin-bottom:12px">
+            <div class="form-group" style="flex:1"><label>Movement Year</label>
+                <select id="mov-year"><option value="">— Auto —</option></select>
+            </div>
+            <div class="form-group" style="flex:1"><label>Movement Month</label>
+                <select id="mov-month"><option value="">— Auto —</option></select>
+            </div>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:12px">Set year/month for single-sheet Stock Movement Reports. Leave blank for multi-sheet Balance History Reports.</p>
         <button onclick="upload()" id="upload-btn">Upload &amp; Import</button>
         <div id="result" style="margin-top:16px;font-size:13px"></div>
     </div>
@@ -53,17 +62,33 @@ async function upload() {
     if(!file){toast('Select a file',false);return}
     const btn=document.getElementById('upload-btn');btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Importing...';
     const form=new FormData();form.append('file',file);
+    const my=document.getElementById('mov-year').value;
+    const mm=document.getElementById('mov-month').value;
+    if(my) form.append('movement_year',my);
+    if(mm) form.append('movement_month',mm);
     const res=await fetch('/api/import',{method:'POST',body:form});
     const d=await res.json();
     btn.disabled=false;btn.textContent='Upload & Import';
     if(d.success){
+        const sf = d.sheets_found ? d.sheets_found.join(', ') : 'none';
+        const hf = d.headers_found ? d.headers_found.join(', ') : 'none';
         document.getElementById('result').innerHTML=`<div style="background:rgba(109,183,123,0.1);padding:12px;border-radius:6px;border:1px solid var(--green)">
-            <strong style="color:var(--green)">Import Complete</strong><br>Run ID: ${esc(d.run_id)}<br>Tables: ${d.tables}<br>Rows: ${d.rows}</div>`;
+            <strong style="color:var(--green)">Import Complete</strong><br>Run ID: ${esc(d.run_id)}<br>Tables: ${d.tables}<br>Rows: ${d.rows}<br><span style="font-size:11px;color:var(--muted)">Sheets: ${esc(sf)}<br>Headers: ${esc(hf)}</span></div>`;
         loadHistory();
     } else {
         document.getElementById('result').innerHTML=`<div style="color:var(--red)">Error: ${esc(d.error)}</div>`;
     }
 }
+
+// Populate year/month dropdowns
+(function(){
+    const ys=document.getElementById('mov-year');
+    const now=new Date();
+    for(let y=now.getFullYear();y>=2024;y--){const o=document.createElement('option');o.value=y;o.textContent=y;ys.appendChild(o)}
+    const ms=document.getElementById('mov-month');
+    const names=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    names.forEach((n,i)=>{const o=document.createElement('option');o.value=i+1;o.textContent=n;ms.appendChild(o)})
+})();
 
 async function loadHistory() {
     const res=await fetch('/api/import/history');

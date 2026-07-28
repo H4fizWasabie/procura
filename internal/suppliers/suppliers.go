@@ -80,6 +80,30 @@ func (s *Service) Delete(supplierName string) error {
 	return err
 }
 
+// GetByName returns a single supplier by name.
+func (s *Service) GetByName(name string) (Supplier, error) {
+	var sup Supplier
+	var contact, phone, email, address, terms, brn, acc, bank sql.NullString
+	err := s.DB.QueryRow(`
+		SELECT supplier_name, contact_person, phone, email, address,
+		       payment_terms, brn, account_no, bank_name
+		FROM suppliers WHERE supplier_name = ?
+	`, name).Scan(&sup.SupplierName, &contact, &phone, &email, &address,
+		&terms, &brn, &acc, &bank)
+	if err != nil {
+		return sup, err
+	}
+	sup.ContactPerson = str(contact)
+	sup.Phone = str(phone)
+	sup.Email = str(email)
+	sup.Address = str(address)
+	sup.PaymentTerms = str(terms)
+	sup.BRN = str(brn)
+	sup.AccountNo = str(acc)
+	sup.BankName = str(bank)
+	return sup, nil
+}
+
 // Names returns supplier names only (for dropdowns).
 func (s *Service) Names() []string {
 	rows, _ := s.DB.Query("SELECT supplier_name FROM suppliers ORDER BY supplier_name")

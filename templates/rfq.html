@@ -10,7 +10,7 @@
         <div class="modal-body">
             <div class="form-row">
                 <div class="form-group"><label>RFQ ID</label><input id="c-id" disabled></div>
-                <div class="form-group"><label>Date</label><input type="date" id="c-date"></div>
+                <div class="form-group"><label>Date</label><input type="text" id="c-date" placeholder="DD/MM/YYYY"></div>
             </div>
             <div class="form-group"><label>Supplier</label><select id="c-supplier"><option value="">- Select -</option></select></div>
             <div class="form-group"><label>Notes</label><textarea id="c-notes" rows="2" placeholder="Additional notes..."></textarea></div>
@@ -27,30 +27,62 @@
 
 <script>
 let suppliers = [];
+function toDMY(iso){if(!iso)return'';const s=iso.slice(0,10);if(s.indexOf('/')!==-1)return s;const d=s.split('-');if(d.length!==3)return s;return d[2]+'/'+d[1]+'/'+d[0]}
+function fromDMY(dmy){if(!dmy)return'';const p=dmy.split('/');if(p.length!==3)return dmy;return p[2]+'-'+p[1]+'-'+p[0]}
+function todayDMY(){const d=new Date();return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear()}
 async function init() {
     const sr = await fetch('/api/suppliers');
     suppliers = await sr.json();
     document.getElementById('c-supplier').innerHTML = '<option value="">- Select -</option>' +
         suppliers.map(s => `<option value="${esc(s.supplier_name)}">${esc(s.supplier_name)}</option>`).join('');
     load();
+
+    // Check for draft from planning page
+    const draft = sessionStorage.getItem('rfqDraft');
+    if (draft) {
+        sessionStorage.removeItem('rfqDraft');
+        try {
+            const d = JSON.parse(draft);
+            openCreateWithDraft(d.supplier, d.items);
+        } catch(e) {}
+    }
 }
 async function load() {
     const res = await fetch('/api/rfq'); const data = await res.json();
     document.getElementById('body').innerHTML = data.map(r => `
-        <tr><td class="link">${esc(r.rfq_id)}</td><td>${esc(r.date||'').slice(0,10)}</td>
+        <tr><td class="link">${esc(r.rfq_id)}</td><td>${toDMY(r.date)}</td>
         <td>${esc(r.supplier||'')}</td><td>${r.items_count||0}</td>
-        <td><button onclick="delRFQ('${esc(r.rfq_id)}')" class="btn-sm btn-danger">Del</button></td></tr>`).join('');
+        <td style="display:flex;gap:4px">
+            <button onclick="previewRFQ('${esc(r.rfq_id)}')" class="btn-sm">👁</button>
+            <button onclick="downloadRFQ('${esc(r.rfq_id)}')" class="btn-sm">📥</button>
+            <button onclick="delRFQ('${esc(r.rfq_id)}')" class="btn-sm btn-danger">Del</button>
+        </td></tr>`).join('');
 }
 async function openCreate() {
     const res = await fetch('/api/rfq/next-id'); const {id} = await res.json();
     document.getElementById('c-id').value = id;
-    document.getElementById('c-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('c-date').value = todayDMY();
     document.getElementById('c-notes').value = '';
     document.getElementById('c-items').querySelector('tbody').innerHTML = '';
     addItem();
     document.getElementById('create-modal').classList.add('open');
 }
 function closeCreate() { document.getElementById('create-modal').classList.remove('open'); }
+function openCreateWithDraft(supplier, items) {
+    openCreate();
+    if (supplier) document.getElementById('c-supplier').value = supplier;
+    const tbody = document.getElementById('c-items').querySelector('tbody');
+    tbody.innerHTML = '';
+    items.forEach(it => {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td><input style="width:100px" class="ri-stock" value="${esc(it.stock_id||'')}"></td>
+            <td><input style="width:200px" class="ri-name" value="${esc(it.item_name||'')}"></td>
+            <td><input type="number" step="1" style="width:60px" class="ri-qty" value="${it.qty||1}"></td>
+            <td><input style="width:60px" class="ri-uom" value="${esc(it.uom||'UNIT')}"></td>
+            <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
+        tbody.appendChild(row);
+    });
+}
 function addItem() {
     const tbody = document.getElementById('c-items').querySelector('tbody');
     const row = document.createElement('tr');
@@ -71,7 +103,7 @@ async function saveRFQ() {
     const body = {
         rfq_id: document.getElementById('c-id').value,
         supplier: document.getElementById('c-supplier').value,
-        date: document.getElementById('c-date').value,
+        date: fromDMY(document.getElementById('c-date').value),
         notes: document.getElementById('c-notes').value,
         items: items,
     };
@@ -84,6 +116,8 @@ async function delRFQ(id) { if(!confirm('Delete '+id+'?'))return;
     await fetch('/api/rfq/'+encodeURIComponent(id),{method:'DELETE'}); toast('Deleted',true); load(); }
 function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function previewRFQ(id){window.open('/rfq/'+encodeURIComponent(id)+'/preview','_blank')}
+function downloadRFQ(id){window.location='/rfq/'+encodeURIComponent(id)+'/pdf'}
 init();
 </script>
 {{end}}

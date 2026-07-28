@@ -13,21 +13,22 @@ var monthLabels = []string{"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep"
 // Frozen baselines from GAS (prevents retroactive changes)
 var frozenInHouse = map[int]map[int]float64{
 	2025: {0:2600,1:3700,2:7300,3:6400,4:17300,5:9200,6:16900,7:7200,8:12700,9:8400,10:24800,11:8000},
-	2026: {0:10400,1:27800,2:32600},
+	2026: {0:10400,1:27800,2:32600,5:15576},
 }
 var frozenVal = map[int]map[int]float64{
 	2025: {0:74100,1:112700,2:166400,3:175700,4:216100,5:277900,6:312300,7:325100,8:326300,9:359700,10:320900,11:323200},
-	2026: {0:433000,1:403400,2:386400},
+	2026: {0:433000,1:403400,2:386400,5:393548},
 }
 var frozenCons = map[int]map[int]float64{
 	2025: {0:37400,1:57000,2:52400,3:59500,4:88500,5:68300,6:82900,7:82000,8:106400,9:118000,10:154300,11:153800},
-	2026: {0:170300,1:177100,2:268200},
+	2026: {0:170300,1:177100,2:268200,5:220621},
 }
 var frozenRev = map[int]map[int]float64{
 	2025: {0:82400,1:145600,2:112300,3:128300,4:198100,5:146200,6:172600,7:174000,8:211500,9:244900,10:340000,11:327900},
-	2026: {0:352700,1:365000,2:423500},
+	2026: {0:352700,1:365000,2:423500,5:491096},
 }
 var legacy2025Spend = map[int]float64{0:32289.11,1:78097.61,2:70487.43,3:43317.38,4:74125.33,5:94482.73,6:75682.60,7:54335.47,8:72744.05,9:82888.69,10:92302.24}
+var legacy2026Spend = map[int]float64{0:198000,1:153181,2:146032,3:128991,4:129408,5:172574}
 
 type Metrics struct {
 	Labels    []string            `json:"labels"`
@@ -157,9 +158,8 @@ func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
 	type itemAcc struct{name string; totalOut,revenue,costVal float64; monthly,ihMonthly []float64; meta itemMeta}
 	allItems := map[string]*itemAcc{}
 	for _, w := range window {
-		rows, _ := s.DB.Query("SELECT stock_id, item_name, month, out_qty, adj_out, report_closing FROM stock_movements WHERE year=?", w[0])
+		rows, _ := s.DB.Query("SELECT stock_id, item_name, month, out_qty, adj_out, report_closing FROM stock_movements WHERE year=? AND month=?", w[0], w[1]+1)
 		if rows==nil { continue }
-		defer rows.Close()
 		for rows.Next() {
 			var sid,name sql.NullString; var mo int; var outQ,adjO,closing sql.NullFloat64
 			rows.Scan(&sid,&name,&mo,&outQ,&adjO,&closing)
@@ -183,6 +183,7 @@ func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
 			acc.revenue += rev
 			m.Business.GrossRevenueTrend[i] += rev
 		}
+		rows.Close()
 	}
 
 	// Apply frozen data
@@ -191,7 +192,8 @@ func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
 		if v, ok := frozenVal[w[0]][w[1]]; ok { m.Inventory.ValuationTrend[i] = v }
 		if v, ok := frozenCons[w[0]][w[1]]; ok { m.Inventory.ConsumptionTrend[i] = v }
 		if v, ok := frozenRev[w[0]][w[1]]; ok { m.Business.GrossRevenueTrend[i] = v }
-		if w[0]==2025 { if v, ok := legacy2025Spend[w[1]]; ok { m.Finance.MonthlySpend[i] += v } }
+		if w[0]==2025 { if v, ok := legacy2025Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
+		if w[0]==2026 { if v, ok := legacy2026Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
 	}
 
 	// Product type split & high movers

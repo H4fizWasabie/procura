@@ -2,7 +2,10 @@
 {{define "content_planning"}}
 <div class="top-bar">
     <h2>Planning</h2>
-    <button id="order-btn" onclick="markOrdered()" disabled>Mark Ordered</button>
+    <div style="display:flex;gap:8px">
+        <button id="rfq-btn" onclick="createRFQ()" disabled>Create RFQ</button>
+        <button id="order-btn" onclick="markOrdered()" disabled>Mark Ordered</button>
+    </div>
 </div>
 
 <div class="search-bar">
@@ -57,6 +60,7 @@ function render() {
     `).join('');
 
     document.getElementById('order-btn').disabled = selected.size === 0;
+    document.getElementById('rfq-btn').disabled = selected.size === 0;
 }
 
 function toggle(id, on) { on ? selected.add(id) : selected.delete(id); render(); }
@@ -69,6 +73,19 @@ function toggleAll(el) {
         }
     });
     render();
+}
+
+function createRFQ() {
+    if (!selected.size) return;
+    const draftItems = data.filter(it => selected.has(it.id)).map(it => ({
+        stock_id: it.id,
+        item_name: it.name,
+        uom: it.uom || 'UNIT',
+        qty: it.suggested > 0 ? it.suggested : 1,
+    }));
+    const draftSupplier = draftItems[0]?.supplier || '';
+    sessionStorage.setItem('rfqDraft', JSON.stringify({supplier: draftSupplier, items: draftItems}));
+    window.location.href = '/rfq';
 }
 
 async function markOrdered() {

@@ -35,10 +35,12 @@ type Item struct {
 }
 
 func (it *Item) UnmarshalJSON(data []byte) error {
-	// Detect GAS legacy short-format keys (id/n/q/c/t/u)
+	// Detect GAS legacy short-format keys (id/n/q/c/t/u or n/q/c/t/u)
 	var probe map[string]json.RawMessage
 	json.Unmarshal(data, &probe)
-	if _, ok := probe["id"]; ok {
+	_, hasID := probe["id"]
+	_, hasN := probe["n"]
+	if hasID || hasN {
 		var si struct {
 			StockID string  `json:"id"`
 			Name    string  `json:"n"`
@@ -75,9 +77,9 @@ func (s *Service) List(search, supplier, status, shipStatus string, unpaidOnly b
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if search != "" {
-		where = append(where, "(LOWER(po_id) LIKE ? OR LOWER(supplier) LIKE ?)")
+		where = append(where, "(LOWER(po_id) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(COALESCE(bill_no,'')) LIKE ?)")
 		term := "%" + strings.ToLower(search) + "%"
-		args = append(args, term, term)
+		args = append(args, term, term, term)
 	}
 	if supplier != "" {
 		where = append(where, "supplier = ?")
@@ -103,7 +105,7 @@ func (s *Service) List(search, supplier, status, shipStatus string, unpaidOnly b
 		ORDER BY date DESC, po_id DESC LIMIT 200
 	`, args...)
 	if err != nil {
-		return nil
+		return []PO{}
 	}
 	defer rows.Close()
 
@@ -162,6 +164,17 @@ func (s *Service) Save(p PO) (string, error) {
 	if isNew {
 		p.POID = s.GenerateID()
 	}
+
+	// Block duplicate invoice numbers
+	if strings.TrimSpace(p.BillNo) != "" {
+		var existing string
+		s.DB.QueryRow("SELECT po_id FROM purchase_orders WHERE bill_no = ? AND po_id != ? LIMIT 1",
+			p.BillNo, p.POID).Scan(&existing)
+		if existing != "" {
+			return "", fmt.Errorf("invoice number %s already used by %s", p.BillNo, existing)
+		}
+	}
+
 	p.Total = 0
 	for _, it := range p.Items {
 		it.Total = it.Qty * it.Cost
@@ -206,6 +219,38 @@ func (s *Service) UpdateStatus(poID, newStatus, field string) error {
 // Void marks a PO as VOID.
 func (s *Service) Void(poID string) error {
 	return s.UpdateStatus(poID, "VOID", "status")
+}
+
+// GetByID returns a single PO with items.
+func (s *Service) GetByID(poID string) (PO, error) {
+	var p PO
+	var date, bill, dep, terms, invDate, sup, st, ship sql.NullString
+	var total, paid, balance sql.NullFloat64
+	var rawJSON sql.NullString
+	err := s.DB.QueryRow(`
+		SELECT po_id, date, supplier, bill_no, total, paid, balance,
+		       status, ship_status, department, terms, invoice_date, raw_po_json
+		FROM purchase_orders WHERE po_id = ?
+	`, poID).Scan(&p.POID, &date, &sup, &bill, &total, &paid, &balance,
+		&st, &ship, &dep, &terms, &invDate, &rawJSON)
+	if err != nil {
+		return p, err
+	}
+	p.Date = strv(date)
+	p.Supplier = strv(sup)
+	p.BillNo = strv(bill)
+	p.Total = f64v(total)
+	p.Paid = f64v(paid)
+	p.Balance = f64v(balance)
+	p.Status = strv(st)
+	p.ShipStatus = strv(ship)
+	p.Department = strv(dep)
+	p.Terms = strv(terms)
+	p.InvoiceDate = strv(invDate)
+	if rawJSON.Valid {
+		json.Unmarshal([]byte(rawJSON.String), &p.Items)
+	}
+	return p, nil
 }
 
 // FilterOptions returns distinct suppliers, statuses, ship_statuses for dropdowns.

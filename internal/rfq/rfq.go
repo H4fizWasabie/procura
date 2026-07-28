@@ -106,6 +106,35 @@ func (s *Service) History() []RFQ {
 	return out
 }
 
+// GetByID returns a single RFQ with items.
+func (s *Service) GetByID(rfqID string) (RFQ, error) {
+	var r RFQ
+	var raw sql.NullString
+	var date, sup sql.NullString
+	err := s.DB.QueryRow(`
+		SELECT rfq_id, date, supplier, items_count, raw_rfq_json
+		FROM rfq_logs WHERE rfq_id = ?
+	`, rfqID).Scan(&r.RFQID, &date, &sup, &r.Count, &raw)
+	if err != nil {
+		return r, err
+	}
+	r.Date = strv(date)
+	r.Supplier = strv(sup)
+	if raw.Valid {
+		var items []map[string]interface{}
+		json.Unmarshal([]byte(raw.String), &items)
+		for _, it := range items {
+			r.Items = append(r.Items, Item{
+				StockID: strv2(it["id"]),
+				Name:    strv2(it["n"]),
+				UOM:     strv2(it["u"]),
+				Qty:     f64v2(it["q"]),
+			})
+		}
+	}
+	return r, nil
+}
+
 // Delete removes an RFQ.
 func (s *Service) Delete(rfqID string) error {
 	_, err := s.DB.Exec("DELETE FROM rfq_logs WHERE rfq_id = ?", rfqID)

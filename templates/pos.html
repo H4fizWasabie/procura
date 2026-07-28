@@ -35,7 +35,7 @@
     <div class="card" style="padding:0;overflow-x:auto;max-height:50vh;overflow-y:auto">
         <table>
             <thead><tr>
-                <th>PO ID</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Balance</th><th>Eff Balance</th>
+                <th>PO ID</th><th>Inv No</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Balance</th><th>Eff Balance</th>
                 <th>Status</th><th>Ship</th><th>Terms</th><th>Dept</th><th>Invoice Date</th>
             </tr></thead>
             <tbody id="po-body"></tbody>
@@ -47,7 +47,11 @@
         <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
                 <h3 id="po-detail-title">PO Details</h3>
-                <span style="cursor:pointer;color:var(--muted);font-size:20px" onclick="closePoDetail()">&times;</span>
+                <div style="display:flex;gap:6px;align-items:center">
+                    <button onclick="previewPO()" style="font-size:11px;padding:3px 8px">👁 Preview</button>
+                    <button onclick="downloadPO()" style="font-size:11px;padding:3px 8px">📥 PDF</button>
+                    <span style="cursor:pointer;color:var(--muted);font-size:20px" onclick="closePoDetail()">&times;</span>
+                </div>
             </div>
             <div class="grid-3" style="margin-bottom:12px" id="po-detail-grid"></div>
             <!-- Status / Ship / Invoice row -->
@@ -59,7 +63,7 @@
                 <select id="po-edit-ship" style="width:130px" onchange="updatePoField('ship')">
                     <option value="">Ship Status</option><option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option>
                 </select>
-                <input type="date" id="po-edit-invdate" style="width:150px" placeholder="Invoice Date">
+                <input type="text" id="po-edit-invdate" style="width:130px" placeholder="DD/MM/YYYY">
                 <button class="btn-secondary btn-sm" onclick="updatePoField('invdate')">Set Inv Date</button>
             </div>
             <h4 style="margin-bottom:8px">Items</h4>
@@ -75,12 +79,12 @@
         <h3>PO Header</h3>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
             <div class="form-group"><label>PO ID</label><input id="npo-id" style="font-family:monospace;font-weight:700;color:var(--accent)" placeholder="Auto-generated" onchange="checkPoId()"></div>
-            <div class="form-group"><label>Date</label><input type="date" id="npo-date"></div>
+            <div class="form-group"><label>Date</label><input type="text" id="npo-date" placeholder="DD/MM/YYYY"></div>
             <div class="form-group"><label>Department</label><select id="npo-dept"><option value="">-- Select --</option>
                 <option>Pharmacy</option><option>Surgical</option><option>Diagnostic</option><option>Lab</option><option>Medical/Ward</option></select></div>
             <div class="form-group"><label>Supplier</label><input id="npo-supplier" list="po-sup-list" placeholder="Search supplier..."><datalist id="po-sup-list"></datalist></div>
             <div class="form-group"><label>Bill #</label><input id="npo-bill" placeholder="Optional invoice ref"></div>
-            <div class="form-group"><label>Invoice Date</label><input type="date" id="npo-inv-date"></div>
+            <div class="form-group"><label>Invoice Date</label><input type="text" id="npo-inv-date" placeholder="DD/MM/YYYY"></div>
             <div class="form-group"><label>Terms</label><input id="npo-terms" readonly placeholder="Auto from supplier"></div>
         </div>
 
@@ -125,8 +129,13 @@
 <script>
 let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='';
 
+// DD/MM/YYYY helpers
+function toDMY(iso){if(!iso)return'';const s=iso.slice(0,10);if(s.indexOf('/')!==-1)return s;const d=s.split('-');if(d.length!==3)return s;return d[2]+'/'+d[1]+'/'+d[0]}
+function fromDMY(dmy){if(!dmy)return'';const p=dmy.split('/');if(p.length!==3)return dmy;return p[2]+'-'+p[1]+'-'+p[0]}
+function todayDMY(){const d=new Date();return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear()}
+
 async function initPo() {
-    document.getElementById('npo-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('npo-date').value = todayDMY();
     const [itemRes,supRes,histRes,uomRes] = await Promise.all([
         fetch('/api/inventory?page=1&pageSize=5000'),
         fetch('/api/suppliers'),
@@ -141,12 +150,13 @@ async function initPo() {
         const d = `[${i.stock_id}] ${i.item_name}`;
         poItemLookup[d.toLowerCase()] = i;
         if (i.stock_id) poItemLookup[(i.stock_id||'').toLowerCase()] = i;
+        if (i.item_name) poItemLookup[(i.item_name||'').toLowerCase()] = i;
     });
     const mappings = await uomRes.json();
     poSupplierUOMLookup = {};
     (mappings||[]).forEach(m => {
-        if (m.supplier && m.stock_id && m.supplier_uom) {
-            poSupplierUOMLookup[(m.supplier+'|'+m.stock_id).toLowerCase()] = m.supplier_uom;
+        if (m.supplier_name && m.stock_id && m.supplier_uom) {
+            poSupplierUOMLookup[(m.supplier_name+'|'+m.stock_id).toLowerCase()] = m.supplier_uom;
         }
     });
     const suppliers = await supRes.json();
@@ -161,6 +171,11 @@ async function initPo() {
         fillSupplierUOM();
     });
     document.getElementById('npo-item-search').addEventListener('change', fillSupplierUOM);
+    document.getElementById('npo-item-search').addEventListener('input', function() {
+        // debounce: only fire when value looks like a complete selection [STOCKID] or after pause
+        const v = this.value.trim();
+        if (v.includes(']') || v.length > 20) fillSupplierUOM();
+    });
     loadPos();
 }
 
@@ -173,7 +188,11 @@ function lookupSupplierUOM(item) {
 function fillSupplierUOM() {
     const item = poItemLookup[document.getElementById('npo-item-search').value.trim().toLowerCase()];
     const mapped = lookupSupplierUOM(item);
-    if (mapped) document.getElementById('npo-sup-uom').value = mapped;
+    if (mapped) {
+        document.getElementById('npo-sup-uom').value = mapped;
+    } else if (item && item.uom) {
+        document.getElementById('npo-sup-uom').value = item.uom;
+    }
 }
 
 function switchTab(name) {
@@ -192,11 +211,12 @@ async function loadPos() {
     add('ship_status', document.getElementById('f-ship').value);
     if (document.getElementById('f-unpaid').checked) params.set('unpaid','1');
     allPos = await (await fetch('/api/pos?'+params)).json();
-    document.getElementById('po-body').innerHTML = allPos.map(p => {
+    document.getElementById('po-body').innerHTML = (allPos||[]).map(p => {
         const effBalance = (p.total||0) - (p.paid||0) - (p.balance||0);
         return `<tr style="cursor:pointer" onclick="selectPo('${esc(p.po_id)}')">
             <td style="font-family:monospace;font-weight:600">${esc(p.po_id)}</td>
-            <td>${(p.date||'').slice(0,10)}</td><td>${esc(p.supplier)||'-'}</td>
+            <td>${esc(p.bill_no)||'-'}</td>
+            <td>${toDMY(p.date)}</td><td>${esc(p.supplier)||'-'}</td>
             <td class="text-right">RM ${(p.total||0).toFixed(2)}</td>
             <td class="text-right">RM ${(p.paid||0).toFixed(2)}</td>
             <td class="text-right">RM ${(p.balance||0).toFixed(2)}</td>
@@ -221,7 +241,7 @@ async function selectPo(poId) {
     document.getElementById('po-detail').style.display = 'block';
     document.getElementById('po-detail-title').textContent = po.po_id;
     document.getElementById('po-detail-grid').innerHTML = `
-        <div class="card"><div class="stat-label">Date</div>${po.date||'-'}</div>
+        <div class="card"><div class="stat-label">Date</div>${toDMY(po.date)||'-'}</div>
         <div class="card"><div class="stat-label">Supplier</div>${esc(po.supplier)||'-'}</div>
         <div class="card"><div class="stat-label">Total</div>RM ${(po.total||0).toFixed(2)}</div>
         <div class="card"><div class="stat-label">Paid</div>RM ${(po.paid||0).toFixed(2)}</div>
@@ -229,14 +249,14 @@ async function selectPo(poId) {
         <div class="card"><div class="stat-label">Eff Balance</div>RM ${((po.total||0)-(po.paid||0)-(po.balance||0)).toFixed(2)}</div>`;
     document.getElementById('po-edit-status').value = po.status||'';
     document.getElementById('po-edit-ship').value = po.ship_status||'';
-    document.getElementById('po-edit-invdate').value = (po.invoice_date||'').slice(0,10);
+    document.getElementById('po-edit-invdate').value = toDMY(po.invoice_date);
     document.getElementById('po-detail-items').innerHTML = (po.items||[]).map(it => `
         <tr><td>${esc(it.stock_id)||'-'}</td><td>${esc(it.item_name)||''}</td>
         <td class="text-right">${(it.quantity||0).toFixed(2)}</td>
         <td class="text-right">RM ${(it.cost||0).toFixed(2)}</td>
         <td class="text-right">RM ${(it.total||0).toFixed(2)}</td><td>${esc(it.uom)||'UNIT'}</td>
         <td>${esc(it.supplier_uom)||'-'}</td></tr>`).join('');
-    poDetail.scrollIntoView({behavior:'smooth'});
+    document.getElementById('po-detail').scrollIntoView({behavior:'smooth'});
 }
 
 function closePoDetail() { document.getElementById('po-detail').style.display = 'none'; }
@@ -253,7 +273,7 @@ async function updatePoField(field) {
         await fetch('/api/pos/'+encodeURIComponent(selectedPoId)+'/status',{method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({field:'ship',status:body.status})});
     } else if (field==='invdate') {
-        body = {invoice_date: document.getElementById('po-edit-invdate').value};
+        body = {invoice_date: fromDMY(document.getElementById('po-edit-invdate').value)};
     }
     toast('Updated', true); loadPos();
 }
@@ -264,10 +284,10 @@ function editSelectedPo() {
     if (!po) return;
     switchTab('new');
     document.getElementById('npo-id').value = po.po_id;
-    document.getElementById('npo-date').value = (po.date||'').slice(0,10);
+    document.getElementById('npo-date').value = toDMY(po.date);
     document.getElementById('npo-supplier').value = po.supplier||'';
     document.getElementById('npo-bill').value = po.bill_no||'';
-    document.getElementById('npo-inv-date').value = (po.invoice_date||'').slice(0,10);
+    document.getElementById('npo-inv-date').value = toDMY(po.invoice_date);
     document.getElementById('npo-dept').value = po.department||'';
     document.getElementById('npo-terms').value = po.terms||'';
     poItems = (po.items||[]).map(it => ({
@@ -325,7 +345,7 @@ function renderPoItems() {
 
 function resetPoForm() {
     document.getElementById('npo-id').value='';
-    document.getElementById('npo-date').value=new Date().toISOString().slice(0,10);
+    document.getElementById('npo-date').value=todayDMY();
     document.getElementById('npo-supplier').value='';
     document.getElementById('npo-dept').value='';
     document.getElementById('npo-bill').value='';
@@ -339,10 +359,10 @@ async function savePo() {
     if(!supplier) return toast('Supplier required',false);
     if(!poItems.length) return toast('Add at least one item',false);
     const body = { po_id: document.getElementById('npo-id').value,
-        date: document.getElementById('npo-date').value, supplier: supplier,
+        date: fromDMY(document.getElementById('npo-date').value), supplier: supplier,
         department: document.getElementById('npo-dept').value,
         bill_no: document.getElementById('npo-bill').value,
-        invoice_date: document.getElementById('npo-inv-date').value,
+        invoice_date: fromDMY(document.getElementById('npo-inv-date').value),
         terms: document.getElementById('npo-terms').value,
         items: poItems.map(it => ({stock_id:it.stock_id,item_name:it.item_name,name:it.item_name,
             quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom,supplier_uom:it.supplier_uom})),
@@ -355,13 +375,15 @@ async function savePo() {
 
 function exportPoCSV() {
     let csv='PO ID,Date,Supplier,Total,Paid,Balance,Status,Ship,Terms,Department,Invoice Date\n';
-    allPos.forEach(p=>csv+=`${p.po_id},${(p.date||'').slice(0,10)},${p.supplier||''},${p.total||0},${p.paid||0},${p.balance||0},${p.status||''},${p.ship_status||''},${p.terms||''},${p.department||''},${p.invoice_date||''}\n`);
+    allPos.forEach(p=>csv+=`${p.po_id},${p.bill_no||''},${toDMY(p.date)},${p.supplier||''},${p.total||0},${p.paid||0},${p.balance||0},${p.status||''},${p.ship_status||''},${p.terms||''},${p.department||''},${toDMY(p.invoice_date)}\n`);
     const b=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a');
     a.href=URL.createObjectURL(b); a.download='pos.csv'; a.click();
 }
 
 function toast(m,ok){const t=document.getElementById('toast');t.textContent=m;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function previewPO(){if(!selectedPoId)return;window.open('/pos/'+encodeURIComponent(selectedPoId)+'/preview','_blank')}
+function downloadPO(){if(!selectedPoId)return;window.location='/pos/'+encodeURIComponent(selectedPoId)+'/pdf'}
 initPo();
 </script>
 {{end}}

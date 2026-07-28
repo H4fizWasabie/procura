@@ -218,10 +218,15 @@ async function saveAnchors() {
 async function importStock(input) {
     const file = input.files[0]; if(!file) return;
     const form = new FormData(); form.append('file', file);
-    const res = await fetch('/api/import', {method:'POST',body:form});
+    const res = await fetch('/api/import-stock', {method:'POST',body:form});
     const d = await res.json();
-    toast(d.success?`Imported ${d.tables} tables, ${d.rows} rows`:'Error', d.success);
-    if (d.success) loadPage(page);
+    if(d.success){
+        const c = d.counts;
+        toast(`Stock updated: ${c.updated} items` + (c.skipped_dash ? `, ${c.skipped_dash} dash→0` : '') + (c.errors ? `, ${c.errors} errors` : ''), true);
+        loadPage(page);
+    } else {
+        toast('Error: ' + d.error, false);
+    }
     input.value = '';
 }
 

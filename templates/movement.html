@@ -39,6 +39,7 @@
 
 <div id="toast" class="toast" style="display:none"></div>
 
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <script>
 let movData=[], movPage=1, movPageSize=100, selectedYear=0, selectedMonth=0;
 const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -66,6 +67,7 @@ async function loadMovements() {
     if (search) params.set('search', search);
 
     movData = await (await fetch('/api/movement?'+params)).json();
+    if (!Array.isArray(movData)) movData = [];
 
     // Pivot: group by stock_id, build month columns
     let monthCols = [];
@@ -148,15 +150,64 @@ async function uploadMovement(input) {
             <button onclick="confirmUpload('${file.name}')">Confirm Upload</button>
             <button class="btn-secondary" onclick="cancelUpload()">Cancel</button>
         </div>`;
-
-    input.value = '';
 }
 
-function cancelUpload() { document.getElementById('upload-preview').style.display='none'; }
+function cancelUpload() { document.getElementById('upload-preview').style.display='none'; document.getElementById('upload-input').value = ''; }
 
-async function confirmUpload() {
+async function confirmUpload(filename) {
     document.getElementById('upload-preview').style.display='none';
-    toast('Upload endpoint: use /api/movement/bulk with parsed Excel data. Currently requires API-level upload.','info');
+    const input = document.getElementById('upload-input');
+    const file = input.files[0];
+    if (!file) return toast('No file selected', false);
+    if (typeof XLSX === 'undefined') return toast('XLSX library not loaded — check internet connection', false);
+    
+    const reader = new FileReader();
+    reader.onerror = function() { toast('Failed to read file', false); };
+    reader.onload = async function(e) {
+        try {
+            const wb = XLSX.read(e.target.result, {type:'array'});
+            const sheet = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet, {header:1});
+            if (rows.length < 2) return toast('File has no data rows', false);
+            
+            const hdr = rows[0].map(h => String(h||'').toLowerCase().trim());
+            const idx = (names) => { for(let n of names) { const i = hdr.indexOf(n); if(i>=0) return i } return -1 };
+            const si = idx(['sku code','stock id']);
+            const ni = idx(['product name','item name']);
+            const ii = idx(['purchase quantity','in qty']);
+            const oi = idx(['sales quantity','out qty']);
+            const ai = idx(['adjustment in','adj in']);
+            const ao = idx(['adjustment out','adj out']);
+            const ci = idx(['closing balance','report closing','closing']);
+            if (si<0) return toast('Missing SKU Code column. Headers: '+hdr.slice(0,5).join(', '), false);
+            
+            const bulkRows = [];
+            for(let r=1; r<rows.length; r++) {
+                const row = rows[r];
+                const sid = String(row[si]||'').trim();
+                if (!sid) continue;
+                bulkRows.push({
+                    stock_id: sid,
+                    item_name: String(row[ni]||'').trim(),
+                    in: parseFloat(row[ii])||0,
+                    out: parseFloat(row[oi])||0,
+                    adj_in: parseFloat(row[ai])||0,
+                    adj_out: parseFloat(row[ao])||0,
+                    closing: parseFloat(row[ci])||0
+                });
+            }
+            if (!bulkRows.length) return toast('No valid rows found', false);
+            
+            const res = await fetch('/api/movement/bulk', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({year:selectedYear, month:selectedMonth, rows:bulkRows})
+            });
+            const d = await res.json();
+            if (d.success) { toast(`Imported ${d.count} rows`, true); loadMovements(); input.value = ''; }
+            else { toast('Error: '+d.error, false); }
+        } catch(e) { toast('Parse error: '+e.message, false); console.error(e); }
+    };
+    reader.readAsArrayBuffer(file);
 }
 
 async function recalcRop() {

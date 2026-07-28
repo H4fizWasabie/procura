@@ -3,11 +3,15 @@ package main
 import (
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +24,7 @@ import (
 	ximport "procura/internal/import"
 	"procura/internal/inventory"
 	"procura/internal/movement"
+	"procura/internal/pdf"
 	"procura/internal/planning"
 	"procura/internal/po"
 	"procura/internal/report"
@@ -35,10 +40,23 @@ import (
 //go:embed templates static
 var assets embed.FS
 
+var (
+	logoB64 string
+	signB64 string
+)
+
 func main() {
 	db, err := core.Open("data")
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// Load logo and signature from embedded static
+	if b, err := assets.ReadFile("static/logo.png"); err == nil {
+		logoB64 = base64.StdEncoding.EncodeToString(b)
+	}
+	if b, err := assets.ReadFile("static/sign.png"); err == nil {
+		signB64 = base64.StdEncoding.EncodeToString(b)
 	}
 
 	authSvc := &auth.Service{DB: db}
@@ -249,6 +267,16 @@ func main() {
 		writeJSON(w, http.StatusOK, invSvc.BasicList())
 	}))
 
+	// Stock Balance History Report import (daily workflow — fixed columns like Python items_screen)
+	mux.HandleFunc("POST /api/import-stock", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		file, _, err := r.FormFile("file")
+		if err != nil { writeJSON(w, 400, map[string]interface{}{"success":false,"error":"no file"}); return }
+		defer file.Close()
+		counts, err := importSvc.ImportStock(file)
+		if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
+		writeJSON(w, 200, map[string]interface{}{"success":true,"counts":counts})
+	})))
+
 	// ── Suppliers ──
 	mux.HandleFunc("GET /suppliers", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
@@ -294,7 +322,7 @@ func main() {
 		writeJSON(w, http.StatusOK, planSvc.Plan())
 	}))
 
-	mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Items []planning.OrderItem `json:"items"`
 			Notes string               `json:"notes"`
@@ -306,6 +334,54 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "orderId": orderID})
+	})))
+
+	// ── Planning → RFQ ──
+	mux.HandleFunc("POST /api/planning/rfq", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			StockIDs []string `json:"stockIds"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if len(body.StockIDs) == 0 {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "no items selected"})
+			return
+		}
+
+		// Get planning data to find items
+		planned := planSvc.Plan()
+		var rfqItems []rfq.Item
+		var supplier string
+
+		for _, p := range planned {
+			for _, sid := range body.StockIDs {
+				if p.ID == sid {
+					qty := p.Suggested
+					if qty <= 0 {
+						qty = 1
+					}
+					rfqItems = append(rfqItems, rfq.Item{
+						StockID: p.ID, Name: p.Name, UOM: p.UOM, Qty: qty,
+					})
+					if supplier == "" {
+						supplier = p.Supplier
+					}
+					break
+				}
+			}
+		}
+
+		if len(rfqItems) == 0 {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "no matching items found"})
+			return
+		}
+
+		rfqDoc := rfq.RFQ{Supplier: supplier, Items: rfqItems}
+		id, err := rfqSvc.Save(rfqDoc, r.Header.Get("X-User-Email"))
+		if err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]interface{}{"success": true, "rfq_id": id, "items": len(rfqItems)})
 	})))
 
 	// ── PO ──
@@ -332,10 +408,80 @@ func main() {
 		writeJSON(w, 200, map[string]interface{}{"success":true,"po_id":id})
 	})))
 	mux.HandleFunc("POST /api/pos/{poId}/status", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body struct{Status string `json:"status"`}; json.NewDecoder(r.Body).Decode(&body)
-		poSvc.UpdateStatus(r.PathValue("poId"), body.Status, "status")
+		var body struct {
+			Status string `json:"status"`
+			Field  string `json:"field"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		col := body.Field
+		if col == "" {
+			col = "status"
+		}
+		poSvc.UpdateStatus(r.PathValue("poId"), body.Status, col)
 		writeJSON(w, 200, map[string]interface{}{"success":true})
 	})))
+
+	// ── PO PDF preview & download ──
+	mux.HandleFunc("GET /pos/{poId}/preview", protected(func(w http.ResponseWriter, r *http.Request) {
+		po, err := poSvc.GetByID(r.PathValue("poId"))
+		if err != nil {
+			http.Error(w, "PO not found", 404)
+			return
+		}
+		sup, _ := supSvc.GetByName(po.Supplier)
+		items := make([]map[string]interface{}, len(po.Items))
+		for i, it := range po.Items {
+			items[i] = map[string]interface{}{
+				"item_name": it.Name, "quantity": it.Qty,
+				"cost": it.Cost, "total": it.Total,
+			}
+		}
+		supData := map[string]string{
+			"contact_person": sup.ContactPerson, "address": sup.Address,
+			"phone": sup.Phone, "brn": sup.BRN,
+			"bank_name": sup.BankName, "account_no": sup.AccountNo,
+		}
+		html := pdf.RenderPOHTML(po.POID, po.Date, po.Supplier, po.Department,
+			po.Terms, po.InvoiceDate, po.Total, items, supData, logoB64, signB64)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(html))
+	}))
+
+	mux.HandleFunc("GET /pos/{poId}/pdf", protected(func(w http.ResponseWriter, r *http.Request) {
+		po, err := poSvc.GetByID(r.PathValue("poId"))
+		if err != nil {
+			http.Error(w, "PO not found", 404)
+			return
+		}
+		sup, _ := supSvc.GetByName(po.Supplier)
+		items := make([]map[string]interface{}, len(po.Items))
+		for i, it := range po.Items {
+			items[i] = map[string]interface{}{
+				"item_name": it.Name, "quantity": it.Qty,
+				"cost": it.Cost, "total": it.Total,
+			}
+		}
+		supData := map[string]string{
+			"contact_person": sup.ContactPerson, "address": sup.Address,
+			"phone": sup.Phone, "brn": sup.BRN,
+			"bank_name": sup.BankName, "account_no": sup.AccountNo,
+		}
+		html := pdf.RenderPOHTML(po.POID, po.Date, po.Supplier, po.Department,
+			po.Terms, po.InvoiceDate, po.Total, items, supData, logoB64, signB64)
+
+		tmpDir := os.TempDir()
+		tmpFile := filepath.Join(tmpDir, fmt.Sprintf("po_%s.pdf", strings.ReplaceAll(po.POID, "/", "_")))
+		if err := pdf.GeneratePDF(html, tmpFile); err != nil {
+			http.Error(w, "PDF generation failed: "+err.Error(), 500)
+			return
+		}
+		defer os.Remove(tmpFile)
+
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="PO_%s.pdf"`,
+			strings.ReplaceAll(po.POID, "/", "_")))
+		http.ServeFile(w, r, tmpFile)
+	}))
 
 	// ── RFQ ──
 	mux.HandleFunc("GET /rfq", protected(func(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +504,54 @@ func main() {
 		writeJSON(w, 200, map[string]interface{}{"success":true})
 	})))
 
+	// ── RFQ PDF preview & download ──
+	mux.HandleFunc("GET /rfq/{rfqId}/preview", protected(func(w http.ResponseWriter, r *http.Request) {
+		rfqDoc, err := rfqSvc.GetByID(r.PathValue("rfqId"))
+		if err != nil {
+			http.Error(w, "RFQ not found", 404)
+			return
+		}
+		items := make([]map[string]interface{}, len(rfqDoc.Items))
+		for i, it := range rfqDoc.Items {
+			items[i] = map[string]interface{}{
+				"stock_id": it.StockID, "item_name": it.Name,
+				"uom": it.UOM, "qty": it.Qty,
+			}
+		}
+		html := pdf.RenderRFQHTML(rfqDoc.RFQID, rfqDoc.Date, rfqDoc.Supplier, items, logoB64)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(html))
+	}))
+
+	mux.HandleFunc("GET /rfq/{rfqId}/pdf", protected(func(w http.ResponseWriter, r *http.Request) {
+		rfqDoc, err := rfqSvc.GetByID(r.PathValue("rfqId"))
+		if err != nil {
+			http.Error(w, "RFQ not found", 404)
+			return
+		}
+		items := make([]map[string]interface{}, len(rfqDoc.Items))
+		for i, it := range rfqDoc.Items {
+			items[i] = map[string]interface{}{
+				"stock_id": it.StockID, "item_name": it.Name,
+				"uom": it.UOM, "qty": it.Qty,
+			}
+		}
+		html := pdf.RenderRFQHTML(rfqDoc.RFQID, rfqDoc.Date, rfqDoc.Supplier, items, logoB64)
+
+		tmpDir := os.TempDir()
+		tmpFile := filepath.Join(tmpDir, fmt.Sprintf("rfq_%s.pdf", strings.ReplaceAll(rfqDoc.RFQID, "/", "_")))
+		if err := pdf.GeneratePDF(html, tmpFile); err != nil {
+			http.Error(w, "PDF generation failed: "+err.Error(), 500)
+			return
+		}
+		defer os.Remove(tmpFile)
+
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="RFQ_%s.pdf"`,
+			strings.ReplaceAll(rfqDoc.RFQID, "/", "_")))
+		http.ServeFile(w, r, tmpFile)
+	}))
+
 	// ── Movement ──
 	mux.HandleFunc("GET /movement", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "movement", "ContentBlock": "content_movement", "User": userFromReq(r)})
@@ -365,7 +559,9 @@ func main() {
 	mux.HandleFunc("GET /api/movement", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		yr, _ := strconv.Atoi(q.Get("year")); mo, _ := strconv.Atoi(q.Get("month")); lim, _ := strconv.Atoi(q.Get("limit"))
-		writeJSON(w, http.StatusOK, movSvc.List(yr, mo, q.Get("search"), lim))
+		data := movSvc.List(yr, mo, q.Get("search"), lim)
+		if data == nil { data = []movement.Row{} }
+		writeJSON(w, http.StatusOK, data)
 	}))
 	mux.HandleFunc("GET /api/movement/years", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, movSvc.Years())
@@ -681,9 +877,18 @@ func main() {
 		file, hdr, err := r.FormFile("file")
 		if err != nil { writeJSON(w, 400, map[string]interface{}{"success":false,"error":"no file"}); return }
 		defer file.Close()
+		movYear, _ := strconv.Atoi(r.FormValue("movement_year"))
+		movMonth, _ := strconv.Atoi(r.FormValue("movement_month"))
+		if movYear > 0 && movMonth >= 1 && movMonth <= 12 {
+			// Standalone monthly movement report → use bulk endpoint logic
+			count, err := importSvc.ImportMovements(file, hdr.Filename, movYear, movMonth)
+			if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
+			writeJSON(w, 200, map[string]interface{}{"success":true,"rows":count,"tables":1})
+			return
+		}
 		result, err := importSvc.Import(file, hdr.Filename)
 		if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
-		writeJSON(w, 200, map[string]interface{}{"success":true,"run_id":result.RunID,"tables":len(result.TableRows),"rows":result.Rows})
+		writeJSON(w, 200, map[string]interface{}{"success":true,"run_id":result.RunID,"tables":len(result.TableRows),"rows":result.Rows,"sheets_found":result.SheetsFound,"headers_found":result.HeadersFound})
 	})))
 
 	// ── Change PIN ──

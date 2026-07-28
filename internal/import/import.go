@@ -14,10 +14,12 @@ import (
 )
 
 type Result struct {
-	RunID     int            `json:"run_id"`
-	Source    string         `json:"source"`
-	TableRows map[string]int `json:"tables"`
-	Rows      int            `json:"rows"`
+	RunID        int            `json:"run_id"`
+	Source       string         `json:"source"`
+	TableRows    map[string]int `json:"tables"`
+	Rows         int            `json:"rows"`
+	SheetsFound  []string       `json:"sheets_found"`
+	HeadersFound []string       `json:"headers_found,omitempty"`
 }
 
 type Service struct {
@@ -45,12 +47,18 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 	src.Close()
 
 	tableRows := map[string]int{}
+	var headersFound []string
 
-	// DB_Items
-	if idx, _ := f.GetSheetIndex("DB_Items"); idx != -1 {
-		rows, _ := f.GetRows("DB_Items")
+	// DB_Items — try exact match first, then fall back to first sheet
+
+	// DB_Items — try exact match first, then fall back to first sheet
+	itemsSheetName, itemsSheetIdx := s.findInventorySheet(f)
+	if itemsSheetIdx != -1 {
+		rows, _ := f.GetRows(itemsSheetName)
 		if len(rows) > 1 {
-			headers := normHeaders(rows[0])
+			rawHeaders := normHeaders(rows[0])
+			headers := applyInventoryAliases(rawHeaders)
+			headersFound = rawHeaders
 			inserted := 0
 			for _, row := range rows[1:] {
 				r := mapRow(headers, row)
@@ -127,27 +135,10 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 		}
 	}
 
-	// Stock movements
-	for _, yr := range []string{"2024","2025","2026"} {
-		sheetName := "Movement " + yr
-		if idx, _ := f.GetSheetIndex(sheetName); idx != -1 {
-			rows, _ := f.GetRows(sheetName)
-			if len(rows) > 1 {
-				movCount := 0
-				for _, row := range rows[1:] {
-					if len(row) < 7 { continue }
-					yrInt := intVal(yr)
-					moInt := intVal(row[1])
-					if moInt < 1 || moInt > 12 { continue }
-					sid := strVal(row[0])
-					s.DB.Exec("DELETE FROM stock_movements WHERE COALESCE(stock_id,'') = ? AND year = ? AND month = ?", sid, yrInt, moInt)
-					s.DB.Exec("INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing) VALUES (?,?,?,?,?,?,?,?,?)",
-						sid, strVal(row[2]), yrInt, moInt, floatVal(row[3]), floatVal(row[4]), floatVal(row[5]), floatVal(row[6]), floatVal(row[7]))
-					movCount++
-				}
-				tableRows["stock_movements"] = movCount
-			}
-		}
+	// Stock movements — flexible sheet matching
+	movCount := s.parseMovementSheets(f, tableRows)
+	if movCount > 0 {
+		tableRows["stock_movements"] = movCount
 	}
 
 	// Record import run
@@ -161,7 +152,317 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 		s.DB.Exec("INSERT INTO import_run_tables (run_id, table_name, rows_imported) VALUES (?,?,?)", runID, table, n)
 	}
 
-	return &Result{RunID: int(runID), Source: filename, TableRows: tableRows, Rows: total}, nil
+	return &Result{RunID: int(runID), Source: filename, TableRows: tableRows, Rows: total, SheetsFound: f.GetSheetList(), HeadersFound: headersFound}, nil
+}
+
+// inventoryFieldPatterns defines target schema columns and their aliases.
+// Matching uses substring containment (like GAS PARSER_CONFIG.INVENTORY_MAP).
+// Order matters: first match wins. Put more specific patterns before generic ones.
+var inventoryFieldPatterns = []struct {
+	target   string
+	patterns []string
+}{
+	{"stock_id", []string{"sku_code", "sku", "stock_id", "stock id", "item_code", "item code", "part_no", "part no", "part_number", "part number", "material", "item_no", "item no", "product_code", "product code"}},
+	{"item_name", []string{"product_name", "product name", "item_name", "item name", "description", "desc", "product"}},
+	{"product_type", []string{"product_type", "product type", "p_type", "p.type", "type"}},
+	{"product_status", []string{"product_status", "product status", "status", "state", "availability"}},
+	{"category", []string{"category", "cat", "group", "family"}},
+	{"cost", []string{"cost_price", "cost price", "unit_cost", "unit cost", "buying_price", "buying price", "cost", "rate", "price"}},
+	{"supplier", []string{"supplier_name", "supplier name", "supplier", "vendor", "mfr", "manufacturer"}},
+	{"uom", []string{"uom", "unit", "measure", "pkg", "packing"}},
+	{"current", []string{"actual_stock", "actual stock", "current_stock", "current stock", "current", "qty_on_hand", "qty on hand", "quantity", "qty", "balance", "on_hand", "on hand", "stock", "closing_balance", "closing balance", "closing"}},
+	{"pack_size", []string{"pack_size", "pack size"}},
+	{"exclude", []string{"exclude"}},
+	{"velocity_override", []string{"velocity_override", "velocity override"}},
+	{"item_behaviour", []string{"item_behaviour", "item behaviour"}},
+}
+
+func applyInventoryAliases(headers []string) []string {
+	out := make([]string, len(headers))
+	for i, h := range headers {
+		// Try to match against patterns (substring match like GAS parser)
+		for _, fp := range inventoryFieldPatterns {
+			for _, pat := range fp.patterns {
+				if strings.Contains(h, pat) {
+					out[i] = fp.target
+					goto next
+				}
+			}
+		}
+		// No match found, keep original header
+		out[i] = h
+	next:
+	}
+	return out
+}
+
+// findInventorySheet returns the best sheet for inventory import.
+// Tries DB_Items first, then any sheet with inventory-like name, then first sheet.
+func (s *Service) findInventorySheet(f *excelize.File) (string, int) {
+	// Exact match
+	if idx, _ := f.GetSheetIndex("DB_Items"); idx != -1 {
+		return "DB_Items", idx
+	}
+	// Try sheets with inventory-related names
+	invPatterns := []string{"item", "inventory", "stock", "balance", "product"}
+	for _, sheetName := range f.GetSheetList() {
+		lower := strings.ToLower(sheetName)
+		for _, p := range invPatterns {
+			if strings.Contains(lower, p) {
+				if idx, _ := f.GetSheetIndex(sheetName); idx != -1 {
+					return sheetName, idx
+				}
+			}
+		}
+	}
+	// Fallback: first sheet
+	if f.SheetCount > 0 {
+		name := f.GetSheetName(0)
+		if idx, _ := f.GetSheetIndex(name); idx != -1 {
+			return name, idx
+		}
+	}
+	return "", -1
+}
+
+// parseMovementSheets finds movement sheets and parses them in either long or wide format.
+func (s *Service) parseMovementSheets(f *excelize.File, tableRows map[string]int) int {
+	total := 0
+	for _, sheetName := range f.GetSheetList() {
+		lower := strings.ToLower(sheetName)
+		if !strings.Contains(lower, "movement") {
+			continue
+		}
+		// Extract year from sheet name (first 4-digit number)
+		yr := extractYear(sheetName)
+		if yr == 0 {
+			continue
+		}
+		rows, _ := f.GetRows(sheetName)
+		if len(rows) < 2 {
+			continue
+		}
+		// Detect format: wide format has 20+ columns (2 + 12*5), long format has ~8
+		if len(rows[0]) >= 20 {
+			total += s.parseWideMovement(rows, yr)
+		} else {
+			total += s.parseLongMovement(rows, yr)
+		}
+	}
+	return total
+}
+
+// parseWideMovement handles GAS-style wide format: one row per item, months as column blocks.
+// Header row 0: Stock ID, Item Name, JANUARY(merged), FEBRUARY(merged), ...
+// Header row 1: empty, empty, IN, OUT, ADJ IN, ADJ OUT, REPORT CLOSING, ...
+// Data rows 2+: Stock ID, Item Name, val, val, val, val, val, ...
+func (s *Service) parseWideMovement(rows [][]string, year int) int {
+	if len(rows) < 3 {
+		return 0
+	}
+	// Determine number of month blocks from header
+	numMonths := (len(rows[0]) - 2) / 5
+	if numMonths > 12 {
+		numMonths = 12
+	}
+	if numMonths < 1 {
+		return 0
+	}
+	count := 0
+	for _, row := range rows[2:] {
+		sid := strVal(row[0])
+		if sid == "" {
+			continue
+		}
+		itemName := ""
+		if len(row) > 1 {
+			itemName = strVal(row[1])
+		}
+		for m := 0; m < numMonths; m++ {
+			base := 2 + (m * 5)
+			if base+4 >= len(row) {
+				break
+			}
+			mo := m + 1
+			inQty := floatVal(row[base])
+			outQty := floatVal(row[base+1])
+			adjIn := floatVal(row[base+2])
+			adjOut := floatVal(row[base+3])
+			closing := floatVal(row[base+4])
+			// Skip empty rows
+			if inQty == 0 && outQty == 0 && adjIn == 0 && adjOut == 0 && closing == 0 {
+				continue
+			}
+			s.DB.Exec("DELETE FROM stock_movements WHERE COALESCE(stock_id,'') = ? AND year = ? AND month = ?", sid, year, mo)
+			s.DB.Exec("INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing) VALUES (?,?,?,?,?,?,?,?,?)",
+				sid, itemName, year, mo, inQty, outQty, adjIn, adjOut, closing)
+			count++
+		}
+	}
+	return count
+}
+
+// parseLongMovement handles transposed format: one row per stock_id+month, 8+ columns.
+func (s *Service) parseLongMovement(rows [][]string, year int) int {
+	count := 0
+	for _, row := range rows[1:] {
+		if len(row) < 8 {
+			continue
+		}
+		mo := intVal(row[1])
+		if mo < 1 || mo > 12 {
+			continue
+		}
+		sid := strVal(row[0])
+		if sid == "" {
+			continue
+		}
+		s.DB.Exec("DELETE FROM stock_movements WHERE COALESCE(stock_id,'') = ? AND year = ? AND month = ?", sid, year, mo)
+		s.DB.Exec("INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing) VALUES (?,?,?,?,?,?,?,?,?)",
+			sid, strVal(row[2]), year, mo, floatVal(row[3]), floatVal(row[4]), floatVal(row[5]), floatVal(row[6]), floatVal(row[7]))
+		count++
+	}
+	return count
+}
+
+// extractYear returns the first 4-digit number from a string, or 0.
+func extractYear(s string) int {
+	for i := 0; i < len(s)-3; i++ {
+		if s[i] >= '0' && s[i] <= '9' &&
+			s[i+1] >= '0' && s[i+1] <= '9' &&
+			s[i+2] >= '0' && s[i+2] <= '9' &&
+			s[i+3] >= '0' && s[i+3] <= '9' {
+			yr := 0
+			fmt.Sscanf(s[i:i+4], "%d", &yr)
+			if yr >= 2020 && yr <= 2030 {
+				return yr
+			}
+		}
+	}
+	return 0
+}
+
+// ImportStock handles the daily Stock Balance History Report import.
+// Uses fixed column positions matching the Python items_screen._import_stock_excel:
+//   col 4 (D): SKU Code → matched against items.stock_id
+//   col 11 (K): Actual Stock → written to items.current_stock
+// Returns counts: {updated, skipped_empty, skipped_dash, errors}.
+func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
+	f, err := excelize.OpenReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("open xlsx: %w", err)
+	}
+	defer f.Close()
+
+	// Use active/first sheet
+	if f.SheetCount == 0 {
+		return nil, fmt.Errorf("no sheets in workbook")
+	}
+	rows, err := f.GetRows(f.GetSheetName(0))
+	if err != nil {
+		return nil, fmt.Errorf("read sheet: %w", err)
+	}
+
+	updated, skippedEmpty, skippedDash, errors := 0, 0, 0, 0
+	for i, row := range rows {
+		if i == 0 {
+			continue // skip header
+		}
+		// col 4 (index 3): SKU Code
+		sku := ""
+		if len(row) > 3 {
+			sku = strings.TrimSpace(row[3])
+		}
+		if sku == "" {
+			continue
+		}
+		// col 11 (index 10): Actual Stock
+		stockRaw := ""
+		if len(row) > 10 {
+			stockRaw = strings.TrimSpace(row[10])
+		}
+		if stockRaw == "" {
+			skippedEmpty++
+			continue
+		}
+		var stockVal int
+		if stockRaw == "-" {
+			stockVal = 0
+			skippedDash++
+		} else {
+			f, err := parseFloat(stockRaw)
+			if err != nil {
+				errors++
+				continue
+			}
+			stockVal = int(f)
+		}
+		result, err := s.DB.Exec("UPDATE items SET current_stock = ? WHERE stock_id = ?", stockVal, sku)
+		if err != nil {
+			errors++
+			continue
+		}
+		n, _ := result.RowsAffected()
+		if n > 0 {
+			updated++
+		}
+	}
+
+	return map[string]int{
+		"updated":       updated,
+		"skipped_empty": skippedEmpty,
+		"skipped_dash":  skippedDash,
+		"errors":        errors,
+	}, nil
+}
+
+func parseFloat(s string) (float64, error) {
+	var f float64
+	_, err := fmt.Sscanf(strings.ReplaceAll(s, ",", ""), "%f", &f)
+	return f, err
+}
+
+// ImportMovements handles standalone single-sheet Stock Movement Report (Sheet1, 7 columns).
+func (s *Service) ImportMovements(r io.Reader, filename string, year, month int) (int, error) {
+	f, err := excelize.OpenReader(r)
+	if err != nil {
+		return 0, fmt.Errorf("open xlsx: %w", err)
+	}
+	defer f.Close()
+
+	rows, err := f.GetRows("Sheet1")
+	if err != nil {
+		// Try active sheet
+		if f.SheetCount > 0 {
+			rows, err = f.GetRows(f.GetSheetName(0))
+		}
+		if err != nil {
+			return 0, fmt.Errorf("no Sheet1 or active sheet found")
+		}
+	}
+	if len(rows) < 2 || len(rows[0]) < 7 {
+		return 0, fmt.Errorf("expected 7 columns (SKU Code, Product Name, Purchase Qty, Sales Qty, Adj In, Adj Out, Closing), got %d", len(rows[0]))
+	}
+
+	// Delete existing rows for this year/month
+	s.DB.Exec("DELETE FROM stock_movements WHERE year = ? AND month = ?", year, month)
+
+	count := 0
+	for _, row := range rows[1:] {
+		if len(row) < 7 {
+			continue
+		}
+		sid := strVal(row[0])
+		if sid == "" {
+			continue
+		}
+		s.DB.Exec(`
+			INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, sid, strVal(row[1]), year, month, floatVal(row[2]), floatVal(row[3]), floatVal(row[4]), floatVal(row[5]), floatVal(row[6]))
+		count++
+	}
+	return count, nil
 }
 
 func normHeaders(headers []string) []string {
