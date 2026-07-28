@@ -3,6 +3,9 @@ package movement
 import (
 	"database/sql"
 	"fmt"
+	"math"
+	"sort"
+	"time"
 )
 
 type Row struct {
@@ -81,18 +84,156 @@ func (s *Service) Years() []int {
 	return out
 }
 
-// RecalcROP updates items.rop = avg monthly consumption * 2 from movement data.
+// RecalcROP mirrors GAS autoCalculateROP v3:
+//   - Weighted velocity from monthly usage (out_qty + adj_out)
+//   - Recency buckets: 0-2mo 50%, 3-5mo 30%, 6+mo 20%
+//   - ROP = CEIL(weighted_velocity * 2)
+//   - Respects velocity_override and excludes Service/Excluded items.
 func (s *Service) RecalcROP() int {
-	res, err := s.DB.Exec(`
-		UPDATE items SET rop = (
-			SELECT COALESCE(AVG(out_qty + adj_out), 0) * 2
-			FROM stock_movements
-			WHERE stock_movements.stock_id = items.stock_id
-		) WHERE rop > 0 OR rop IS NULL
+	// 1. Fetch movement data: stock_id, year, month, usage (out + adj_out)
+	cutoff := time.Now().AddDate(0, -36, 0) // 36-month lookback
+	rows, err := s.DB.Query(`
+		SELECT COALESCE(stock_id,''), year, month,
+		       COALESCE(out_qty,0) + COALESCE(adj_out,0) AS usage
+		FROM stock_movements
+		WHERE (year > ? OR (year = ? AND month >= ?))
+		ORDER BY stock_id, year, month
+	`, cutoff.Year(), cutoff.Year(), int(cutoff.Month()))
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+
+	type monthlyUsage struct {
+		year, month int
+		usage       float64
+	}
+	usageMap := map[string][]monthlyUsage{}
+	for rows.Next() {
+		var sid string
+		var mu monthlyUsage
+		rows.Scan(&sid, &mu.year, &mu.month, &mu.usage)
+		usageMap[sid] = append(usageMap[sid], mu)
+	}
+
+	// 2. Fetch all items (stock_id, rop, exclude, item_behaviour, velocity_override)
+	itemRows, err := s.DB.Query(`
+		SELECT stock_id, COALESCE(rop,0), COALESCE(exclude,''),
+		       COALESCE(item_behaviour,''), COALESCE(velocity_override,0)
+		FROM items
 	`)
-	if err != nil { return 0 }
-	n, _ := res.RowsAffected()
-	return int(n)
+	if err != nil {
+		return 0
+	}
+	defer itemRows.Close()
+
+	type itemRec struct {
+		id       string
+		currROP  float64
+		exclude  string
+		beh      string
+		velOv    float64
+	}
+	var items []itemRec
+	for itemRows.Next() {
+		var it itemRec
+		itemRows.Scan(&it.id, &it.currROP, &it.exclude, &it.beh, &it.velOv)
+		items = append(items, it)
+	}
+
+	// 3. Compute ROP per item
+	now := time.Now()
+	currentYearMonth := now.Year()*12 + int(now.Month()) - 1
+
+	buckets := []struct {
+		from, to, weight float64
+	}{
+		{0, 2, 0.50},
+		{3, 5, 0.30},
+		{6, 35, 0.20},
+	}
+
+	updated := 0
+	for _, it := range items {
+		newROP := 0.0
+
+		// Skip: service / exclude
+		beh := it.beh
+		excl := it.exclude
+		if beh == "Service" || excl == "TRUE" || excl == "YES" || excl == "EXCLUDE" || excl == "1" {
+			newROP = 0
+		} else if it.velOv > 0 {
+			// Velocity override
+			newROP = math.Ceil(it.velOv * 2)
+		} else {
+			// Weighted velocity from movement history
+			usages := usageMap[it.id]
+			if len(usages) > 0 {
+				// Compute monthsAgo for each data point
+				type point struct {
+					monthsAgo int
+					usage     float64
+				}
+				var points []point
+				lifecycleStart := -1
+				for _, mu := range usages {
+					ym := mu.year*12 + mu.month - 1
+					monthsAgo := currentYearMonth - ym
+					if monthsAgo < 0 {
+						continue // future data, skip
+					}
+					isActive := mu.usage > 0
+					points = append(points, point{monthsAgo, mu.usage})
+					if isActive && monthsAgo > lifecycleStart {
+						lifecycleStart = monthsAgo
+					}
+				}
+
+				if lifecycleStart >= 0 && len(points) > 0 {
+					// Only include months within lifecycle
+					var activePoints []point
+					for _, p := range points {
+						if p.monthsAgo <= lifecycleStart {
+							activePoints = append(activePoints, p)
+						}
+					}
+
+					// Sort by monthsAgo for weighted calculation
+					sort.Slice(activePoints, func(i, j int) bool {
+						return activePoints[i].monthsAgo < activePoints[j].monthsAgo
+					})
+
+					totalWV, totalW := 0.0, 0.0
+					for _, b := range buckets {
+						sum, count := 0.0, 0
+						for _, p := range activePoints {
+							if float64(p.monthsAgo) >= b.from && float64(p.monthsAgo) <= b.to {
+								sum += p.usage
+								count++
+							}
+						}
+						if count > 0 {
+							avg := sum / float64(count)
+							totalWV += avg * b.weight
+							totalW += b.weight
+						}
+					}
+					if totalW > 0 {
+						velocity := totalWV / totalW
+						newROP = math.Ceil(velocity * 2)
+					}
+				}
+			}
+		}
+
+		// Only update if ROP changed
+		if newROP != it.currROP {
+			s.DB.Exec("UPDATE items SET rop = ? WHERE stock_id = ?", newROP, it.id)
+			updated++
+		}
+	}
+
+	return updated
 }
 
 func strv(s sql.NullString) string { if s.Valid { return s.String }; return "" }
