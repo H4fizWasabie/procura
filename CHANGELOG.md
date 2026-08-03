@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-03
+- [rfq] Item name field now autocompletes from inventory (native datalist, match by name or stock ID → auto-fills stock ID + UOM); free text still allowed for new items not in inventory. `/api/inventory/basic` now also returns UOM + supplier
+
+## 2026-08-03
 - [planning] Added filter bar (supplier, product type, category, status dropdowns + search), GAS-style; select-all now respects active filters; empty-state row added
 - [rfq] Added search (RFQ ID/supplier) and supplier dropdown filter to RFQ history list
 

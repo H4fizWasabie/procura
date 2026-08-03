@@ -138,7 +138,7 @@ func (s *Service) UpdateAnchors(stockID string, updates map[string]interface{}) 
 // BasicList returns ID + Name for dropdowns. Excludes Unavailable items.
 func (s *Service) BasicList() []map[string]string {
 	rows, _ := s.DB.Query(`
-		SELECT stock_id, item_name, category
+		SELECT stock_id, item_name, category, COALESCE(uom,''), COALESCE(supplier_name,'')
 		FROM items
 		WHERE COALESCE(product_status,'') != 'Unavailable'
 		ORDER BY item_name
@@ -146,9 +146,9 @@ func (s *Service) BasicList() []map[string]string {
 	defer rows.Close()
 	var out []map[string]string
 	for rows.Next() {
-		var id, name, cat string
-		rows.Scan(&id, &name, &cat)
-		out = append(out, map[string]string{"Stock ID": id, "Item Name": name, "Category": cat})
+		var id, name, cat, uom, sup string
+		rows.Scan(&id, &name, &cat, &uom, &sup)
+		out = append(out, map[string]string{"Stock ID": id, "Item Name": name, "Category": cat, "UOM": uom, "Supplier": sup})
 	}
 	return out
 }
