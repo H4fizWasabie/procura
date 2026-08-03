@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-03
+- [planning] Added filter bar (supplier, product type, category, status dropdowns + search), GAS-style; select-all now respects active filters; empty-state row added
+- [rfq] Added search (RFQ ID/supplier) and supplier dropdown filter to RFQ history list
+
 ## 2026-07-29
 - [planning] Aligned turnover rate, velocity thresholds, and cap months with GAS/Python: turnover = annual total_out / avg(report_closing) for most recent year (was lifetime sum); thresholds 0.50/0.10 (was 12/4); caps 1.5/1.5/2.0 months (was 4/3/2). Go planning now matches procurepilot Python output
 

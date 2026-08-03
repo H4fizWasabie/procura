@@ -9,7 +9,11 @@
 </div>
 
 <div class="search-bar">
-    <input type="text" id="filter" placeholder="Filter by name, supplier, or category..." oninput="render()">
+    <input type="text" id="filter" placeholder="Search name, ID, supplier..." oninput="render()" style="flex:1">
+    <select id="f-supplier" style="width:160px" onchange="render()"><option value="">All Suppliers</option></select>
+    <select id="f-type" style="width:140px" onchange="render()"><option value="">All Types</option></select>
+    <select id="f-category" style="width:150px" onchange="render()"><option value="">All Categories</option></select>
+    <select id="f-status" style="width:120px" onchange="render()"><option value="">All Status</option></select>
 </div>
 
 <table>
@@ -31,18 +35,41 @@ async function load() {
     const res = await fetch('/api/planning');
     data = await res.json();
     selected.clear();
+    fillOptions();
     render();
 }
 
-function render() {
+function fillOptions() {
+    const uniq = arr => [...new Set(arr.filter(Boolean))].sort();
+    const set = (id, label, vals) => {
+        const sel = document.getElementById(id);
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">' + label + '</option>' + vals.map(v => `<option>${esc(v)}</option>`).join('');
+        sel.value = cur; // keep selection across reloads
+    };
+    set('f-supplier', 'All Suppliers', uniq(data.map(i => i.supplier)));
+    set('f-type', 'All Types', uniq(data.map(i => i.productType)));
+    set('f-category', 'All Categories', uniq(data.map(i => i.category)));
+    set('f-status', 'All Status', uniq(data.map(i => i.status)));
+}
+
+function matches(it) {
     const q = (document.getElementById('filter').value || '').toLowerCase();
-    const filtered = data.filter(i =>
-        !q || (i.id||'').toLowerCase().includes(q) || (i.name||'').toLowerCase().includes(q)
-            || (i.supplier||'').toLowerCase().includes(q) || (i.category||'').toLowerCase().includes(q)
-    );
+    if (q && !(it.id||'').toLowerCase().includes(q) && !(it.name||'').toLowerCase().includes(q)
+            && !(it.supplier||'').toLowerCase().includes(q) && !(it.category||'').toLowerCase().includes(q)) return false;
+    const v = id => document.getElementById(id).value;
+    if (v('f-supplier') && (it.supplier||'') !== v('f-supplier')) return false;
+    if (v('f-type') && (it.productType||'') !== v('f-type')) return false;
+    if (v('f-category') && (it.category||'') !== v('f-category')) return false;
+    if (v('f-status') && (it.status||'') !== v('f-status')) return false;
+    return true;
+}
+
+function render() {
+    const filtered = data.filter(matches);
 
     const tbody = document.getElementById('plan-body');
-    tbody.innerHTML = filtered.map((it, idx) => `
+    tbody.innerHTML = filtered.length ? filtered.map((it, idx) => `
         <tr>
             <td><input type="checkbox" ${selected.has(it.id) ? 'checked' : ''} onchange="toggle('${esc(it.id)}', this.checked)"></td>
             <td>${esc(it.id)}</td>
@@ -57,7 +84,7 @@ function render() {
             <td class="money">${it.suggested > 0 ? it.suggested.toFixed(0) : '-'}</td>
             <td class="money">${it.cost ? 'RM ' + it.cost.toFixed(2) : '-'}</td>
         </tr>
-    `).join('');
+    `).join('') : '<tr><td colspan="12" style="text-align:center;color:var(--muted)">No items match filters</td></tr>';
 
     document.getElementById('order-btn').disabled = selected.size === 0;
     document.getElementById('rfq-btn').disabled = selected.size === 0;
@@ -65,13 +92,7 @@ function render() {
 
 function toggle(id, on) { on ? selected.add(id) : selected.delete(id); render(); }
 function toggleAll(el) {
-    const q = (document.getElementById('filter').value || '').toLowerCase();
-    data.forEach(it => {
-        if (!q || (it.id||'').toLowerCase().includes(q) || (it.name||'').toLowerCase().includes(q)
-                || (it.supplier||'').toLowerCase().includes(q)) {
-            el.checked ? selected.add(it.id) : selected.delete(it.id);
-        }
-    });
+    data.forEach(it => { if (matches(it)) el.checked ? selected.add(it.id) : selected.delete(it.id); });
     render();
 }
 

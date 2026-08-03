@@ -1,6 +1,10 @@
 {{template "base.html" .}}
 {{define "content_rfq"}}
 <div class="top-bar"><h2>RFQ</h2><button onclick="openCreate()">+ New RFQ</button></div>
+<div class="search-bar">
+    <input type="text" id="filter" placeholder="Search RFQ ID or supplier..." oninput="renderRFQ()" style="flex:1">
+    <select id="f-supplier" style="width:180px" onchange="renderRFQ()"><option value="">All Suppliers</option></select>
+</div>
 <table><thead><tr><th>RFQ ID</th><th>Date</th><th>Supplier</th><th>Items</th><th>Actions</th></tr></thead><tbody id="body"></tbody></table>
 <div id="toast" class="toast" style="display:none"></div>
 
@@ -26,7 +30,7 @@
 </div>
 
 <script>
-let suppliers = [];
+let suppliers = [], rfqData = [];
 function toDMY(iso){if(!iso)return'';const s=iso.slice(0,10);if(s.indexOf('/')!==-1)return s;const d=s.split('-');if(d.length!==3)return s;return d[2]+'/'+d[1]+'/'+d[0]}
 function fromDMY(dmy){if(!dmy)return'';const p=dmy.split('/');if(p.length!==3)return dmy;return p[2]+'-'+p[1]+'-'+p[0]}
 function todayDMY(){const d=new Date();return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear()}
@@ -48,15 +52,29 @@ async function init() {
     }
 }
 async function load() {
-    const res = await fetch('/api/rfq'); const data = await res.json();
-    document.getElementById('body').innerHTML = data.map(r => `
+    const res = await fetch('/api/rfq'); rfqData = await res.json();
+    const sup = document.getElementById('f-supplier').value;
+    document.getElementById('f-supplier').innerHTML = '<option value="">All Suppliers</option>' +
+        [...new Set(rfqData.map(r => r.supplier).filter(Boolean))].sort().map(s => `<option>${esc(s)}</option>`).join('');
+    document.getElementById('f-supplier').value = sup; // keep selection across reloads
+    renderRFQ();
+}
+function renderRFQ() {
+    const q = (document.getElementById('filter').value || '').toLowerCase();
+    const sup = document.getElementById('f-supplier').value;
+    const rows = rfqData.filter(r => {
+        if (sup && (r.supplier||'') !== sup) return false;
+        if (q && !(r.rfq_id||'').toLowerCase().includes(q) && !(r.supplier||'').toLowerCase().includes(q)) return false;
+        return true;
+    });
+    document.getElementById('body').innerHTML = rows.length ? rows.map(r => `
         <tr><td class="link">${esc(r.rfq_id)}</td><td>${toDMY(r.date)}</td>
         <td>${esc(r.supplier||'')}</td><td>${r.items_count||0}</td>
         <td style="display:flex;gap:4px">
             <button onclick="previewRFQ('${esc(r.rfq_id)}')" class="btn-sm">👁</button>
             <button onclick="downloadRFQ('${esc(r.rfq_id)}')" class="btn-sm">📥</button>
             <button onclick="delRFQ('${esc(r.rfq_id)}')" class="btn-sm btn-danger">Del</button>
-        </td></tr>`).join('');
+        </td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No RFQs match filters</td></tr>';
 }
 async function openCreate() {
     const res = await fetch('/api/rfq/next-id'); const {id} = await res.json();
