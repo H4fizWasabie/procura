@@ -14,10 +14,10 @@ const (
 	supplierLeadDays  = 14
 	paymentDelayDays  = 30
 	safetyBufferDays  = 14
-	turnoverFastThres = 12.0 // times per year
-	turnoverSlowThres = 4.0
-	capFastMonths     = 4.0
-	capMediumMonths   = 3.0
+	turnoverFastThres = 0.50 // turnover ratio (annual out / avg closing), GAS MOV_CONFIG
+	turnoverSlowThres = 0.10
+	capFastMonths     = 1.5
+	capMediumMonths   = 1.5
 	capSlowMonths     = 2.0
 	ropMonths         = 2.0 // ROP = 2 months of velocity
 	safetyStockMonths = 1.0
@@ -303,13 +303,22 @@ func (s *Service) pipelineStockIDs() map[string]bool {
 	return p
 }
 
-// turnoverRates computes turnover rate (annual consumption / ROP) from movement data.
+// turnoverRates computes annual turnover ratio (total_out / avg closing)
+// for the most recent year with movement data, mirroring GAS/Python.
 func (s *Service) turnoverRates() map[string]float64 {
+	var year sql.NullInt64
+	s.DB.QueryRow("SELECT MAX(year) FROM stock_movements").Scan(&year)
+	if !year.Valid {
+		return map[string]float64{}
+	}
+
 	rows, _ := s.DB.Query(`
-		SELECT stock_id, SUM(out_qty + adj_out) as total_out
+		SELECT stock_id, SUM(COALESCE(out_qty,0) + COALESCE(adj_out,0)) as total_out,
+		       AVG(report_closing) as avg_closing
 		FROM stock_movements
+		WHERE year = ? AND COALESCE(stock_id,'') != ''
 		GROUP BY stock_id
-	`)
+	`, year.Int64)
 	if rows == nil {
 		return map[string]float64{}
 	}
@@ -318,10 +327,10 @@ func (s *Service) turnoverRates() map[string]float64 {
 	m := map[string]float64{}
 	for rows.Next() {
 		var sid string
-		var total float64
-		rows.Scan(&sid, &total)
-		if sid != "" && total > 0 {
-			m[strings.ToUpper(strings.TrimSpace(sid))] = total
+		var total, avgClosing float64
+		rows.Scan(&sid, &total, &avgClosing)
+		if sid != "" && avgClosing > 0 {
+			m[strings.ToUpper(strings.TrimSpace(sid))] = total / avgClosing
 		}
 	}
 	return m

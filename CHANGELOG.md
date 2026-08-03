@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-07-29
+- [planning] Aligned turnover rate, velocity thresholds, and cap months with GAS/Python: turnover = annual total_out / avg(report_closing) for most recent year (was lifetime sum); thresholds 0.50/0.10 (was 12/4); caps 1.5/1.5/2.0 months (was 4/3/2). Go planning now matches procurepilot Python output
+
 ## 2026-07-28
 - [movement] Rewrote `RecalcROP()` to match GAS v3 weighted-velocity algorithm: recency buckets (0-2mo 50%, 3-5mo 30%, 6+mo 20%), velocity_override support, Service/Exclude skip, 36-month lookback, CEIL rounding. Was: simple `AVG(usage)*2`
 - [planning] Fixed `createRFQ()` — supplier now carried per-item into RFQ draft; mixed-supplier warning added
