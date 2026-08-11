@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-12
+- [uom] UOM page now also lists item-level usages (478 supplier_item_mappings) joined to standard UOM via case-insensitive supplier+UOM match — shows which items carry each supplier unit
+
+## 2026-08-12
 - [uom] Fix UOM page showing garbage — it fetched item-level /api/uom/mappings but rendered conversion columns (standard_uom/multiplier never existed in that payload); page now shows the 108 supplier→standard conversions from /api/uom, modal saves conversions via SaveUOM, dead mappings route removed
 
 ## 2026-08-12

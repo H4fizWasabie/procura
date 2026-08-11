@@ -897,6 +897,9 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	}))
 
 	// ── UOM ──
+	mux.HandleFunc("GET /api/uom/mappings", protected(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, uomSvc.ItemUsages(r.URL.Query().Get("supplier")))
+	}))
 	mux.HandleFunc("GET /api/uom", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, uomSvc.UOMs(r.URL.Query().Get("supplier")))
 	}))

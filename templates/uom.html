@@ -7,6 +7,11 @@
 <table><thead><tr><th>Supplier</th><th>Supplier UOM</th><th>Standard UOM</th></tr></thead>
 <tbody id="body"></tbody></table>
 <div id="empty" class="empty" style="display:none"><span class="material-icons">straighten</span><p>No UOM conversions found</p></div>
+
+<h3 style="margin-top:28px">Item UOM Usages</h3>
+<table><thead><tr><th>Supplier</th><th>Item</th><th>Stock ID</th><th>Supplier UOM</th><th>Standard UOM</th></tr></thead>
+<tbody id="usage-body"></tbody></table>
+<div id="usage-empty" class="empty" style="display:none"><span class="material-icons">inventory_2</span><p>No item mappings found</p></div>
 <div id="toast" class="toast" style="display:none"></div>
 
 <div id="mapping-modal" class="modal">
@@ -37,9 +42,13 @@ async function init() {
 }
 async function loadMappings() {
     const supplier = document.getElementById('supplier-filter').value;
-    const url = '/api/uom' + (supplier ? '?supplier=' + encodeURIComponent(supplier) : '');
-    const res = await fetch(url);
-    const data = await res.json();
+    const qs = supplier ? '?supplier=' + encodeURIComponent(supplier) : '';
+    const [convRes, usageRes] = await Promise.all([
+        fetch('/api/uom' + qs),
+        fetch('/api/uom/mappings' + qs)
+    ]);
+    const data = await convRes.json();
+    const usages = await usageRes.json();
     if (!data || data.length === 0) {
         document.getElementById('body').innerHTML = '';
         document.getElementById('empty').style.display = 'block';
@@ -48,6 +57,16 @@ async function loadMappings() {
         document.getElementById('body').innerHTML = data.map(m => `
             <tr><td>${esc(m.supplier_name||'')}</td><td>${esc(m.supplier_uom||'')}</td>
             <td>${esc(m.standard_uom||'')}</td></tr>`).join('');
+    }
+    if (!usages || usages.length === 0) {
+        document.getElementById('usage-body').innerHTML = '';
+        document.getElementById('usage-empty').style.display = 'block';
+    } else {
+        document.getElementById('usage-empty').style.display = 'none';
+        document.getElementById('usage-body').innerHTML = usages.map(m => `
+            <tr><td>${esc(m.supplier_name||'')}</td><td>${esc(m.supplier_item_name||'')}</td>
+            <td style="font-family:monospace">${esc(m.stock_id||'-')}</td><td>${esc(m.supplier_uom||'')}</td>
+            <td>${esc(m.standard_uom||'-')}</td></tr>`).join('');
     }
 }
 function openCreate() { document.getElementById('mapping-modal').classList.add('open'); }

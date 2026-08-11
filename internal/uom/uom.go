@@ -9,7 +9,40 @@ type UOM struct {
 	StandardUOM  string `json:"standard_uom"`
 }
 
+// ItemUsage is one item's supplier unit, joined to its standard UOM conversion.
+type ItemUsage struct {
+	SupplierName    string `json:"supplier_name"`
+	SupplierItemName string `json:"supplier_item_name"`
+	StockID         string `json:"stock_id"`
+	Brand           string `json:"brand"`
+	SupplierUOM     string `json:"supplier_uom"`
+	StandardUOM     string `json:"standard_uom"`
+}
+
 type Service struct{ DB *sql.DB }
+
+func (s *Service) ItemUsages(supplier string) []ItemUsage {
+	q := `SELECT m.supplier_name, COALESCE(m.supplier_item_name,''), COALESCE(m.stock_id,''), COALESCE(m.brand,''),
+	       COALESCE(m.supplier_uom,''), COALESCE(u.standard_uom,'')
+	       FROM supplier_item_mappings m
+	       LEFT JOIN supplier_uom u ON UPPER(u.supplier_name)=UPPER(m.supplier_name) AND UPPER(u.supplier_uom)=UPPER(m.supplier_uom)
+	       WHERE m.is_active=1`
+	args := []interface{}{}
+	if supplier != "" {
+		q += " AND m.supplier_name = ?"
+		args = append(args, supplier)
+	}
+	q += " ORDER BY m.supplier_name, m.supplier_item_name"
+	rows, err := s.DB.Query(q, args...)
+	if err != nil { return []ItemUsage{} }
+	defer rows.Close()
+	var out []ItemUsage
+	for rows.Next() {
+		var u ItemUsage; rows.Scan(&u.SupplierName, &u.SupplierItemName, &u.StockID, &u.Brand, &u.SupplierUOM, &u.StandardUOM)
+		out = append(out, u)
+	}
+	return out
+}
 
 func (s *Service) UOMs(supplier string) []UOM {
 	var rows *sql.Rows
