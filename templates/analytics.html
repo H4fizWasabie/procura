@@ -8,6 +8,8 @@
         <span>To</span>
         <select id="at-month" onchange="load()"></select><select id="at-year" onchange="load()"></select>
         <button onclick="load(true)">Refresh</button>
+        <button onclick="freeze()">Freeze Month</button>
+        <button onclick="exportXlsx()">Export Excel</button>
     </div>
 </div>
 
@@ -192,6 +194,18 @@ function renderTab(tab) {
     }
 }
 function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function freeze() {
+    const r = getRange();
+    const label = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][r.to_month] + ' ' + r.to_year;
+    fetch(`/api/analytics/freeze?year=${r.to_year}&month=${r.to_month}`, {method:'POST'})
+        .then(res => res.json())
+        .then(() => toast('Frozen '+label, true))
+        .catch(() => toast('Freeze failed', false));
+}
+function exportXlsx() {
+    const r = getRange();
+    window.location = `/api/analytics/export?from_year=${r.from_year}&from_month=${r.from_month}&to_year=${r.to_year}&to_month=${r.to_month}`;
+}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 initDropdowns(); load();
 </script>

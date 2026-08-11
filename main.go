@@ -850,6 +850,25 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 		if fy==0 { fy=2025 }; if ty==0 { ty=time.Now().Year(); tm=int(time.Now().Month())-1 }
 		writeJSON(w, 200, analyticsSvc.Compute(fy,fm,ty,tm))
 	}))
+	mux.HandleFunc("POST /api/analytics/freeze", protected(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		y,_:=strconv.Atoi(q.Get("year")); mo,_:=strconv.Atoi(q.Get("month"))
+		if y==0 { y=time.Now().Year(); mo=int(time.Now().Month())-1 }
+		vals, err := analyticsSvc.Freeze(y, mo)
+		if err != nil { writeJSON(w, 500, map[string]string{"error": err.Error()}); return }
+		writeJSON(w, 200, vals)
+	}))
+	mux.HandleFunc("GET /api/analytics/export", protected(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		fy,_:=strconv.Atoi(q.Get("from_year")); fm,_:=strconv.Atoi(q.Get("from_month"))
+		ty,_:=strconv.Atoi(q.Get("to_year")); tm,_:=strconv.Atoi(q.Get("to_month"))
+		if fy==0 { fy=2025 }; if ty==0 { ty=time.Now().Year(); tm=int(time.Now().Month())-1 }
+		b, err := analyticsSvc.Export(fy,fm,ty,tm)
+		if err != nil { writeJSON(w, 500, map[string]string{"error": err.Error()}); return }
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Content-Disposition", `attachment; filename="procura-analytics.xlsx"`)
+		w.Write(b)
+	}))
 
 	// ── Catalogue ──
 	mux.HandleFunc("GET /api/catalogue", protected(func(w http.ResponseWriter, r *http.Request) {

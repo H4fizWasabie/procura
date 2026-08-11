@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-11
+- [analytics] Export Excel now covers every chart/KPI in the Analytics tab: added KPIs, Department Spend, Product Types, Supplier Ranking, Scorecard Radar, and Seasonal Trends (top 5 items × month) sheets; Summary keeps monthly trends
+
+## 2026-08-10
+- [analytics] Freeze Month button: snapshots all four monthly trends (in-house, valuation, consumption, revenue) for the selected month into the `settings` table — no more hardcoded Go maps; settings override the legacy GAS baselines. Refactored item/movement scanning into shared helpers (`loadItems`, `scanMovements`)
+- [analytics] Export Excel button: downloads xlsx of the visible range — Summary + In-House Items, Consumption Items, Top Turnover, Top Movers, Critical Items, Top Suppliers, Dead Stock sheets
+- [analytics] Frozen July 2026 in-house consumption baseline at 20851.69 (live value captured from VPS) — prevents retroactive changes once month data settles
+
 ## 2026-08-03
 - [rfq] Item name field now autocompletes from inventory (native datalist, match by name or stock ID → auto-fills stock ID + UOM); free text still allowed for new items not in inventory. `/api/inventory/basic` now also returns UOM + supplier
 

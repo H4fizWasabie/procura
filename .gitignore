@@ -22,3 +22,6 @@ gas/GS_SecureConfig.js
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated exports
+*.xlsx

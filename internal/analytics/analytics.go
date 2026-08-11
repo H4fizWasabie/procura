@@ -2,8 +2,10 @@ package analytics
 
 import (
 	"database/sql"
+	"encoding/json"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,7 +15,7 @@ var monthLabels = []string{"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep"
 // Frozen baselines from GAS (prevents retroactive changes)
 var frozenInHouse = map[int]map[int]float64{
 	2025: {0:2600,1:3700,2:7300,3:6400,4:17300,5:9200,6:16900,7:7200,8:12700,9:8400,10:24800,11:8000},
-	2026: {0:10400,1:27800,2:32600,5:15576},
+	2026: {0:10400,1:27800,2:32600,5:15576,6:20851.69},
 }
 var frozenVal = map[int]map[int]float64{
 	2025: {0:74100,1:112700,2:166400,3:175700,4:216100,5:277900,6:312300,7:325100,8:326300,9:359700,10:320900,11:323200},
@@ -79,6 +81,100 @@ type TurnoverItem struct{Name string `json:"name"`; Revenue float64 `json:"reven
 type SeasonalTrends struct{Labels []string `json:"labels"`; Datasets []TrendDataset `json:"datasets"`}
 type TrendDataset struct{Label string `json:"label"`; Data []float64 `json:"data"`; BorderColor string `json:"borderColor"`}
 
+type itemMeta struct{name,typ,cat,beh string; cost,sell,cur,rop float64}
+type itemAcc struct{name string; totalOut,revenue float64; monthly,ihMonthly,revMonthly,valMonthly []float64; meta itemMeta}
+
+// snapshot of the items table: per-item metadata plus derived critical/asset figures
+func (s *Service) loadItems() (itemMap map[string]itemMeta, critical []CriticalItem, restockCost, inventoryAsset float64) {
+	itemMap = map[string]itemMeta{}
+	rows, _ := s.DB.Query("SELECT stock_id, item_name, cost, selling_price, current_stock, rop, product_type, category, item_behaviour FROM items")
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id,name,pt,cat,beh sql.NullString; var cost,sell,cur,rop sql.NullFloat64
+			rows.Scan(&id,&name,&cost,&sell,&cur,&rop,&pt,&cat,&beh)
+			if !id.Valid { continue }
+			im := itemMeta{name: strv(name), typ: strv(pt), cat: strv(cat), beh: strv(beh),
+				cost: f64v(cost), sell: f64v(sell), cur: f64v(cur), rop: f64v(rop)}
+			itemMap[strings.ToUpper(strings.TrimSpace(id.String))] = im
+			cv, cst := im.cur, im.cost
+			inventoryAsset += cv * cst
+			r := im.rop
+			if r > 0 && cv < r {
+				gap := r - cv
+				restockCost += gap * cst
+				critical = append(critical, CriticalItem{Name: strv(name), Gap: gap, Cost: gap*cst})
+			}
+		}
+	}
+	return
+}
+
+// per-item movement accumulation over a window; trends are derived from it by callers
+func (s *Service) scanMovements(window [][2]int, itemMap map[string]itemMeta) map[string]*itemAcc {
+	allItems := map[string]*itemAcc{}
+	for _, w := range window {
+		rows, _ := s.DB.Query("SELECT stock_id, item_name, month, out_qty, adj_out, report_closing FROM stock_movements WHERE year=? AND month=?", w[0], w[1]+1)
+		if rows==nil { continue }
+		for rows.Next() {
+			var sid,name sql.NullString; var mo int; var outQ,adjO,closing sql.NullFloat64
+			rows.Scan(&sid,&name,&mo,&outQ,&adjO,&closing)
+			id := strings.ToUpper(strings.TrimSpace(strv(sid)))
+			if id=="" { continue }
+			i := -1
+			for k, ww := range window { if ww[0]==w[0] && ww[1]==mo-1 { i=k; break } }
+			if i==-1 { continue }
+			meta := itemMap[id]
+			acc := allItems[id]
+			if acc == nil {
+				acc = &itemAcc{name:strv(name), monthly:make([]float64,len(window)), ihMonthly:make([]float64,len(window)), revMonthly:make([]float64,len(window)), valMonthly:make([]float64,len(window)), meta:meta}
+				allItems[id] = acc
+			}
+			totalOut := f64v(outQ)+f64v(adjO)
+			acc.totalOut += totalOut; acc.monthly[i] += totalOut
+			acc.valMonthly[i] += f64v(closing)*meta.cost
+			if strings.ToLower(strings.TrimSpace(meta.beh))=="in-house use" { acc.ihMonthly[i] += totalOut*meta.cost }
+			rev := totalOut*meta.sell
+			acc.revenue += rev; acc.revMonthly[i] += rev
+		}
+		rows.Close()
+	}
+	return allItems
+}
+
+func (s *Service) getSetting(key string) string {
+	var v sql.NullString
+	s.DB.QueryRow("SELECT value FROM settings WHERE key=?", key).Scan(&v)
+	return v.String
+}
+func (s *Service) setSetting(key, value string) error {
+	_, err := s.DB.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value)
+	return err
+}
+
+// user-frozen baselines from settings (key "analytics_frozen": {year:{month:{ih,val,cons,rev}}})
+func (s *Service) settingsFrozen() map[string]map[string]map[string]float64 {
+	m := map[string]map[string]map[string]float64{}
+	if raw := s.getSetting("analytics_frozen"); raw != "" {
+		json.Unmarshal([]byte(raw), &m)
+	}
+	return m
+}
+
+// Freeze snapshots the four monthly trends for a month into settings; re-freezing is idempotent.
+func (s *Service) Freeze(year, month int) (map[string]float64, error) {
+	m := s.Compute(year, month, year, month)
+	vals := map[string]float64{"ih":m.Operation.InHouseConsumption[0], "val":m.Inventory.ValuationTrend[0], "cons":m.Inventory.ConsumptionTrend[0], "rev":m.Business.GrossRevenueTrend[0]}
+	frozen := s.settingsFrozen()
+	key := strconv.Itoa(year)
+	if frozen[key] == nil { frozen[key] = map[string]map[string]float64{} }
+	frozen[key][strconv.Itoa(month)] = vals
+	b, err := json.Marshal(frozen)
+	if err != nil { return vals, err }
+	return vals, s.setSetting("analytics_frozen", string(b))
+}
+
+// Service exposes analytics metrics
 type Service struct{DB *sql.DB}
 
 func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
@@ -105,33 +201,15 @@ func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
 	}
 
 	// Item map
-	type itemMeta struct{name,typ,cat,beh string; cost,sell,cur,rop float64}
-	itemMap := map[string]itemMeta{}
-	rows, _ := s.DB.Query("SELECT stock_id, item_name, cost, selling_price, current_stock, rop, product_type, category, item_behaviour FROM items")
-	if rows != nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id,name,pt,cat,beh sql.NullString; var cost,sell,cur,rop sql.NullFloat64
-			rows.Scan(&id,&name,&cost,&sell,&cur,&rop,&pt,&cat,&beh)
-			if !id.Valid { continue }
-			im := itemMeta{name: strv(name), typ: strv(pt), cat: strv(cat), beh: strv(beh),
-				cost: f64v(cost), sell: f64v(sell), cur: f64v(cur), rop: f64v(rop)}
-			itemMap[strings.ToUpper(strings.TrimSpace(id.String))] = im
-			cv, cst := im.cur, im.cost
-			m.Finance.InventoryAsset += cv * cst
-			r := im.rop
-			if r > 0 && cv < r {
-				gap := r - cv
-				m.Operation.RestockCost += gap * cst
-				m.Operation.CriticalItems = append(m.Operation.CriticalItems, CriticalItem{Name: strv(name), Gap: gap, Cost: gap*cst})
-			}
-		}
-	}
+	itemMap, criticalItems, restockCost, inventoryAsset := s.loadItems()
+	m.Finance.InventoryAsset = inventoryAsset
+	m.Operation.RestockCost = restockCost
+	m.Operation.CriticalItems = criticalItems
 	sort.Slice(m.Operation.CriticalItems, func(i,j int)bool{return m.Operation.CriticalItems[i].Cost>m.Operation.CriticalItems[j].Cost})
 	if len(m.Operation.CriticalItems)>10 { m.Operation.CriticalItems = m.Operation.CriticalItems[:10] }
 
 	// PO scan
-	rows, _ = s.DB.Query("SELECT po_id, date, total, status, department, supplier FROM purchase_orders")
+	rows, _ := s.DB.Query("SELECT po_id, date, total, status, department, supplier FROM purchase_orders")
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -155,43 +233,29 @@ func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
 	}
 
 	// Movement data
-	type itemAcc struct{name string; totalOut,revenue,costVal float64; monthly,ihMonthly []float64; meta itemMeta}
-	allItems := map[string]*itemAcc{}
-	for _, w := range window {
-		rows, _ := s.DB.Query("SELECT stock_id, item_name, month, out_qty, adj_out, report_closing FROM stock_movements WHERE year=? AND month=?", w[0], w[1]+1)
-		if rows==nil { continue }
-		for rows.Next() {
-			var sid,name sql.NullString; var mo int; var outQ,adjO,closing sql.NullFloat64
-			rows.Scan(&sid,&name,&mo,&outQ,&adjO,&closing)
-			id := strings.ToUpper(strings.TrimSpace(strv(sid)))
-			if id=="" { continue }
-			i := idx(w[0], mo-1); if i==-1 { continue }
-			meta := itemMap[id]
-			if _, ok := allItems[id]; !ok {
-				allItems[id] = &itemAcc{name:strv(name), monthly:make([]float64,ws), ihMonthly:make([]float64,ws), meta:meta}
-			}
-			acc := allItems[id]
-			totalOut := f64v(outQ)+f64v(adjO)
-			acc.totalOut += totalOut; acc.monthly[i] += totalOut
-			m.Inventory.ValuationTrend[i] += f64v(closing)*meta.cost
-			m.Inventory.ConsumptionTrend[i] += totalOut*meta.cost
-			if strings.ToLower(strings.TrimSpace(meta.beh))=="in-house use" {
-				m.Operation.InHouseConsumption[i] += totalOut*meta.cost
-				acc.ihMonthly[i] += totalOut*meta.cost
-			}
-			rev := totalOut*meta.sell
-			acc.revenue += rev
-			m.Business.GrossRevenueTrend[i] += rev
+	allItems := s.scanMovements(window, itemMap)
+	for _, acc := range allItems {
+		for i := range window {
+			m.Inventory.ValuationTrend[i] += acc.valMonthly[i]
+			m.Inventory.ConsumptionTrend[i] += acc.monthly[i]*acc.meta.cost
+			m.Operation.InHouseConsumption[i] += acc.ihMonthly[i]
+			m.Business.GrossRevenueTrend[i] += acc.revMonthly[i]
 		}
-		rows.Close()
 	}
 
-	// Apply frozen data
+	// Apply frozen data (settings overrides legacy GAS baselines)
+	sf := s.settingsFrozen()
 	for i, w := range window {
 		if v, ok := frozenInHouse[w[0]][w[1]]; ok { m.Operation.InHouseConsumption[i] = v }
 		if v, ok := frozenVal[w[0]][w[1]]; ok { m.Inventory.ValuationTrend[i] = v }
 		if v, ok := frozenCons[w[0]][w[1]]; ok { m.Inventory.ConsumptionTrend[i] = v }
 		if v, ok := frozenRev[w[0]][w[1]]; ok { m.Business.GrossRevenueTrend[i] = v }
+		if fs, ok := sf[strconv.Itoa(w[0])][strconv.Itoa(w[1])]; ok {
+			if v, ok := fs["ih"]; ok { m.Operation.InHouseConsumption[i] = v }
+			if v, ok := fs["val"]; ok { m.Inventory.ValuationTrend[i] = v }
+			if v, ok := fs["cons"]; ok { m.Inventory.ConsumptionTrend[i] = v }
+			if v, ok := fs["rev"]; ok { m.Business.GrossRevenueTrend[i] = v }
+		}
 		if w[0]==2025 { if v, ok := legacy2025Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
 		if w[0]==2026 { if v, ok := legacy2026Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
 	}
