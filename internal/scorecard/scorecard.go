@@ -17,7 +17,7 @@ type Entry struct {
 
 type SupplierSummary struct {
 	Name    string  `json:"name"`
-	AvgScore float64 `json:"avg_score"`
+	AvgScore float64 `json:"avg"`
 	Count   int     `json:"rating_count"`
 }
 

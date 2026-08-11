@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-12
+- [scorecard] Fix scorecard summary JSON key avg_score → avg — frontend read s.avg, so every summary row threw TypeError on toFixed
+
+## 2026-08-12
 - [auth] Demo login button — no-PIN POST /api/login/demo mints a VIEWER token; VIEWER role is now enforced read-only in Middleware (all non-GET blocked except item-history report and change-pin); /users page admin-only — lets visitors browse the app without credentials or write access
 
 ## 2026-08-11
