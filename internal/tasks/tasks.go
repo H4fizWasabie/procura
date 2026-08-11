@@ -1,9 +1,13 @@
 package tasks
 
-import "database/sql"
+import (
+	"database/sql"
+	"strconv"
+	"time"
+)
 
 type Task struct {
-	TaskID      string `json:"task_id"`
+	TaskID      string `json:"id"`
 	Title       string `json:"title"`
 	Notes       string `json:"notes"`
 	Attachments string `json:"attachments"`
@@ -22,6 +26,12 @@ func (s *Service) List() []Task {
 }
 
 func (s *Service) Save(t Task) error {
+	if t.TaskID == "" {
+		t.TaskID = "TK-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	if t.CreatedDate == "" {
+		t.CreatedDate = time.Now().Format("2006-01-02")
+	}
 	_, err := s.DB.Exec(`
 		INSERT OR REPLACE INTO tasks (task_id, title, notes, attachments, status, created_by, created_date)
 		VALUES (?, ?, ?, ?, ?, ?, ?)

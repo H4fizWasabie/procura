@@ -824,7 +824,10 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	}))
 	mux.HandleFunc("POST /api/tasks", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body tasks.Task; json.NewDecoder(r.Body).Decode(&body)
-		taskSvc.Save(body)
+		if err := taskSvc.Save(body); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success":false, "error": err.Error()})
+			return
+		}
 		writeJSON(w, 200, map[string]interface{}{"success":true})
 	})))
 

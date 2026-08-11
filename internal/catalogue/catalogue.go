@@ -55,7 +55,7 @@ func (s *Service) Items(search string, supplier string, limit int) []Item {
 	if limit <= 0 { limit = 100 }
 	args = append(args, limit)
 	rows, _ := s.DB.Query(`
-		SELECT c.id, c.supplier_name, c.supplier_item_code, c.supplier_item_name, COALESCE(c.normalized_item_name,''),
+		SELECT c.id, c.supplier_name, COALESCE(c.supplier_item_code,''), c.supplier_item_name, COALESCE(c.normalized_item_name,''),
 		       COALESCE(c.brand,''), COALESCE(c.pack,''), COALESCE(c.uom,''), c.indicative_price, COALESCE(c.currency,'MYR'),
 		       COALESCE(c.freshness_status,'current')
 		FROM catalogue_items c `+where+` ORDER BY c.supplier_name, c.supplier_item_name LIMIT ?`, args...)
@@ -71,7 +71,7 @@ func (s *Service) Items(search string, supplier string, limit int) []Item {
 }
 
 func (s *Service) Deals(itemID int) []Deal {
-	rows, _ := s.DB.Query("SELECT id, catalogue_item_id, COALESCE(rule_type,''), trigger_qty, paid_qty, free_qty, tier_price, bonus_price, effective_unit_price, COALESCE(free_text_rule,'') FROM catalogue_deals WHERE catalogue_item_id = ? AND is_active = 1", itemID)
+	rows, _ := s.DB.Query("SELECT id, catalogue_item_id, COALESCE(rule_type,''), COALESCE(trigger_qty,0), COALESCE(paid_qty,0), COALESCE(free_qty,0), COALESCE(tier_price,0), COALESCE(bonus_price,0), COALESCE(effective_unit_price,0), COALESCE(free_text_rule,'') FROM catalogue_deals WHERE catalogue_item_id = ? AND is_active = 1", itemID)
 	if rows == nil { return []Deal{} }
 	defer rows.Close()
 	var out []Deal

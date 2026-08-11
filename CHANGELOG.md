@@ -1,6 +1,10 @@
 # Changelog
 
 ## 2026-08-12
+- [tasks] Fix Done/Reopen/Delete/Edit dead buttons — frontend sent JSON key `id` but Go struct read `task_id`, so saves wrote NULL PK and failed silently; struct now exposes `id`, Save auto-generates TK-* id + created_date, and main.go surfaces Save errors
+- [catalogue] Fix blank catalogue items on VPS — NULL supplier_item_code (and NULL deal numbers) aborted row scans mid-way, blanking every field after column 3; queries now COALESCE NULLs
+
+## 2026-08-12
 - [scorecard] Fix scorecard summary JSON key avg_score → avg — frontend read s.avg, so every summary row threw TypeError on toFixed
 
 ## 2026-08-12
