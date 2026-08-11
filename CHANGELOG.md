@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-12
+- [auth] Hide Users nav link from non-admin roles — demo/VIEWER no longer sees it (page was already 403)
+
+## 2026-08-12
 - [uom] Dedupe item-usage join — 3 suppliers had duplicate uppercase (supplier,UOM) conversion rows, inflating the item list 478→504
 
 ## 2026-08-12
