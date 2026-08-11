@@ -1,24 +1,23 @@
 {{template "base.html" .}}
 {{define "content_uom"}}
-<div class="top-bar"><h2>UOM Mappings</h2><button onclick="openCreate()">+ New Mapping</button></div>
+<div class="top-bar"><h2>UOM Conversions</h2><button onclick="openCreate()">+ New Mapping</button></div>
 <div class="search-bar">
     <select id="supplier-filter" onchange="loadMappings()"><option value="">All Suppliers</option></select>
 </div>
-<table><thead><tr><th>Supplier</th><th>Supplier UOM</th><th>Standard UOM</th><th>Multiplier</th><th>Actions</th></tr></thead>
+<table><thead><tr><th>Supplier</th><th>Supplier UOM</th><th>Standard UOM</th></tr></thead>
 <tbody id="body"></tbody></table>
-<div id="empty" class="empty" style="display:none"><span class="material-icons">straighten</span><p>No UOM mappings found</p></div>
+<div id="empty" class="empty" style="display:none"><span class="material-icons">straighten</span><p>No UOM conversions found</p></div>
 <div id="toast" class="toast" style="display:none"></div>
 
 <div id="mapping-modal" class="modal">
     <div class="modal-content">
-        <div class="modal-header"><h3>New UOM Mapping</h3><span class="close" onclick="closeModal()">&times;</span></div>
+        <div class="modal-header"><h3>New UOM Conversion</h3><span class="close" onclick="closeModal()">&times;</span></div>
         <div class="modal-body">
             <div class="form-group"><label>Supplier</label><select id="m-supplier"></select></div>
             <div class="form-row">
                 <div class="form-group"><label>Supplier UOM</label><input id="m-supplier-uom" placeholder="e.g. BTLS"></div>
                 <div class="form-group"><label>Standard UOM</label><input id="m-standard-uom" placeholder="e.g. BOTTLES"></div>
             </div>
-            <div class="form-group"><label>Multiplier</label><input type="number" step="0.01" id="m-multiplier" value="1"></div>
             <div class="btn-group">
                 <button class="btn-secondary" onclick="closeModal()">Cancel</button>
                 <button onclick="saveMapping()">Save</button>
@@ -28,7 +27,6 @@
 </div>
 
 <script>
-let allMappings = [];
 async function init() {
     const sr = await fetch('/api/suppliers');
     const suppliers = await sr.json();
@@ -39,28 +37,26 @@ async function init() {
 }
 async function loadMappings() {
     const supplier = document.getElementById('supplier-filter').value;
-    const url = '/api/uom/mappings' + (supplier ? '?supplier=' + encodeURIComponent(supplier) : '');
+    const url = '/api/uom' + (supplier ? '?supplier=' + encodeURIComponent(supplier) : '');
     const res = await fetch(url);
-    allMappings = await res.json();
-    if (!allMappings || allMappings.length === 0) {
+    const data = await res.json();
+    if (!data || data.length === 0) {
         document.getElementById('body').innerHTML = '';
         document.getElementById('empty').style.display = 'block';
     } else {
         document.getElementById('empty').style.display = 'none';
-        document.getElementById('body').innerHTML = allMappings.map(m => `
-            <tr><td>${esc(m.supplier||'')}</td><td>${esc(m.supplier_uom||'')}</td>
-            <td>${esc(m.standard_uom||'')}</td><td>${m.multiplier||1}</td>
-            <td></td></tr>`).join('');
+        document.getElementById('body').innerHTML = data.map(m => `
+            <tr><td>${esc(m.supplier_name||'')}</td><td>${esc(m.supplier_uom||'')}</td>
+            <td>${esc(m.standard_uom||'')}</td></tr>`).join('');
     }
 }
 function openCreate() { document.getElementById('mapping-modal').classList.add('open'); }
 function closeModal() { document.getElementById('mapping-modal').classList.remove('open'); }
 async function saveMapping() {
     const body = {
-        supplier: document.getElementById('m-supplier').value,
+        supplier_name: document.getElementById('m-supplier').value,
         supplier_uom: document.getElementById('m-supplier-uom').value,
         standard_uom: document.getElementById('m-standard-uom').value,
-        multiplier: parseFloat(document.getElementById('m-multiplier').value) || 1,
     };
     if (!body.supplier_uom || !body.standard_uom) { toast('Both UOM fields required', false); return; }
     const res = await fetch('/api/uom/mapping', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});

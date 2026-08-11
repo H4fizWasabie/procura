@@ -897,14 +897,15 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	}))
 
 	// ── UOM ──
-	mux.HandleFunc("GET /api/uom/mappings", protected(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, uomSvc.Mappings(r.URL.Query().Get("supplier")))
-	}))
 	mux.HandleFunc("GET /api/uom", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, uomSvc.UOMs(r.URL.Query().Get("supplier")))
 	}))
 	mux.HandleFunc("POST /api/uom/mapping", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body uom.Mapping; json.NewDecoder(r.Body).Decode(&body); uomSvc.SaveMapping(body)
+		var body uom.UOM; json.NewDecoder(r.Body).Decode(&body)
+		if err := uomSvc.SaveUOM(body); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success":false, "error": err.Error()})
+			return
+		}
 		writeJSON(w, 200, map[string]interface{}{"success":true})
 	})))
 

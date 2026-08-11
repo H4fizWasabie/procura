@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-12
+- [uom] Fix UOM page showing garbage — it fetched item-level /api/uom/mappings but rendered conversion columns (standard_uom/multiplier never existed in that payload); page now shows the 108 supplier→standard conversions from /api/uom, modal saves conversions via SaveUOM, dead mappings route removed
+
+## 2026-08-12
 - [catalogue] Fix blank catalogue page — template read old JSON keys (supplier/name/cost/bonus), API emits supplier_name/supplier_item_name/indicative_price; page now auto-loads the first 200 items on open instead of demanding a search
 
 ## 2026-08-12
