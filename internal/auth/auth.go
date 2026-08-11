@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"math/big"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,7 +14,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var jwtSecret = []byte("procura-secret-change-in-production")
+var jwtSecret = []byte("procura-dev-secret-7f3a9c1e-rotate-in-prod")
+
+func init() {
+	if s := os.Getenv("PROCURA_SECRET"); s != "" {
+		jwtSecret = []byte(s)
+	}
+}
 
 type Claims struct {
 	Email string `json:"email"`

@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-12
+- [auth] JWT secret now from PROCURA_SECRET env var (fallback: new dev-only value) — the old hardcoded secret was exposed in the public GitHub repo, letting anyone forge admin tokens; VPS got a fresh random secret
+
+## 2026-08-12
 - [auth] Hide Users nav link from non-admin roles — demo/VIEWER no longer sees it (page was already 403)
 
 ## 2026-08-12
