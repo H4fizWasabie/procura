@@ -13,8 +13,16 @@
         <input type="email" id="email" placeholder="Email" autocomplete="email">
         <input type="password" id="pin" placeholder="PIN" autocomplete="current-password">
         <button onclick="login()">Sign In</button>
+        <div class="login-divider">or</div>
+        <button class="btn-demo" onclick="demoLogin()">Explore as Demo User</button>
     </div>
 <script>
+async function demoLogin() {
+    try {
+        const res = await fetch('/api/login/demo', {method: 'POST'});
+        if (res.ok) window.location.href = '/';
+    } catch(e) {}
+}
 async function login() {
     const err = document.getElementById('error');
     err.style.display = 'none';

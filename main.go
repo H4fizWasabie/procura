@@ -115,6 +115,20 @@ func main() {
 		})
 	})
 
+	// ── Demo login (no PIN, read-only VIEWER token) ──
+	mux.HandleFunc("POST /api/login/demo", func(w http.ResponseWriter, r *http.Request) {
+		token, claims, err := authSvc.DemoLogin()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "Demo login failed"})
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name: "token", Value: token, Path: "/",
+			HttpOnly: true, MaxAge: 8 * 3600, SameSite: http.SameSiteLaxMode,
+		})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "user": claims})
+	})
+
 	// ── Logout ──
 	mux.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{
@@ -137,7 +151,7 @@ func main() {
 	}
 
 	// ── Users page ──
-	mux.HandleFunc("GET /users", protected(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
 			"Active": "users", "ContentBlock": "content_users",
 			"User": userFromReq(r), "Users": authSvc.ListUsers(),

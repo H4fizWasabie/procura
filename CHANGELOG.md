@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-08-12
+- [auth] Demo login button — no-PIN POST /api/login/demo mints a VIEWER token; VIEWER role is now enforced read-only in Middleware (all non-GET blocked except item-history report and change-pin); /users page admin-only — lets visitors browse the app without credentials or write access
+
 ## 2026-08-11
 - [analytics] Export Excel now covers every chart/KPI in the Analytics tab: added KPIs, Department Spend, Product Types, Supplier Ranking, Scorecard Radar, and Seasonal Trends (top 5 items × month) sheets; Summary keeps monthly trends
 

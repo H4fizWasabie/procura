@@ -73,6 +73,15 @@ func (s *Service) Login(email, pin string) (string, *Claims, error) {
 	// Update last access
 	s.DB.Exec("UPDATE users SET last_access = ? WHERE email = ?", time.Now().Format(time.RFC3339), email)
 
+	return issueToken(email, role, name)
+}
+
+// DemoLogin issues a read-only VIEWER token without credentials. No DB row needed.
+func (s *Service) DemoLogin() (string, *Claims, error) {
+	return issueToken("demo@procura.app", "VIEWER", "Demo User")
+}
+
+func issueToken(email, role, name string) (string, *Claims, error) {
 	claims := &Claims{
 		Email: email,
 		Role:  role,
@@ -81,7 +90,6 @@ func (s *Service) Login(email, pin string) (string, *Claims, error) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(8 * time.Hour)),
 		},
 	}
-
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(jwtSecret)
 	return token, claims, err
 }
@@ -132,6 +140,14 @@ func (s *Service) Middleware(next http.HandlerFunc) http.HandlerFunc {
 		r.Header.Set("X-User-Email", claims.Email)
 		r.Header.Set("X-User-Role", claims.Role)
 		r.Header.Set("X-User-Name", claims.Name)
+		// VIEWER = read-only: block every non-GET except read-only/self-service POSTs
+		if claims.Role == "VIEWER" && r.Method != http.MethodGet &&
+			r.URL.Path != "/api/reports/item-history" && r.URL.Path != "/api/change-pin" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":"Demo account is read-only"}`))
+			return
+		}
 		next(w, r)
 	}
 }
