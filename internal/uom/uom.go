@@ -25,7 +25,8 @@ func (s *Service) ItemUsages(supplier string) []ItemUsage {
 	q := `SELECT m.supplier_name, COALESCE(m.supplier_item_name,''), COALESCE(m.stock_id,''), COALESCE(m.brand,''),
 	       COALESCE(m.supplier_uom,''), COALESCE(u.standard_uom,'')
 	       FROM supplier_item_mappings m
-	       LEFT JOIN supplier_uom u ON UPPER(u.supplier_name)=UPPER(m.supplier_name) AND UPPER(u.supplier_uom)=UPPER(m.supplier_uom)
+	       LEFT JOIN (SELECT UPPER(supplier_name) sn, UPPER(supplier_uom) su, MIN(standard_uom) standard_uom FROM supplier_uom GROUP BY 1,2) u
+	       ON u.sn=UPPER(m.supplier_name) AND u.su=UPPER(m.supplier_uom)
 	       WHERE m.is_active=1`
 	args := []interface{}{}
 	if supplier != "" {

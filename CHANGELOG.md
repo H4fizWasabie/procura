@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-12
+- [uom] Dedupe item-usage join — 3 suppliers had duplicate uppercase (supplier,UOM) conversion rows, inflating the item list 478→504
+
+## 2026-08-12
 - [uom] UOM page now also lists item-level usages (478 supplier_item_mappings) joined to standard UOM via case-insensitive supplier+UOM match — shows which items carry each supplier unit
 
 ## 2026-08-12
