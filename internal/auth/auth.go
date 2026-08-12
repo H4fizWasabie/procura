@@ -200,8 +200,12 @@ func (s *Service) BootstrapAdmin() string {
 	}
 	pin := randomPIN(6)
 	hash, _ := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
-	s.DB.Exec("INSERT INTO users (email, role, name, pin_hash, must_change_pin) VALUES (?, 'ADMIN', 'Hafiz', ?, 1)",
-		"kisame350@gmail.com", string(hash))
+	email := os.Getenv("PROCURA_ADMIN_EMAIL")
+	if email == "" {
+		email = "admin@procura.local"
+	}
+	s.DB.Exec("INSERT INTO users (email, role, name, pin_hash, must_change_pin) VALUES (?, 'ADMIN', 'Admin', ?, 1)",
+		email, string(hash))
 	return pin
 }
 

@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-12
+- [repo] OSS prep — removed legacy gas/ folder (dead GAS code containing personal emails), bootstrap admin email now from PROCURA_ADMIN_EMAIL env (default admin@procura.local), added README + MIT license
+
+## 2026-08-12
 - [auth] JWT secret now from PROCURA_SECRET env var (fallback: new dev-only value) — the old hardcoded secret was exposed in the public GitHub repo, letting anyone forge admin tokens; VPS got a fresh random secret
 
 ## 2026-08-12
