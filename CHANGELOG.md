@@ -112,3 +112,10 @@
 - [import] Excel workbook upload via excelize — imports DB_Items, DB_Suppliers, PurchaseOrder with items, Movement sheets
 - All 15 modules wired with HTML pages and API endpoints
 - All modules wired with HTML pages, full GAS feature parity across 11 modules
+
+## 2026-08-23
+- [planning] Full redesign per docs/planning-redesign-spec.md (wayfinder map #1): velocity from trailing 3→6 month movement history with HIGH/LOW/MANUAL confidence tiers; suggested qty = ceil(velocity×2mo cover − on_hand − incoming); CRITICAL/REORDER/REVIEW tiers; ON ORDER flag with stage badges replaces hard pipeline hiding; direct orders gain DELIVERED/SUPERSEDED lifecycle (superseded_by_po column) with supersede-on-PO hook — why: old engine produced no quantities for REORDER items and ordered items kept reappearing because Go-saved PO JSON was invisible to pipeline scanning
+- [po] Item.MarshalJSON now emits GAS-format "id" alongside "stock_id" — fixes pipeline suppression missing all new POs; added linkage audit (UnlinkedLines/LinkLine/RememberAlias) writing stock_id into rows and raw_po_json
+- [import] PurchaseOrder sheet auto-links empty stock_ids via normalized name match against items then item_aliases — human links teach future imports
+- [core] additive migrations: items.initial_stock_target, direct_orders.superseded_by_po
+- [ui] planning page: editable suggested qty, confidence/status badges, in-flight section with Delivered/Cancel actions; new /pos/unlinked audit page; removed dead POST /api/planning/rfq (server-side re-derivation violated explicit-payload contract)

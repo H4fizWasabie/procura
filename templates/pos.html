@@ -2,7 +2,10 @@
 {{define "content_pos"}}
 <div class="top-bar">
     <h2>Purchase Orders</h2>
-    <button onclick="switchTab('new')">+ New PO</button>
+    <div style="display:flex;gap:8px">
+        <button class="btn-sm" onclick="window.location='/pos/unlinked'" title="PO lines without stock_id — link them to catalogue items">Unlinked Lines</button>
+        <button onclick="switchTab('new')">+ New PO</button>
+    </div>
 </div>
 
 <!-- Tabs -->

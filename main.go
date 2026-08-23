@@ -193,7 +193,9 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 	}))
 	mux.HandleFunc("POST /api/users/reset-pin", adminOnly(func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ Email string `json:"email"` }
+		var body struct {
+			Email string `json:"email"`
+		}
 		json.NewDecoder(r.Body).Decode(&body)
 		pin, err := authSvc.ResetUserPIN(body.Email)
 		if err != nil {
@@ -203,7 +205,9 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "pin": pin})
 	}))
 	mux.HandleFunc("DELETE /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ Email string `json:"email"` }
+		var body struct {
+			Email string `json:"email"`
+		}
 		json.NewDecoder(r.Body).Decode(&body)
 		if err := authSvc.DeleteUser(body.Email); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
@@ -221,7 +225,7 @@ func main() {
 	mux.HandleFunc("GET /", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
 			"Active": "dashboard", "ContentBlock": "content_dashboard",
-			"User": userFromReq(r),
+			"User":  userFromReq(r),
 			"Stats": dashSvc.Compute(),
 		})
 	}))
@@ -256,8 +260,12 @@ func main() {
 		q := r.URL.Query()
 		page, _ := strconv.Atoi(q.Get("page"))
 		size, _ := strconv.Atoi(q.Get("pageSize"))
-		if page < 1 { page = 1 }
-		if size < 1 { size = 50 }
+		if page < 1 {
+			page = 1
+		}
+		if size < 1 {
+			size = 50
+		}
 		items := invSvc.List(q.Get("search"), page, size)
 		writeJSON(w, http.StatusOK, items)
 	}))
@@ -282,20 +290,26 @@ func main() {
 	}))
 
 	// Stock Balance History Report import (daily workflow — fixed columns like Python items_screen)
-	mux.HandleFunc("POST /api/import-stock", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/import-stock", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		file, _, err := r.FormFile("file")
-		if err != nil { writeJSON(w, 400, map[string]interface{}{"success":false,"error":"no file"}); return }
+		if err != nil {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "no file"})
+			return
+		}
 		defer file.Close()
 		counts, err := importSvc.ImportStock(file)
-		if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
-		writeJSON(w, 200, map[string]interface{}{"success":true,"counts":counts})
+		if err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]interface{}{"success": true, "counts": counts})
 	})))
 
 	// ── Suppliers ──
 	mux.HandleFunc("GET /suppliers", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
 			"Active": "suppliers", "ContentBlock": "content_suppliers",
-			"User":   userFromReq(r),
+			"User": userFromReq(r),
 		})
 	}))
 
@@ -328,7 +342,7 @@ func main() {
 	mux.HandleFunc("GET /planning", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
 			"Active": "planning", "ContentBlock": "content_planning",
-			"User":   userFromReq(r),
+			"User": userFromReq(r),
 		})
 	}))
 
@@ -336,13 +350,24 @@ func main() {
 		writeJSON(w, http.StatusOK, planSvc.Plan())
 	}))
 
-mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	// Direct orders (in-flight markers). Quantities come from the UI payload,
+	// never re-derived server-side (ticket #7).
+	mux.HandleFunc("GET /api/planning/orders", protected(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, planSvc.DirectOrders())
+	}))
+
+	mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Items []planning.OrderItem `json:"items"`
-			Notes string               `json:"notes"`
+			Items    []planning.OrderItem `json:"items"`
+			Supplier string               `json:"supplier"`
+			Notes    string               `json:"notes"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
-		orderID, err := planSvc.MarkOrdered(body.Items, body.Notes, r.Header.Get("X-User-Email"))
+		if len(body.Items) == 0 {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "no items"})
+			return
+		}
+		orderID, err := planSvc.MarkOrdered(body.Items, body.Supplier, body.Notes, r.Header.Get("X-User-Email"))
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 			return
@@ -350,52 +375,30 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "orderId": orderID})
 	})))
 
-	// ── Planning → RFQ ──
-	mux.HandleFunc("POST /api/planning/rfq", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/planning/order/{action}", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			StockIDs []string `json:"stockIds"`
+			OrderID string `json:"orderId"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
-		if len(body.StockIDs) == 0 {
-			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "no items selected"})
+		if body.OrderID == "" {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "orderId required"})
 			return
 		}
-
-		// Get planning data to find items
-		planned := planSvc.Plan()
-		var rfqItems []rfq.Item
-		var supplier string
-
-		for _, p := range planned {
-			for _, sid := range body.StockIDs {
-				if p.ID == sid {
-					qty := p.Suggested
-					if qty <= 0 {
-						qty = 1
-					}
-					rfqItems = append(rfqItems, rfq.Item{
-						StockID: p.ID, Name: p.Name, UOM: p.UOM, Qty: qty,
-					})
-					if supplier == "" {
-						supplier = p.Supplier
-					}
-					break
-				}
-			}
-		}
-
-		if len(rfqItems) == 0 {
-			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "no matching items found"})
+		var err error
+		switch r.PathValue("action") {
+		case "deliver":
+			err = planSvc.MarkDelivered(body.OrderID)
+		case "cancel":
+			err = planSvc.CancelOrder(body.OrderID)
+		default:
+			writeJSON(w, 404, map[string]interface{}{"success": false, "error": "unknown action"})
 			return
 		}
-
-		rfqDoc := rfq.RFQ{Supplier: supplier, Items: rfqItems}
-		id, err := rfqSvc.Save(rfqDoc, r.Header.Get("X-User-Email"))
 		if err != nil {
 			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, 200, map[string]interface{}{"success": true, "rfq_id": id, "items": len(rfqItems)})
+		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 
 	// ── PO ──
@@ -409,19 +412,64 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	mux.HandleFunc("GET /api/pos/next-id", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"id": poSvc.GenerateID()})
 	}))
-	mux.HandleFunc("POST /api/pos", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body po.PO; json.NewDecoder(r.Body).Decode(&body)
+	mux.HandleFunc("POST /api/pos", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body po.PO
+		json.NewDecoder(r.Body).Decode(&body)
 		id, err := poSvc.Save(body)
-		if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
+		if err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		// A covering PO supersedes ACTIVE direct orders for its stock_ids (#6).
+		stockIDs := make([]string, len(body.Items))
+		for i, item := range body.Items {
+			stockIDs[i] = item.StockID
+		}
+		planSvc.SupersedeDirectOrders(id, stockIDs)
 		for _, item := range body.Items {
 			if err := uomSvc.UpsertItemMapping(body.Supplier, item.StockID, item.Name, item.SupplierUOM); err != nil {
-				writeJSON(w, 500, map[string]interface{}{"success":false,"error":"PO saved but supplier UOM mapping failed: " + err.Error()})
+				writeJSON(w, 500, map[string]interface{}{"success": false, "error": "PO saved but supplier UOM mapping failed: " + err.Error()})
 				return
 			}
 		}
-		writeJSON(w, 200, map[string]interface{}{"success":true,"po_id":id})
+		writeJSON(w, 200, map[string]interface{}{"success": true, "po_id": id})
 	})))
-	mux.HandleFunc("POST /api/pos/{poId}/status", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+
+	// ── PO linkage audit (#8) ──
+	mux.HandleFunc("GET /pos/unlinked", protected(func(w http.ResponseWriter, r *http.Request) {
+		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "pos", "ContentBlock": "content_unlinked", "User": userFromReq(r)})
+	}))
+	mux.HandleFunc("GET /api/pos/unlinked", protected(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, poSvc.UnlinkedLines(r.URL.Query().Get("all") == "1"))
+	}))
+	mux.HandleFunc("POST /api/pos/unlinked/link", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			LineID   int64  `json:"lineId"`
+			StockID  string `json:"stockId"`
+			Remember bool   `json:"remember"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.LineID == 0 || body.StockID == "" {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "lineId and stockId required"})
+			return
+		}
+		itemName := ""
+		for _, l := range poSvc.UnlinkedLines(true) {
+			if l.LineID == body.LineID {
+				itemName = l.ItemName
+				break
+			}
+		}
+		if err := poSvc.LinkLine(body.LineID, body.StockID); err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		if body.Remember && itemName != "" {
+			poSvc.RememberAlias(body.StockID, itemName, r.Header.Get("X-User-Email"))
+		}
+		writeJSON(w, 200, map[string]interface{}{"success": true})
+	})))
+	mux.HandleFunc("POST /api/pos/{poId}/status", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Status string `json:"status"`
 			Field  string `json:"field"`
@@ -432,7 +480,7 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 			col = "status"
 		}
 		poSvc.UpdateStatus(r.PathValue("poId"), body.Status, col)
-		writeJSON(w, 200, map[string]interface{}{"success":true})
+		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 
 	// ── PO PDF preview & download ──
@@ -507,15 +555,19 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	mux.HandleFunc("GET /api/rfq/next-id", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"id": rfqSvc.GenerateID()})
 	}))
-	mux.HandleFunc("POST /api/rfq", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body rfq.RFQ; json.NewDecoder(r.Body).Decode(&body)
+	mux.HandleFunc("POST /api/rfq", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body rfq.RFQ
+		json.NewDecoder(r.Body).Decode(&body)
 		id, err := rfqSvc.Save(body, r.Header.Get("X-User-Email"))
-		if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
-		writeJSON(w, 200, map[string]interface{}{"success":true,"rfq_id":id})
+		if err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]interface{}{"success": true, "rfq_id": id})
 	})))
-	mux.HandleFunc("DELETE /api/rfq/{rfqId}", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE /api/rfq/{rfqId}", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		rfqSvc.Delete(r.PathValue("rfqId"))
-		writeJSON(w, 200, map[string]interface{}{"success":true})
+		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 
 	// ── RFQ PDF preview & download ──
@@ -572,17 +624,21 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	}))
 	mux.HandleFunc("GET /api/movement", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		yr, _ := strconv.Atoi(q.Get("year")); mo, _ := strconv.Atoi(q.Get("month")); lim, _ := strconv.Atoi(q.Get("limit"))
+		yr, _ := strconv.Atoi(q.Get("year"))
+		mo, _ := strconv.Atoi(q.Get("month"))
+		lim, _ := strconv.Atoi(q.Get("limit"))
 		data := movSvc.List(yr, mo, q.Get("search"), lim)
-		if data == nil { data = []movement.Row{} }
+		if data == nil {
+			data = []movement.Row{}
+		}
 		writeJSON(w, http.StatusOK, data)
 	}))
 	mux.HandleFunc("GET /api/movement/years", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, movSvc.Years())
 	}))
-	mux.HandleFunc("POST /api/movement/rop", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/movement/rop", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		n := movSvc.RecalcROP()
-		writeJSON(w, 200, map[string]interface{}{"success":true,"updated":n})
+		writeJSON(w, 200, map[string]interface{}{"success": true, "updated": n})
 	})))
 
 	// Movement analysis
@@ -604,10 +660,10 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 			"found":       found,
 		})
 	}))
-	mux.HandleFunc("POST /api/movement/bulk", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/movement/bulk", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Year  int               `json:"year"`
-			Month int               `json:"month"`
+			Year  int                `json:"year"`
+			Month int                `json:"month"`
 			Rows  []movement.BulkRow `json:"rows"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
@@ -688,7 +744,9 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 			}
 			runs = append(runs, r)
 		}
-		if runs == nil { runs = []Run{} }
+		if runs == nil {
+			runs = []Run{}
+		}
 		writeJSON(w, 200, runs)
 	}))
 
@@ -699,9 +757,15 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 		var categories []string
 		if rows != nil {
 			defer rows.Close()
-			for rows.Next() { var c string; rows.Scan(&c); categories = append(categories, c) }
+			for rows.Next() {
+				var c string
+				rows.Scan(&c)
+				categories = append(categories, c)
+			}
 		}
-		if categories == nil { categories = []string{} }
+		if categories == nil {
+			categories = []string{}
+		}
 		writeJSON(w, 200, map[string]interface{}{"suppliers": suppliers, "categories": categories})
 	}))
 	mux.HandleFunc("GET /api/inventory/detail", protected(func(w http.ResponseWriter, r *http.Request) {
@@ -767,17 +831,20 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 			"item_behaviour": strv(beh), "cost": f64v(cost), "selling_price": f64v(selling),
 			"current_stock": f64v(current), "rop": f64v(rop), "velocity_override": strv(velOv),
 			"supplier_uom": strv(supUom),
-			"movements": movements, "po_history": poHistory,
+			"movements":    movements, "po_history": poHistory,
 		})
 	}))
 	mux.HandleFunc("GET /api/reports/restock", protected(func(w http.ResponseWriter, r *http.Request) {
-		p, _ := strconv.Atoi(r.URL.Query().Get("page")); sz, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
+		p, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		sz, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
 		writeJSON(w, 200, repSvc.RestockReport(p, sz))
 	}))
 	mux.HandleFunc("GET /api/reports/historical", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		yr, _ := strconv.Atoi(q.Get("year")); mo, _ := strconv.Atoi(q.Get("month"))
-		p, _ := strconv.Atoi(q.Get("page")); sz, _ := strconv.Atoi(q.Get("pageSize"))
+		yr, _ := strconv.Atoi(q.Get("year"))
+		mo, _ := strconv.Atoi(q.Get("month"))
+		p, _ := strconv.Atoi(q.Get("page"))
+		sz, _ := strconv.Atoi(q.Get("pageSize"))
 		writeJSON(w, 200, repSvc.HistoricalReport(q.Get("type"), yr, mo, p, sz))
 	}))
 	mux.HandleFunc("GET /api/reports/search-po-items", protected(func(w http.ResponseWriter, r *http.Request) {
@@ -806,15 +873,26 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 			rows.Scan(&id, &name)
 			items = append(items, map[string]string{"stock_id": id, "item_name": name})
 		}
-		if items == nil { items = []map[string]string{} }
+		if items == nil {
+			items = []map[string]string{}
+		}
 		writeJSON(w, 200, items)
 	}))
 	mux.HandleFunc("POST /api/reports/item-history", protected(func(w http.ResponseWriter, r *http.Request) {
-		var body []struct{ID string `json:"id"`; Name string `json:"name"`}
+		var body []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
 		json.NewDecoder(r.Body).Decode(&body)
 		// Convert to the type expected by report service
-		items := make([]struct{ID string; Name string}, len(body))
-		for i, b := range body { items[i].ID = b.ID; items[i].Name = b.Name }
+		items := make([]struct {
+			ID   string
+			Name string
+		}, len(body))
+		for i, b := range body {
+			items[i].ID = b.ID
+			items[i].Name = b.Name
+		}
 		writeJSON(w, 200, repSvc.ItemHistory(items))
 	}))
 
@@ -822,13 +900,14 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	mux.HandleFunc("GET /api/tasks", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, taskSvc.List())
 	}))
-	mux.HandleFunc("POST /api/tasks", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body tasks.Task; json.NewDecoder(r.Body).Decode(&body)
+	mux.HandleFunc("POST /api/tasks", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body tasks.Task
+		json.NewDecoder(r.Body).Decode(&body)
 		if err := taskSvc.Save(body); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success":false, "error": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, 200, map[string]interface{}{"success":true})
+		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 
 	// ── Scorecard ──
@@ -838,22 +917,29 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	mux.HandleFunc("GET /api/scorecard/summary", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, scoreSvc.Summary())
 	}))
-	mux.HandleFunc("POST /api/scorecard", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body scorecard.Entry; json.NewDecoder(r.Body).Decode(&body)
+	mux.HandleFunc("POST /api/scorecard", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body scorecard.Entry
+		json.NewDecoder(r.Body).Decode(&body)
 		scoreSvc.Save(body)
-		writeJSON(w, 200, map[string]interface{}{"success":true})
+		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 
 	// ── Workflow ──
-	mux.HandleFunc("POST /api/workflow/approve", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body struct{POID string `json:"po_id"`}; json.NewDecoder(r.Body).Decode(&body)
+	mux.HandleFunc("POST /api/workflow/approve", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			POID string `json:"po_id"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
 		wfSvc.Approve(body.POID)
-		writeJSON(w, 200, map[string]interface{}{"success":true})
+		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
-	mux.HandleFunc("POST /api/workflow/payment", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body struct{POID string `json:"po_id"`}; json.NewDecoder(r.Body).Decode(&body)
+	mux.HandleFunc("POST /api/workflow/payment", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			POID string `json:"po_id"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
 		wfSvc.RequestPayment(body.POID)
-		writeJSON(w, 200, map[string]interface{}{"success":true})
+		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 	mux.HandleFunc("GET /api/workflow/pending", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, wfSvc.PendingActions())
@@ -862,26 +948,52 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	// ── Analytics ──
 	mux.HandleFunc("GET /api/analytics", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		fy,_:=strconv.Atoi(q.Get("from_year")); fm,_:=strconv.Atoi(q.Get("from_month"))
-		ty,_:=strconv.Atoi(q.Get("to_year")); tm,_:=strconv.Atoi(q.Get("to_month"))
-		if fy==0 { fy=2025 }; if ty==0 { ty=time.Now().Year(); tm=int(time.Now().Month())-1 }
-		writeJSON(w, 200, analyticsSvc.Compute(fy,fm,ty,tm))
+		fy, _ := strconv.Atoi(q.Get("from_year"))
+		fm, _ := strconv.Atoi(q.Get("from_month"))
+		ty, _ := strconv.Atoi(q.Get("to_year"))
+		tm, _ := strconv.Atoi(q.Get("to_month"))
+		if fy == 0 {
+			fy = 2025
+		}
+		if ty == 0 {
+			ty = time.Now().Year()
+			tm = int(time.Now().Month()) - 1
+		}
+		writeJSON(w, 200, analyticsSvc.Compute(fy, fm, ty, tm))
 	}))
 	mux.HandleFunc("POST /api/analytics/freeze", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		y,_:=strconv.Atoi(q.Get("year")); mo,_:=strconv.Atoi(q.Get("month"))
-		if y==0 { y=time.Now().Year(); mo=int(time.Now().Month())-1 }
+		y, _ := strconv.Atoi(q.Get("year"))
+		mo, _ := strconv.Atoi(q.Get("month"))
+		if y == 0 {
+			y = time.Now().Year()
+			mo = int(time.Now().Month()) - 1
+		}
 		vals, err := analyticsSvc.Freeze(y, mo)
-		if err != nil { writeJSON(w, 500, map[string]string{"error": err.Error()}); return }
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, 200, vals)
 	}))
 	mux.HandleFunc("GET /api/analytics/export", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		fy,_:=strconv.Atoi(q.Get("from_year")); fm,_:=strconv.Atoi(q.Get("from_month"))
-		ty,_:=strconv.Atoi(q.Get("to_year")); tm,_:=strconv.Atoi(q.Get("to_month"))
-		if fy==0 { fy=2025 }; if ty==0 { ty=time.Now().Year(); tm=int(time.Now().Month())-1 }
-		b, err := analyticsSvc.Export(fy,fm,ty,tm)
-		if err != nil { writeJSON(w, 500, map[string]string{"error": err.Error()}); return }
+		fy, _ := strconv.Atoi(q.Get("from_year"))
+		fm, _ := strconv.Atoi(q.Get("from_month"))
+		ty, _ := strconv.Atoi(q.Get("to_year"))
+		tm, _ := strconv.Atoi(q.Get("to_month"))
+		if fy == 0 {
+			fy = 2025
+		}
+		if ty == 0 {
+			ty = time.Now().Year()
+			tm = int(time.Now().Month()) - 1
+		}
+		b, err := analyticsSvc.Export(fy, fm, ty, tm)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
 		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 		w.Header().Set("Content-Disposition", `attachment; filename="procura-analytics.xlsx"`)
 		w.Write(b)
@@ -889,7 +1001,8 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 
 	// ── Catalogue ──
 	mux.HandleFunc("GET /api/catalogue", protected(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query(); lim,_:=strconv.Atoi(q.Get("limit"))
+		q := r.URL.Query()
+		lim, _ := strconv.Atoi(q.Get("limit"))
 		writeJSON(w, 200, catalogueSvc.Items(q.Get("search"), q.Get("supplier"), lim))
 	}))
 	mux.HandleFunc("GET /api/catalogue/sources", protected(func(w http.ResponseWriter, r *http.Request) {
@@ -903,32 +1016,42 @@ mux.HandleFunc("POST /api/planning/order", protected(auth.RequireRole("EDITOR", 
 	mux.HandleFunc("GET /api/uom", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, uomSvc.UOMs(r.URL.Query().Get("supplier")))
 	}))
-	mux.HandleFunc("POST /api/uom/mapping", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
-		var body uom.UOM; json.NewDecoder(r.Body).Decode(&body)
+	mux.HandleFunc("POST /api/uom/mapping", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body uom.UOM
+		json.NewDecoder(r.Body).Decode(&body)
 		if err := uomSvc.SaveUOM(body); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success":false, "error": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, 200, map[string]interface{}{"success":true})
+		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 
 	// ── Import ──
-	mux.HandleFunc("POST /api/import", protected(auth.RequireRole("EDITOR","ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/import", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		file, hdr, err := r.FormFile("file")
-		if err != nil { writeJSON(w, 400, map[string]interface{}{"success":false,"error":"no file"}); return }
+		if err != nil {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "no file"})
+			return
+		}
 		defer file.Close()
 		movYear, _ := strconv.Atoi(r.FormValue("movement_year"))
 		movMonth, _ := strconv.Atoi(r.FormValue("movement_month"))
 		if movYear > 0 && movMonth >= 1 && movMonth <= 12 {
 			// Standalone monthly movement report → use bulk endpoint logic
 			count, err := importSvc.ImportMovements(file, hdr.Filename, movYear, movMonth)
-			if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
-			writeJSON(w, 200, map[string]interface{}{"success":true,"rows":count,"tables":1})
+			if err != nil {
+				writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+				return
+			}
+			writeJSON(w, 200, map[string]interface{}{"success": true, "rows": count, "tables": 1})
 			return
 		}
 		result, err := importSvc.Import(file, hdr.Filename)
-		if err != nil { writeJSON(w, 500, map[string]interface{}{"success":false,"error":err.Error()}); return }
-		writeJSON(w, 200, map[string]interface{}{"success":true,"run_id":result.RunID,"tables":len(result.TableRows),"rows":result.Rows,"sheets_found":result.SheetsFound,"headers_found":result.HeadersFound})
+		if err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]interface{}{"success": true, "run_id": result.RunID, "tables": len(result.TableRows), "rows": result.Rows, "sheets_found": result.SheetsFound, "headers_found": result.HeadersFound})
 	})))
 
 	// ── Change PIN ──
@@ -963,5 +1086,15 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func strv(s sql.NullString) string { if s.Valid { return s.String }; return "" }
-func f64v(f sql.NullFloat64) float64 { if f.Valid { return f.Float64 }; return 0 }
+func strv(s sql.NullString) string {
+	if s.Valid {
+		return s.String
+	}
+	return ""
+}
+func f64v(f sql.NullFloat64) float64 {
+	if f.Valid {
+		return f.Float64
+	}
+	return 0
+}

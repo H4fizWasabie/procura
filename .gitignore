@@ -25,3 +25,9 @@ Thumbs.db
 
 # Generated exports
 *.xlsx
+
+# Local DB backups
+data/backups/
+
+# Local tooling index
+.codegraph/

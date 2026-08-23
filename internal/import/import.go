@@ -63,7 +63,9 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 			for _, row := range rows[1:] {
 				r := mapRow(headers, row)
 				sid := strVal(r["stock_id"])
-				if sid == "" { continue }
+				if sid == "" {
+					continue
+				}
 				itemName := strVal(r["item_name"])
 				currentStock := floatVal(r["current"])
 				ts := now.Format("2006-01-02T15:04:05")
@@ -94,7 +96,9 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 			for _, row := range rows[1:] {
 				r := mapRow(headers, row)
 				sn := strVal(r["supplier_name"])
-				if sn == "" { continue }
+				if sn == "" {
+					continue
+				}
 				s.DB.Exec(`INSERT OR REPLACE INTO suppliers (supplier_name, contact_person, phone, email, address, payment_terms, brn, account_no, bank_name) VALUES (?,?,?,?,?,?,?,?,?)`,
 					sn, strVal(r["contact_person"]), strVal(r["phone"]), strVal(r["email"]), strVal(r["address"]),
 					strVal(r["payment_terms"]), strVal(r["brn"]), strVal(r["account_no"]), strVal(r["bank_name"]))
@@ -109,11 +113,14 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 		rows, _ := f.GetRows("PurchaseOrder")
 		if len(rows) > 1 {
 			headers := normHeaders(rows[0])
-			inserted, itemRows := 0, 0
+			inserted, itemRows, autoLinked := 0, 0, 0
+			nameIndex := s.buildNameIndex()
 			for _, row := range rows[1:] {
 				r := mapRow(headers, row)
 				poID := strVal(r["po_id"])
-				if poID == "" { continue }
+				if poID == "" {
+					continue
+				}
 				rawJSON := strVal(r["po_data_json"])
 				s.DB.Exec(`INSERT OR REPLACE INTO purchase_orders (po_id, date, supplier, bill_no, total, paid, balance, status, ship_status, department, terms, raw_po_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 					poID, strVal(r["date"]), strVal(r["supplier"]), strVal(r["bill"]), floatVal(r["total"]), floatVal(r["paid"]),
@@ -124,14 +131,27 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 				if json.Unmarshal([]byte(rawJSON), &items) == nil {
 					s.DB.Exec("DELETE FROM purchase_order_items WHERE po_id = ?", poID)
 					for _, it := range items {
+						sid := strVal2(it["id"])
+						name := strVal2(it["n"])
+						if sid == "" {
+							// Opportunistic auto-link by normalized name / alias (#5).
+							// Never guesses beyond exact-after-normalization.
+							sid = nameIndex.lookup(name)
+							if sid != "" {
+								autoLinked++
+							}
+						}
 						s.DB.Exec("INSERT INTO purchase_order_items (po_id, item_name, quantity, cost, total, uom, stock_id) VALUES (?,?,?,?,?,?,?)",
-							poID, strVal2(it["n"]), floatVal2(it["q"]), floatVal2(it["c"]), floatVal2(it["t"]), strVal2(it["u"]), strVal2(it["id"]))
+							poID, name, floatVal2(it["q"]), floatVal2(it["c"]), floatVal2(it["t"]), strVal2(it["u"]), sid)
 						itemRows++
 					}
 				}
 			}
 			tableRows["purchase_orders"] = inserted
 			tableRows["purchase_order_items"] = itemRows
+			if autoLinked > 0 {
+				tableRows["auto_linked_items"] = autoLinked
+			}
 		}
 	}
 
@@ -143,7 +163,9 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 
 	// Record import run
 	total := 0
-	for _, v := range tableRows { total += v }
+	for _, v := range tableRows {
+		total += v
+	}
 	js, _ := json.Marshal(tableRows)
 	res, _ := s.DB.Exec("INSERT INTO import_runs (source_file, copied_file, imported_at, row_counts_json) VALUES (?,?,?,?)",
 		filename, copiedPath, now.Format("2006-01-02T15:04:05"), string(js))
@@ -344,8 +366,10 @@ func extractYear(s string) int {
 
 // ImportStock handles the daily Stock Balance History Report import.
 // Uses fixed column positions matching the Python items_screen._import_stock_excel:
-//   col 4 (D): SKU Code → matched against items.stock_id
-//   col 11 (K): Actual Stock → written to items.current_stock
+//
+//	col 4 (D): SKU Code → matched against items.stock_id
+//	col 11 (K): Actual Stock → written to items.current_stock
+//
 // Returns counts: {updated, skipped_empty, skipped_dash, errors}.
 func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 	f, err := excelize.OpenReader(r)
@@ -471,13 +495,20 @@ func normHeaders(headers []string) []string {
 	for i, h := range headers {
 		h = strings.TrimSpace(h)
 		key := strings.ToLower(strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') { return r }
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				return r
+			}
 			return '_'
 		}, h))
 		key = strings.Trim(key, "_")
-		if key == "" { key = fmt.Sprintf("column_%d", i+1) }
-		c := seen[key]; seen[key] = c+1
-		if c > 0 { key = fmt.Sprintf("%s_%d", key, c+1) }
+		if key == "" {
+			key = fmt.Sprintf("column_%d", i+1)
+		}
+		c := seen[key]
+		seen[key] = c + 1
+		if c > 0 {
+			key = fmt.Sprintf("%s_%d", key, c+1)
+		}
 		out[i] = key
 	}
 	return out
@@ -486,20 +517,99 @@ func normHeaders(headers []string) []string {
 func mapRow(headers, row []string) map[string]string {
 	m := map[string]string{}
 	for i, h := range headers {
-		if i < len(row) { m[h] = row[i] } else { m[h] = "" }
+		if i < len(row) {
+			m[h] = row[i]
+		} else {
+			m[h] = ""
+		}
 	}
 	return m
 }
 
 func strVal(s string) string { return strings.TrimSpace(s) }
-func intVal(s string) int { s = strings.TrimSpace(s); n:=0; fmt.Sscanf(s, "%d", &n); return n }
-func floatVal(s string) float64 { s = strings.TrimSpace(s); var f float64; fmt.Sscanf(s, "%f", &f); return f }
-func strVal2(v interface{}) string { if v==nil { return "" }; if s,ok:=v.(string); ok { return s }; return "" }
+func intVal(s string) int    { s = strings.TrimSpace(s); n := 0; fmt.Sscanf(s, "%d", &n); return n }
+func floatVal(s string) float64 {
+	s = strings.TrimSpace(s)
+	var f float64
+	fmt.Sscanf(s, "%f", &f)
+	return f
+}
+func strVal2(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
 func floatVal2(v interface{}) float64 {
-	if v==nil { return 0 }
-	switch n:=v.(type) {
-	case float64: return n
-	case json.Number: f,_:=n.Float64(); return f
+	if v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return n
+	case json.Number:
+		f, _ := n.Float64()
+		return f
 	}
 	return 0
+}
+
+// nameIndex maps normalized item names and aliases to stock_ids for
+// opportunistic auto-linking during import (ticket #5). Exact-after-
+// normalization only — no fuzzy guesses.
+type nameIndex struct {
+	byName map[string]string
+}
+
+func (n *nameIndex) lookup(name string) string {
+	if name == "" {
+		return ""
+	}
+	return n.byName[normKey(name)]
+}
+
+func normKey(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func (s *Service) buildNameIndex() *nameIndex {
+	idx := &nameIndex{byName: map[string]string{}}
+	rows, err := s.DB.Query("SELECT stock_id, item_name FROM items WHERE COALESCE(TRIM(item_name),'') != ''")
+	if err == nil {
+		for rows.Next() {
+			var sid, name string
+			rows.Scan(&sid, &name)
+			if k := normKey(name); k != "" {
+				idx.byName[k] = sid
+			}
+		}
+		rows.Close()
+	}
+	// Aliases win over raw names: they are human-confirmed mappings (#8).
+	rows, err = s.DB.Query(`
+		SELECT COALESCE(canonical_stock_id, alias_stock_id, ''), alias_item_name
+		FROM item_aliases WHERE is_active = 1
+	`)
+	if err == nil {
+		for rows.Next() {
+			var sid, alias string
+			rows.Scan(&sid, &alias)
+			if sid != "" {
+				if k := normKey(alias); k != "" {
+					idx.byName[k] = sid
+				}
+			}
+		}
+		rows.Close()
+	}
+	return idx
 }

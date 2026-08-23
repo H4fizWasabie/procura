@@ -1,0 +1,79 @@
+{{template "base.html" .}}
+{{define "content_unlinked"}}
+<div class="top-bar">
+    <h2>Unlinked PO Lines</h2>
+    <label style="display:flex;align-items:center;gap:6px;color:var(--muted)">
+        <input type="checkbox" id="show-all" onchange="load()"> include historical POs
+    </label>
+</div>
+<p style="color:var(--muted)">These purchase-order lines have no <code>stock_id</code>, so planning cannot see they are ordered. Link each line to its catalogue item — links are remembered as name aliases so the same supplier line never needs linking twice.</p>
+
+<table>
+    <thead><tr><th>PO</th><th>Date</th><th>Supplier</th><th>Item (supplier's name)</th><th>Qty</th><th style="width:420px">Link to catalogue item</th></tr></thead>
+    <tbody id="body"><tr><td colspan="6" style="text-align:center;color:var(--muted)">Loading…</td></tr></tbody>
+</table>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<script>
+let invItems = [];
+
+async function load() {
+    if (!invItems.length) {
+        const ir = await fetch('/api/inventory/basic');
+        invItems = await ir.json();
+    }
+    const all = document.getElementById('show-all').checked ? '?all=1' : '';
+    const res = await fetch('/api/pos/unlinked' + all);
+    const lines = await res.json();
+    document.getElementById('body').innerHTML = lines.length ? lines.map(l => `
+        <tr>
+            <td>${esc(l.poId)}</td><td>${(l.date||'').slice(0,10)}</td><td>${esc(l.supplier||'')}</td>
+            <td>${esc(l.itemName)}</td><td class="money">${l.qty}</td>
+            <td data-line="${l.lineId}">
+                <input type="text" list="inv-list" placeholder="${esc(l.itemName)}" style="width:220px"
+                       onchange="linkLine(this, ${l.lineId})">
+            </td>
+        </tr>
+    `).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--muted)">Nothing unlinked 🎉</td></tr>';
+}
+
+function resolveStockId(input) {
+    const v = input.value.trim().toLowerCase();
+    if (!v) return null;
+    for (const i of invItems) {
+        if ((i['Stock ID']||'').toLowerCase() === v || (i['Item Name']||'').toLowerCase() === v) return i['Stock ID'];
+    }
+    return null;
+}
+
+async function linkLine(input, lineId) {
+    const sid = resolveStockId(input);
+    if (!sid) { toast('No catalogue match — pick an item from the list', false); return; }
+    // Remembering is default-on (ticket #8): each confirmed link teaches the import.
+    const res = await fetch('/api/pos/unlinked/link', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({lineId, stockId: sid, remember: true})
+    });
+    const d = await res.json();
+    toast(d.success ? `Linked to ${sid}` : d.error, d.success);
+    if (d.success) input.closest('tr').remove(); else load();
+}
+
+function toast(msg, ok) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast ' + (ok ? 'toast-ok' : 'toast-err');
+    t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3000);
+}
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+document.addEventListener('DOMContentLoaded', () => {
+    const list = document.createElement('datalist');
+    list.id = 'inv-list';
+    fetch('/api/inventory/basic').then(r => r.json()).then(items => {
+        list.innerHTML = items.map(i => `<option value="${esc(i['Stock ID'])}">${esc(i['Item Name'])}</option>`).join('');
+        document.body.appendChild(list);
+    });
+});
+load();
+</script>
+{{end}}

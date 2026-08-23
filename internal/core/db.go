@@ -228,6 +228,13 @@ var schema = []string{
 	)`,
 }
 
+// migrations are additive ALTERs applied on every start; duplicate-column
+// errors mean already applied and are ignored.
+var migrations = []string{
+	"ALTER TABLE items ADD COLUMN initial_stock_target REAL",
+	"ALTER TABLE direct_orders ADD COLUMN superseded_by_po TEXT",
+}
+
 func Open(dataDir string) (*sql.DB, error) {
 	os.MkdirAll(dataDir, 0755)
 	path := filepath.Join(dataDir, "procura.sqlite")
@@ -240,6 +247,9 @@ func Open(dataDir string) (*sql.DB, error) {
 		if _, err := db.Exec(s); err != nil {
 			return nil, err
 		}
+	}
+	for _, m := range migrations {
+		db.Exec(m) // ignore errors: duplicate column = already applied
 	}
 	log.Printf("core: database ready at %s", path)
 	return db, nil

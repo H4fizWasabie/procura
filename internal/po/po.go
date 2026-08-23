@@ -34,6 +34,19 @@ type Item struct {
 	SupplierUOM string  `json:"supplier_uom"`
 }
 
+// MarshalJSON emits both GAS-format "id" and long-form "stock_id" so every
+// reader (planning pipeline scanner, mino, legacy) sees the link.
+// Ticket #5: Go-saved POs were invisible to pipeline suppression because only
+// "stock_id" was written.
+func (it Item) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"id": it.StockID, "stock_id": it.StockID,
+		"item_name": it.Name, "quantity": it.Qty,
+		"cost": it.Cost, "total": it.Total,
+		"uom": it.UOM, "supplier_uom": it.SupplierUOM,
+	})
+}
+
 func (it *Item) UnmarshalJSON(data []byte) error {
 	// Detect GAS legacy short-format keys (id/n/q/c/t/u or n/q/c/t/u)
 	var probe map[string]json.RawMessage
