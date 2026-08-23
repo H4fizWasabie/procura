@@ -11,6 +11,7 @@ package planning
 
 import (
 	"database/sql"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -95,12 +96,12 @@ type Service struct {
 // visibility with a flag, never silence.
 func (s *Service) Plan() []Item {
 	incoming := s.incomingPipeline()
-	usage := s.monthlyUsage()
+	coverage := s.historyCoverage()
 
 	rows, err := s.DB.Query(`
 		SELECT stock_id, item_name, category, product_type, supplier_name, uom,
 		       current_stock, rop, cost, exclude, item_behaviour, product_status,
-		       velocity_override, initial_stock_target
+		       velocity_override, initial_stock_target, COALESCE(velocity,0)
 		FROM items
 	`)
 	if err != nil {
@@ -111,9 +112,9 @@ func (s *Service) Plan() []Item {
 	var items []Item
 	for rows.Next() {
 		var id, name, cat, ptype, supplier, uom, excl, beh, status, velOv sql.NullString
-		var current, rop, cost, initTarget sql.NullFloat64
+		var current, rop, cost, initTarget, velCol sql.NullFloat64
 		rows.Scan(&id, &name, &cat, &ptype, &supplier, &uom,
-			&current, &rop, &cost, &excl, &beh, &status, &velOv, &initTarget)
+			&current, &rop, &cost, &excl, &beh, &status, &velOv, &initTarget, &velCol)
 
 		if !id.Valid || !name.Valid {
 			continue
@@ -147,32 +148,33 @@ func (s *Service) Plan() []Item {
 			it.IncomingQty += in.Qty
 		}
 
-		// Velocity resolution (ticket #2).
+		// Velocity resolution (ticket #9): read the persisted weighted
+		// velocity owned by movement.RecalcROP; planning never recomputes
+		// from windows. Confidence reflects data coverage only.
+		cov := coverage[sid]
 		if v := parseFloatOr(velOv.String, 0); v > 0 {
 			it.Velocity = v
 			it.Confidence = ConfHigh
 			it.SafetyQty = math.Ceil(v * safetyMonths)
-		} else if u := usage[sid]; u.historyMonths() <= 1 || it.InitialTarget > 0 {
+		} else if cov.totalMonths <= 1 || it.InitialTarget > 0 {
 			it.Confidence = ConfManual
 			it.Status = StatusReview
-		} else {
-			window := u.recentWindowUsage()
-			active := u.activeMonths(recentWindow)
-			n := recentWindow
-			if active < minActiveForHi {
-				window = u.widenedWindowUsage()
-				n = widenedWindow
-				it.Confidence = ConfLow
-			} else {
+		} else if velCol.Float64 > 0 {
+			it.Velocity = velCol.Float64
+			if cov.recentActive >= minActiveForHi {
 				it.Confidence = ConfHigh
-			}
-			it.Velocity = window / float64(n)
-			if it.Velocity <= 0 {
-				// Zero-velocity below ROP: conservative proxy, never hidden.
-				it.Velocity = dbROP / 2
+			} else {
 				it.Confidence = ConfLow
 			}
 			it.SafetyQty = math.Ceil(it.Velocity * safetyMonths)
+		} else if dbROP > 0 {
+			// Zero-velocity below ROP: conservative proxy, never hidden.
+			it.Velocity = dbROP / 2
+			it.Confidence = ConfLow
+			it.SafetyQty = math.Ceil(it.Velocity * safetyMonths)
+		} else {
+			it.Confidence = ConfManual
+			it.Status = StatusReview
 		}
 
 		if it.Status == "" {
@@ -212,6 +214,13 @@ func (s *Service) Plan() []Item {
 		return items[i].Name < items[j].Name
 	})
 	return items
+}
+
+// Plannable reports whether an item participates in reorder planning.
+// Shared by planning and movement.RecalcROP so both modules agree on what
+// is plannable (#14).
+func Plannable(excl, beh, status, ptype, category string) bool {
+	return !excluded(excl, beh, status, ptype, category)
 }
 
 // excluded applies the static filters: manual exclude flag, non-plannable
@@ -297,78 +306,55 @@ func (s *Service) incomingPipeline() map[string][]Incoming {
 	return out
 }
 
-// monthUsage is one stock_id's aggregated movement for one month.
-type monthUsage struct {
-	idx int // year*12+month
-	out float64
-}
-
-// stockUsage is all movement history for one stock_id.
-type stockUsage struct {
-	months []monthUsage // sorted by idx
-}
-
-func (u stockUsage) historyMonths() int { return len(u.months) }
-
-func (u stockUsage) sumFrom(minIdx int) float64 {
-	total := 0.0
-	for _, m := range u.months {
-		if m.idx >= minIdx {
-			total += m.out
-		}
-	}
-	return total
-}
-
-func (u stockUsage) activeMonths(window int) int {
-	lastIdx := lastCompleteMonthIdx()
-	n := 0
-	for _, m := range u.months {
-		if m.idx > lastIdx-window && m.idx <= lastIdx && m.out > 0 {
-			n++
-		}
-	}
-	return n
-}
-
-func (u stockUsage) recentWindowUsage() float64 {
-	return u.sumFrom(lastCompleteMonthIdx() - recentWindow + 1)
-}
-func (u stockUsage) widenedWindowUsage() float64 {
-	return u.sumFrom(lastCompleteMonthIdx() - widenedWindow + 1)
-}
-
-// monthlyUsage aggregates stock_movements into per-stock monthly out-totals
-// (out_qty + adj_out), the demand signal for velocity (ticket #2).
-func (s *Service) monthlyUsage() map[string]stockUsage {
-	m := map[string]stockUsage{}
+// historyCoverage returns per stock_id: total months with any movement row,
+// and active (out>0) months in the recent window. Used only for confidence
+// tiers — velocity itself comes from items.velocity (#9).
+func (s *Service) historyCoverage() map[string]historyMonths {
+	m := map[string]historyMonths{}
+	lc := lastCompleteMonthIdx()
 	rows, err := s.DB.Query(`
-		SELECT COALESCE(stock_id,''), year, month,
-		       SUM(COALESCE(out_qty,0) + COALESCE(adj_out,0))
-		FROM stock_movements
-		GROUP BY stock_id, year, month
-	`)
+		SELECT COALESCE(stock_id,''),
+		       COUNT(DISTINCT year*12+month),
+		       SUM(CASE WHEN year*12+month > ? AND year*12+month <= ?
+		                AND COALESCE(out_qty,0)+COALESCE(adj_out,0) > 0
+		            THEN 1 ELSE 0 END)
+		FROM stock_movements GROUP BY stock_id
+	`, lc-widenedWindow, lc)
 	if err != nil {
 		return m
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var sid string
-		var year, month int
-		var out float64
-		rows.Scan(&sid, &year, &month, &out)
-		if sid == "" || month < 1 || month > 12 {
-			continue
+		var total, recent int
+		rows.Scan(&sid, &total, &recent)
+		if sid != "" {
+			m[sid] = historyMonths{totalMonths: total, recentActive: recent}
 		}
-		u := m[sid]
-		u.months = append(u.months, monthUsage{idx: year*12 + month, out: out})
-		m[sid] = u
-	}
-	for sid, u := range m {
-		sort.Slice(u.months, func(i, j int) bool { return u.months[i].idx < u.months[j].idx })
-		m[sid] = u
 	}
 	return m
+}
+
+type historyMonths struct {
+	totalMonths  int
+	recentActive int
+}
+
+// DataThrough describes how fresh the movement data behind velocity is,
+// e.g. "Jul 2026" (Q3: staleness made visible).
+func (s *Service) DataThrough() string {
+	var idx sql.NullInt64
+	s.DB.QueryRow("SELECT MAX(year*12+month) FROM stock_movements").Scan(&idx)
+	if !idx.Valid {
+		return "no movement data"
+	}
+	y := int(idx.Int64) / 12
+	mo := int(idx.Int64) % 12
+	if mo == 0 { // December wraps to idx%12 == 0
+		y--
+		mo = 12
+	}
+	return time.Month(mo).String()[:3] + fmt.Sprintf(" %d", y)
 }
 
 var nowFn = time.Now // overridable in tests

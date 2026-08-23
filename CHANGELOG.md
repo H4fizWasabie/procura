@@ -119,3 +119,7 @@
 - [import] PurchaseOrder sheet auto-links empty stock_ids via normalized name match against items then item_aliases — human links teach future imports
 - [core] additive migrations: items.initial_stock_target, direct_orders.superseded_by_po
 - [ui] planning page: editable suggested qty, confidence/status badges, in-flight section with Delivered/Cancel actions; new /pos/unlinked audit page; removed dead POST /api/planning/rfq (server-side re-derivation violated explicit-payload contract)
+
+## 2026-08-23 (later)
+- [movement] RecalcROP persists weighted velocity to new items.velocity column; spike cap bounds each month's contribution at 3x median active month (#9, #12: first tests for RecalcROP math); plannable filter now shared with planning (#14)
+- [planning] Plan() reads items.velocity instead of recomputing from calendar windows — single velocity model, no movement-table scan per plan render; confidence tiers derive from data coverage; added DataThrough() staleness label shown on planning page

@@ -41,6 +41,11 @@ func seedUsage(t *testing.T, s *Service, id string, outs ...float64) {
 	}
 }
 
+// setVelocity persists the weighted velocity RecalcROP would compute (#9).
+func setVelocity(t *testing.T, s *Service, id string, v float64) {
+	mustExec(t, s, `UPDATE items SET velocity = ? WHERE stock_id = ?`, v, id)
+}
+
 func find(t *testing.T, items []Item, id string) Item {
 	t.Helper()
 	for _, it := range items {
@@ -55,7 +60,8 @@ func find(t *testing.T, items []Item, id string) Item {
 func TestSteadyUsageHighConfidence(t *testing.T) {
 	s := testDB(t)
 	seedItem(t, s, "A", 2, 10)
-	seedUsage(t, s, "A", 5, 5, 5) // 3 active months → HIGH
+	setVelocity(t, s, "A", 5)     // as RecalcROP would persist
+	seedUsage(t, s, "A", 5, 5, 5) // 3 active recent months → HIGH
 
 	items := s.Plan()
 	it := find(t, items, "A")
@@ -77,14 +83,15 @@ func TestSteadyUsageHighConfidence(t *testing.T) {
 func TestSparseUsageWidensAndLowConfidence(t *testing.T) {
 	s := testDB(t)
 	seedItem(t, s, "B", 1, 10)
-	seedUsage(t, s, "B", 6, 0, 0, 6, 0, 0) // only 2 active in recent 3 → widen to 6
+	setVelocity(t, s, "B", 2)              // weighted model's output; sparse recent data
+	seedUsage(t, s, "B", 6, 0, 0, 6, 0, 0) // only 2 active in recent window
 
 	items := s.Plan()
 	it := find(t, items, "B")
 	if it.Confidence != ConfLow {
 		t.Errorf("confidence = %v, want LOW", it.Confidence)
 	}
-	if it.Velocity != 2 { // 12 total over 6 months
+	if it.Velocity != 2 {
 		t.Errorf("velocity = %v, want 2", it.Velocity)
 	}
 }

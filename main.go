@@ -347,7 +347,10 @@ func main() {
 	}))
 
 	mux.HandleFunc("GET /api/planning", protected(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, planSvc.Plan())
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"items":       planSvc.Plan(),
+			"dataThrough": planSvc.DataThrough(),
+		})
 	}))
 
 	// Direct orders (in-flight markers). Quantities come from the UI payload,

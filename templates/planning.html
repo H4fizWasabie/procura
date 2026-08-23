@@ -9,6 +9,7 @@
 </div>
 
 <div class="search-bar">
+    <div id="data-note" style="color:var(--muted);font-size:13px;flex:1"></div>
     <input type="text" id="filter" placeholder="Search name, ID, supplier..." oninput="render()" style="flex:1">
     <select id="f-supplier" style="width:160px" onchange="render()"><option value="">All Suppliers</option></select>
     <select id="f-type" style="width:140px" onchange="render()"><option value="">All Types</option></select>
@@ -44,7 +45,9 @@ let data = [], selected = new Set();
 
 async function load() {
     const res = await fetch('/api/planning');
-    data = await res.json();
+    const d = await res.json();
+    data = d.items || d;
+    document.getElementById('data-note').textContent = d.dataThrough ? `Velocity & ROP based on movements through ${d.dataThrough}` : '';
     selected.clear();
     fillOptions();
     render();

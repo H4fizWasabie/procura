@@ -6,17 +6,19 @@ import (
 	"math"
 	"sort"
 	"time"
+
+	"procura/internal/planning"
 )
 
 type Row struct {
-	StockID      string  `json:"stock_id"`
-	ItemName     string  `json:"item_name"`
-	Year         int     `json:"year"`
-	Month        int     `json:"month"`
-	InQty        float64 `json:"in_qty"`
-	OutQty       float64 `json:"out_qty"`
-	AdjIn        float64 `json:"adj_in"`
-	AdjOut       float64 `json:"adj_out"`
+	StockID       string  `json:"stock_id"`
+	ItemName      string  `json:"item_name"`
+	Year          int     `json:"year"`
+	Month         int     `json:"month"`
+	InQty         float64 `json:"in_qty"`
+	OutQty        float64 `json:"out_qty"`
+	AdjIn         float64 `json:"adj_in"`
+	AdjOut        float64 `json:"adj_out"`
 	ReportClosing float64 `json:"report_closing"`
 }
 
@@ -41,7 +43,9 @@ func (s *Service) List(year, month int, search string, limit int) []Row {
 		term := "%" + search + "%"
 		args = append(args, term, term)
 	}
-	if limit <= 0 { limit = 500 }
+	if limit <= 0 {
+		limit = 500
+	}
 	args = append(args, limit)
 
 	query := `
@@ -51,7 +55,9 @@ func (s *Service) List(year, month int, search string, limit int) []Row {
 		ORDER BY year DESC, month DESC, stock_id LIMIT ?
 	`
 	rows, err := s.DB.Query(query, args...)
-	if err != nil { return []Row{} }
+	if err != nil {
+		return []Row{}
+	}
 	defer rows.Close()
 
 	var out []Row
@@ -75,11 +81,15 @@ func (s *Service) List(year, month int, search string, limit int) []Row {
 // Years returns distinct years in movement data.
 func (s *Service) Years() []int {
 	rows, _ := s.DB.Query("SELECT DISTINCT year FROM stock_movements ORDER BY year DESC")
-	if rows == nil { return []int{} }
+	if rows == nil {
+		return []int{}
+	}
 	defer rows.Close()
 	out := []int{}
 	for rows.Next() {
-		var y int; rows.Scan(&y); out = append(out, y)
+		var y int
+		rows.Scan(&y)
+		out = append(out, y)
 	}
 	return out
 }
@@ -116,10 +126,11 @@ func (s *Service) RecalcROP() int {
 		usageMap[sid] = append(usageMap[sid], mu)
 	}
 
-	// 2. Fetch all items (stock_id, rop, exclude, item_behaviour, velocity_override)
+	// 2. Fetch all items
 	itemRows, err := s.DB.Query(`
 		SELECT stock_id, COALESCE(rop,0), COALESCE(exclude,''),
-		       COALESCE(item_behaviour,''), COALESCE(velocity_override,0)
+		       COALESCE(item_behaviour,''), COALESCE(velocity_override,0),
+		       COALESCE(product_type,''), COALESCE(category,'')
 		FROM items
 	`)
 	if err != nil {
@@ -133,11 +144,15 @@ func (s *Service) RecalcROP() int {
 		exclude  string
 		beh      string
 		velOv    float64
+		ptype    string
+		category string
 	}
 	var items []itemRec
 	for itemRows.Next() {
 		var it itemRec
-		itemRows.Scan(&it.id, &it.currROP, &it.exclude, &it.beh, &it.velOv)
+		if err := itemRows.Scan(&it.id, &it.currROP, &it.exclude, &it.beh, &it.velOv, &it.ptype, &it.category); err != nil {
+			continue
+		}
 		items = append(items, it)
 	}
 
@@ -155,15 +170,14 @@ func (s *Service) RecalcROP() int {
 
 	updated := 0
 	for _, it := range items {
-		newROP := 0.0
+		newROP, newVel := 0.0, 0.0
 
-		// Skip: service / exclude
-		beh := it.beh
-		excl := it.exclude
-		if beh == "Service" || excl == "TRUE" || excl == "YES" || excl == "EXCLUDE" || excl == "1" {
+		// Skip non-plannable items (shared predicate with planning, #14)
+		if !planning.Plannable(it.exclude, it.beh, "", it.ptype, it.category) {
 			newROP = 0
 		} else if it.velOv > 0 {
 			// Velocity override
+			newVel = it.velOv
 			newROP = math.Ceil(it.velOv * 2)
 		} else {
 			// Weighted velocity from movement history
@@ -203,6 +217,25 @@ func (s *Service) RecalcROP() int {
 						return activePoints[i].monthsAgo < activePoints[j].monthsAgo
 					})
 
+					// Spike cap (#9): bound each month's contribution at 3× the
+					// median active month so one-off adjustments (write-offs,
+					// corrections) don't permanently inflate velocity.
+					var actives []float64
+					for _, p := range activePoints {
+						if p.usage > 0 {
+							actives = append(actives, p.usage)
+						}
+					}
+					if len(actives) >= 3 {
+						if spikeCap := median(actives) * 3; spikeCap > 0 {
+							for i, p := range activePoints {
+								if p.usage > spikeCap {
+									activePoints[i].usage = spikeCap
+								}
+							}
+						}
+					}
+
 					totalWV, totalW := 0.0, 0.0
 					for _, b := range buckets {
 						sum, count := 0.0, 0
@@ -220,25 +253,50 @@ func (s *Service) RecalcROP() int {
 					}
 					if totalW > 0 {
 						velocity := totalWV / totalW
+						newVel = velocity
 						newROP = math.Ceil(velocity * 2)
 					}
 				}
 			}
 		}
 
-		// Only update if ROP changed
+		// Persist velocity alongside ROP (#9: single velocity model)
 		if newROP != it.currROP {
-			s.DB.Exec("UPDATE items SET rop = ? WHERE stock_id = ?", newROP, it.id)
+			s.DB.Exec("UPDATE items SET rop = ?, velocity = ? WHERE stock_id = ?", newROP, newVel, it.id)
 			updated++
+		} else if newVel > 0 {
+			s.DB.Exec("UPDATE items SET velocity = ? WHERE stock_id = ?", newVel, it.id)
 		}
 	}
 
 	return updated
 }
 
-func strv(s sql.NullString) string { if s.Valid { return s.String }; return "" }
-func f64v(f sql.NullFloat64) float64 { if f.Valid { return f.Float64 }; return 0 }
+// median returns the median of a non-empty slice.
+func median(vals []float64) float64 {
+	sorted := append([]float64(nil), vals...)
+	sort.Float64s(sorted)
+	n := len(sorted)
+	if n%2 == 1 {
+		return sorted[n/2]
+	}
+	return (sorted[n/2-1] + sorted[n/2]) / 2
+}
+
+func strv(s sql.NullString) string {
+	if s.Valid {
+		return s.String
+	}
+	return ""
+}
+func f64v(f sql.NullFloat64) float64 {
+	if f.Valid {
+		return f.Float64
+	}
+	return 0
+}
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
+
 // TimelineItem is one data point for a single stock item's monthly history.
 type TimelineItem struct {
 	Year    int     `json:"year"`
@@ -283,7 +341,7 @@ func (s *Service) Timeline(stockID string) []TimelineItem {
 		return nil
 	}
 	defer rows.Close()
-	months := []string{"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"}
+	months := []string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 	var out []TimelineItem
 	for rows.Next() {
 		var y, m int
@@ -352,7 +410,9 @@ func (s *Service) BulkSave(year, month int, rows []BulkRow) error {
 func join(ss []string, sep string) string {
 	r := ""
 	for i, s := range ss {
-		if i > 0 { r += sep }
+		if i > 0 {
+			r += sep
+		}
 		r += s
 	}
 	return r
