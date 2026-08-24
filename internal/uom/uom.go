@@ -73,7 +73,7 @@ func (s *Service) UpsertItemMapping(supplier, stockID, itemName, supplierUOM str
 	var id int
 	err := s.DB.QueryRow(`
 		SELECT id FROM supplier_item_mappings
-		WHERE supplier_name = ? AND stock_id = ?
+		WHERE supplier_name = ? AND TRIM(stock_id) = TRIM(?)
 		ORDER BY id LIMIT 1
 	`, supplier, stockID).Scan(&id)
 	if err == nil {
@@ -86,9 +86,12 @@ func (s *Service) UpsertItemMapping(supplier, stockID, itemName, supplierUOM str
 	}
 	// Imported mappings may already identify the same item by supplier name.
 	// Reuse that row so the table's existing uniqueness rule is preserved.
+	// TRIM-compare: legacy rows differ only by stray whitespace (#bugfix:
+	// exact-match lookup missed them, INSERT then hit the UNIQUE constraint
+	// and every PO save surfaced an error even though the PO itself saved).
 	err = s.DB.QueryRow(`
 		SELECT id FROM supplier_item_mappings
-		WHERE supplier_name = ? AND supplier_item_name = ?
+		WHERE supplier_name = ? AND TRIM(supplier_item_name) = TRIM(?)
 		ORDER BY id LIMIT 1
 	`, supplier, itemName).Scan(&id)
 	if err == nil {
@@ -103,6 +106,16 @@ func (s *Service) UpsertItemMapping(supplier, stockID, itemName, supplierUOM str
 	_, err = s.DB.Exec(`INSERT INTO supplier_item_mappings
 		(supplier_name, supplier_item_name, supplier_uom, stock_id, match_priority)
 		VALUES (?, ?, ?, ?, 0)`, supplier, itemName, supplierUOM, stockID)
+	if err != nil {
+		// Last resort: a near-duplicate (case/whitespace variant) tripped the
+		// UNIQUE rule. Update it instead of failing the save.
+		if _, updErr := s.DB.Exec(`UPDATE supplier_item_mappings
+			SET supplier_uom = ?, stock_id = ?
+			WHERE supplier_name = ? AND TRIM(LOWER(supplier_item_name)) = TRIM(LOWER(?))`,
+			supplierUOM, stockID, supplier, itemName); updErr == nil {
+			return nil
+		}
+	}
 	return err
 }
 

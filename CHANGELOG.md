@@ -123,3 +123,7 @@
 ## 2026-08-23 (later)
 - [movement] RecalcROP persists weighted velocity to new items.velocity column; spike cap bounds each month's contribution at 3x median active month (#9, #12: first tests for RecalcROP math); plannable filter now shared with planning (#14)
 - [planning] Plan() reads items.velocity instead of recomputing from calendar windows — single velocity model, no movement-table scan per plan render; confidence tiers derive from data coverage; added DataThrough() staleness label shown on planning page
+
+## 2026-08-24
+- [po] fix Item JSON round-trip: UnmarshalJSON misread new-format entries (which carry both "id" and long keys) as GAS compact format, showing empty item names and zero quantities when viewing saved POs — data was intact, read path only
+- [uom] UpsertItemMapping: TRIM-tolerant lookups + INSERT falls back to UPDATE on UNIQUE conflicts — whitespace-variant legacy mappings no longer fail every PO save with "supplier UOM mapping failed"

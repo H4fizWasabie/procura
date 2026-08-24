@@ -48,12 +48,17 @@ func (it Item) MarshalJSON() ([]byte, error) {
 }
 
 func (it *Item) UnmarshalJSON(data []byte) error {
-	// Detect GAS legacy short-format keys (id/n/q/c/t/u or n/q/c/t/u)
+	// Detect GAS legacy short-format keys (id/n/q/c/t/u or n/q/c/t/u).
+	// Long-format entries (item_name present) must NOT take this path even
+	// when "id" is present — the round-trip bug fixed 2026-08-24: MarshalJSON
+	// emits both "id" and long keys, and the old detection misread them as
+	// GAS, producing empty names and zero quantities.
 	var probe map[string]json.RawMessage
 	json.Unmarshal(data, &probe)
 	_, hasID := probe["id"]
 	_, hasN := probe["n"]
-	if hasID || hasN {
+	_, hasLong := probe["item_name"]
+	if (hasID || hasN) && !hasLong {
 		var si struct {
 			StockID string  `json:"id"`
 			Name    string  `json:"n"`

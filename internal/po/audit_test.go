@@ -46,3 +46,31 @@ func TestLinkLineUpdatesRowAndRawJSON(t *testing.T) {
 		t.Errorf("unmarshal round-trip = %+v", items)
 	}
 }
+
+// Regression: MarshalJSON emits both "id" and long keys; UnmarshalJSON must
+// read long-format entries correctly instead of misreading them as GAS
+// compact format (empty names, zero quantities — the KM VET PO bug).
+func TestItemJSONRoundTrip(t *testing.T) {
+	in := Item{StockID: "M24089KD", Name: "KALZYME Dental Spray", Qty: 22, Cost: 69.9, Total: 1537.8, UOM: "Bottle", SupplierUOM: "Bottle"}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Item
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out != in {
+		t.Errorf("round-trip mismatch:\n in:  %+v\n out: %+v", in, out)
+	}
+
+	// GAS legacy entries still parse.
+	legacy := []byte(`{"id":"M123","n":"Legacy Name","q":5,"c":2,"t":10,"u":"BOX"}`)
+	var gas Item
+	if err := json.Unmarshal(legacy, &gas); err != nil {
+		t.Fatal(err)
+	}
+	if gas.StockID != "M123" || gas.Name != "Legacy Name" || gas.Qty != 5 {
+		t.Errorf("gas parse = %+v", gas)
+	}
+}
