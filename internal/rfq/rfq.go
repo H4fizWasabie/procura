@@ -17,9 +17,9 @@ type RFQ struct {
 }
 
 type Item struct {
-	StockID string `json:"stock_id"`
-	Name    string `json:"item_name"`
-	UOM     string `json:"uom"`
+	StockID string  `json:"stock_id"`
+	Name    string  `json:"item_name"`
+	UOM     string  `json:"uom"`
 	Qty     float64 `json:"qty"`
 }
 
@@ -55,6 +55,9 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 		rfq.RFQID = s.GenerateID()
 	}
 	rfq.Count = len(rfq.Items)
+	if rfq.Date == "" {
+		rfq.Date = time.Now().Format("2006-01-02T15:04:05")
+	}
 
 	compact := make([]map[string]interface{}, len(rfq.Items))
 	for i, it := range rfq.Items {
@@ -67,7 +70,7 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 	_, err := s.DB.Exec(`
 		INSERT OR REPLACE INTO rfq_logs (rfq_id, date, supplier, items_count, created_by, raw_rfq_json)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, rfq.RFQID, time.Now().Format("2006-01-02T15:04:05"), rfq.Supplier, rfq.Count, createdBy, string(rawJSON))
+	`, rfq.RFQID, rfq.Date, rfq.Supplier, rfq.Count, createdBy, string(rawJSON))
 	return rfq.RFQID, err
 }
 

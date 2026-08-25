@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-08-25
+- [rfq] Added Edit action for generated RFQs, reusing the existing form and preserving the RFQ date on save
+
 ## 2026-08-12
 - [repo] OSS prep — removed legacy gas/ folder (dead GAS code containing personal emails), bootstrap admin email now from PROCURA_ADMIN_EMAIL env (default admin@procura.local), added README + MIT license
 

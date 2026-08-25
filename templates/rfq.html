@@ -10,7 +10,7 @@
 
 <div id="create-modal" class="modal">
     <div class="modal-content" style="max-width:700px">
-        <div class="modal-header"><h3>New RFQ</h3><span class="close" onclick="closeCreate()">&times;</span></div>
+        <div class="modal-header"><h3 id="c-title">New RFQ</h3><span class="close" onclick="closeCreate()">&times;</span></div>
         <div class="modal-body">
             <div class="form-row">
                 <div class="form-group"><label>RFQ ID</label><input id="c-id" disabled></div>
@@ -79,22 +79,40 @@ function renderRFQ() {
         <td style="display:flex;gap:4px">
             <button onclick="previewRFQ('${esc(r.rfq_id)}')" class="btn-sm">👁</button>
             <button onclick="downloadRFQ('${esc(r.rfq_id)}')" class="btn-sm">📥</button>
+            <button onclick="editRFQ('${esc(r.rfq_id)}')" class="btn-sm">Edit</button>
             <button onclick="delRFQ('${esc(r.rfq_id)}')" class="btn-sm btn-danger">Del</button>
         </td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No RFQs match filters</td></tr>';
 }
 async function openCreate() {
     const res = await fetch('/api/rfq/next-id'); const {id} = await res.json();
+    document.getElementById('c-title').textContent = 'New RFQ';
     document.getElementById('c-id').value = id;
     document.getElementById('c-date').value = todayDMY();
+    document.getElementById('c-supplier').value = '';
     document.getElementById('c-notes').value = '';
     document.getElementById('c-items').querySelector('tbody').innerHTML = '';
     addItem();
     document.getElementById('create-modal').classList.add('open');
 }
 function closeCreate() { document.getElementById('create-modal').classList.remove('open'); }
+function editRFQ(id) {
+    const r = rfqData.find(r => r.rfq_id === id);
+    if (!r) return;
+    document.getElementById('c-title').textContent = 'Edit RFQ';
+    document.getElementById('c-id').value = r.rfq_id;
+    document.getElementById('c-date').value = toDMY(r.date);
+    document.getElementById('c-supplier').value = r.supplier || '';
+    document.getElementById('c-notes').value = '';
+    const tbody = document.getElementById('c-items').querySelector('tbody');
+    tbody.innerHTML = '';
+    (r.items || []).forEach(it => addItem(it));
+    if (!r.items || !r.items.length) addItem();
+    document.getElementById('create-modal').classList.add('open');
+}
 async function openCreateWithDraft(supplier, items) {
     // fetch next ID but skip addItem() — we'll add draft items instead
     const res = await fetch('/api/rfq/next-id'); const {id} = await res.json();
+    document.getElementById('c-title').textContent = 'New RFQ';
     document.getElementById('c-id').value = id;
     document.getElementById('c-date').value = todayDMY();
     document.getElementById('c-notes').value = '';
@@ -102,15 +120,7 @@ async function openCreateWithDraft(supplier, items) {
     const tbody = document.getElementById('c-items').querySelector('tbody');
     tbody.innerHTML = '';
     if (!items || !items.length) { addItem(); } else {
-        items.forEach(it => {
-            const row = document.createElement('tr');
-            row.innerHTML = `<td><input style="width:100px" class="ri-stock" value="${esc(it.stock_id||'')}"></td>
-                <td><input style="width:200px" class="ri-name" list="rfq-item-list" onchange="onRfqItemSelect(this)" value="${esc(it.item_name||'')}"></td>
-                <td><input type="number" step="0.01" style="width:70px" class="ri-qty" value="${it.qty||1}"></td>
-                <td><input style="width:60px" class="ri-uom" value="${esc(it.uom||'UNIT')}"></td>
-                <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
-            tbody.appendChild(row);
-        });
+        items.forEach(it => addItem(it));
     }
     document.getElementById('create-modal').classList.add('open');
 }
@@ -127,13 +137,13 @@ function onRfqItemSelect(input) {
     row.querySelector('.ri-uom').value = match['UOM'] || 'UNIT';
     input.value = match['Item Name'];
 }
-function addItem() {
+function addItem(it = {}) {
     const tbody = document.getElementById('c-items').querySelector('tbody');
     const row = document.createElement('tr');
-    row.innerHTML = `<td><input style="width:100px" class="ri-stock"></td>
-        <td><input style="width:200px" class="ri-name" list="rfq-item-list" onchange="onRfqItemSelect(this)" placeholder="Search inventory..."></td>
-        <td><input type="number" step="0.01" value="1" style="width:70px" class="ri-qty"></td>
-        <td><input style="width:60px" class="ri-uom" value="UNIT"></td>
+    row.innerHTML = `<td><input style="width:100px" class="ri-stock" value="${esc(it.stock_id||'')}"></td>
+        <td><input style="width:200px" class="ri-name" list="rfq-item-list" onchange="onRfqItemSelect(this)" placeholder="Search inventory..." value="${esc(it.item_name||'')}"></td>
+        <td><input type="number" step="0.01" value="${it.qty || 1}" style="width:70px" class="ri-qty"></td>
+        <td><input style="width:60px" class="ri-uom" value="${esc(it.uom||'UNIT')}"></td>
         <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
     tbody.appendChild(row);
 }
