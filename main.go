@@ -93,7 +93,6 @@ func main() {
 	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "login.html", nil)
 	})
-
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Email string `json:"email"`
@@ -134,6 +133,9 @@ func main() {
 
 	// ── Protected pages ──
 	protected := authSvc.Middleware
+	mux.HandleFunc("GET /api/session", protected(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"email": r.Header.Get("X-User-Email")})
+	}))
 	adminOnly := func(next http.HandlerFunc) http.HandlerFunc {
 		return protected(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("X-User-Role") != "ADMIN" {

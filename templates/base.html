@@ -61,6 +61,7 @@
     </div></div>
 <script>
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const HEARTBEAT_MS = 5 * 60 * 1000;
 let idleTimer;
 function resetIdleTimer() {
     clearTimeout(idleTimer);
@@ -72,6 +73,15 @@ function resetIdleTimer() {
 ['pointerdown', 'keydown', 'mousemove', 'touchstart', 'scroll'].forEach(e =>
     document.addEventListener(e, resetIdleTimer, {passive: true}));
 resetIdleTimer();
+setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    fetch('/api/session').then(res => {
+        if (!res.ok) throw new Error('session expired');
+    }).catch(() => { window.location.href = '/login'; });
+}, HEARTBEAT_MS);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resetIdleTimer();
+});
 function toggleNav() { document.body.classList.toggle('nav-open'); }
 async function logout() {
     await fetch('/api/logout', {method:'POST'});

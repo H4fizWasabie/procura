@@ -2,6 +2,7 @@
 
 ## 2026-08-25
 - [auth] Added a 15-minute sliding idle timeout — active requests refresh the session; inactive browser sessions expire and return to login
+- [auth] Added a five-minute visible-page heartbeat so users can complete long forms without losing an active session
 
 ## 2026-08-25
 - [rfq] Added Edit action for generated RFQs, reusing the existing form and preserving the RFQ date on save
