@@ -105,10 +105,7 @@ func main() {
 			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
-			Name: "token", Value: token, Path: "/",
-			HttpOnly: true, MaxAge: 8 * 3600, SameSite: http.SameSiteLaxMode,
-		})
+		auth.SetSessionCookie(w, token)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": true, "user": claims,
 			"mustChangePin": authSvc.MustChangePIN(claims.Email),
@@ -122,10 +119,7 @@ func main() {
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "Demo login failed"})
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
-			Name: "token", Value: token, Path: "/",
-			HttpOnly: true, MaxAge: 8 * 3600, SameSite: http.SameSiteLaxMode,
-		})
+		auth.SetSessionCookie(w, token)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "user": claims})
 	})
 

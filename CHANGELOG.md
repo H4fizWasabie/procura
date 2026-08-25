@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-08-25
+- [auth] Added a 15-minute sliding idle timeout — active requests refresh the session; inactive browser sessions expire and return to login
+
+## 2026-08-25
 - [rfq] Added Edit action for generated RFQs, reusing the existing form and preserving the RFQ date on save
 
 ## 2026-08-12

@@ -60,6 +60,18 @@
     </main>
     </div></div>
 <script>
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+let idleTimer;
+function resetIdleTimer() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(async () => {
+        await fetch('/api/logout', {method:'POST', keepalive:true});
+        window.location.href = '/login';
+    }, IDLE_TIMEOUT_MS);
+}
+['pointerdown', 'keydown', 'mousemove', 'touchstart', 'scroll'].forEach(e =>
+    document.addEventListener(e, resetIdleTimer, {passive: true}));
+resetIdleTimer();
 function toggleNav() { document.body.classList.toggle('nav-open'); }
 async function logout() {
     await fetch('/api/logout', {method:'POST'});

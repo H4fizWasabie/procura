@@ -30,7 +30,7 @@ type Claims struct {
 }
 
 type attempt struct {
-	count    int
+	count       int
 	lockedUntil time.Time
 }
 
@@ -42,6 +42,8 @@ var (
 type Service struct {
 	DB *sql.DB
 }
+
+const idleTimeout = 15 * time.Minute
 
 // Login authenticates user and returns JWT.
 func (s *Service) Login(email, pin string) (string, *Claims, error) {
@@ -94,11 +96,26 @@ func issueToken(email, role, name string) (string, *Claims, error) {
 		Role:  role,
 		Name:  name,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(8 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(idleTimeout)),
 		},
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(jwtSecret)
 	return token, claims, err
+}
+
+func SetSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name: "token", Value: token, Path: "/", HttpOnly: true,
+		MaxAge: int(idleTimeout.Seconds()), SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func refreshSessionCookie(w http.ResponseWriter, claims *Claims) {
+	claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(idleTimeout))
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(jwtSecret)
+	if err == nil {
+		SetSessionCookie(w, token)
+	}
 }
 
 // MustChangePIN returns true if user must change their PIN.
@@ -142,6 +159,9 @@ func (s *Service) Middleware(next http.HandlerFunc) http.HandlerFunc {
 		if err != nil || !token.Valid {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
+		}
+		if cookie != nil {
+			refreshSessionCookie(w, claims)
 		}
 		// Store claims in context via header for simplicity
 		r.Header.Set("X-User-Email", claims.Email)

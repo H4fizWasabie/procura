@@ -34,3 +34,11 @@ func TestViewerReadOnly(t *testing.T) {
 		t.Errorf("POST item-history = %d, want %d", c, http.StatusTeapot)
 	}
 }
+
+func TestSessionCookieUsesIdleTimeout(t *testing.T) {
+	rec := httptest.NewRecorder()
+	SetSessionCookie(rec, "token")
+	if got := rec.Result().Cookies()[0].MaxAge; got != int(idleTimeout.Seconds()) {
+		t.Fatalf("MaxAge = %d, want %d", got, int(idleTimeout.Seconds()))
+	}
+}
