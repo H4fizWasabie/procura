@@ -134,3 +134,5 @@
 ## 2026-08-24
 - [po] fix Item JSON round-trip: UnmarshalJSON misread new-format entries (which carry both "id" and long keys) as GAS compact format, showing empty item names and zero quantities when viewing saved POs — data was intact, read path only
 - [uom] UpsertItemMapping: TRIM-tolerant lookups + INSERT falls back to UPDATE on UNIQUE conflicts — whitespace-variant legacy mappings no longer fail every PO save with "supplier UOM mapping failed"
+## 2026-08-26
+- [import] Make Stock Balance History uploads authoritative: header-map catalogue fields, update existing items, and add new SKUs such as Renadyl.

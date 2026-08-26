@@ -222,7 +222,7 @@ async function importStock(input) {
     const d = await res.json();
     if(d.success){
         const c = d.counts;
-        toast(`Stock updated: ${c.updated} items` + (c.skipped_dash ? `, ${c.skipped_dash} dash→0` : '') + (c.errors ? `, ${c.errors} errors` : ''), true);
+        toast(`Stock synced: ${c.updated} updated, ${c.added || 0} added` + (c.skipped_dash ? `, ${c.skipped_dash} dash→0` : '') + (c.errors ? `, ${c.errors} errors` : ''), true);
         loadPage(page);
     } else {
         toast('Error: ' + d.error, false);

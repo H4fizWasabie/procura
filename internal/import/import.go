@@ -185,11 +185,12 @@ var inventoryFieldPatterns = []struct {
 	patterns []string
 }{
 	{"stock_id", []string{"sku_code", "sku", "stock_id", "stock id", "item_code", "item code", "part_no", "part no", "part_number", "part number", "material", "item_no", "item no", "product_code", "product code"}},
-	{"item_name", []string{"product_name", "product name", "item_name", "item name", "description", "desc", "product"}},
+	{"item_name", []string{"product_name", "product name", "item_name", "item name", "description", "desc"}},
 	{"product_type", []string{"product_type", "product type", "p_type", "p.type", "type"}},
 	{"product_status", []string{"product_status", "product status", "status", "state", "availability"}},
 	{"category", []string{"category", "cat", "group", "family"}},
-	{"cost", []string{"cost_price", "cost price", "unit_cost", "unit cost", "buying_price", "buying price", "cost", "rate", "price"}},
+	{"cost", []string{"cost_price", "cost price", "unit_cost", "unit cost", "buying_price", "buying price", "cost", "rate"}},
+	{"selling_price", []string{"selling_price", "selling price", "retail_price", "retail price", "sell price"}},
 	{"supplier", []string{"supplier_name", "supplier name", "supplier", "vendor", "mfr", "manufacturer"}},
 	{"uom", []string{"uom", "unit", "measure", "pkg", "packing"}},
 	{"current", []string{"actual_stock", "actual stock", "current_stock", "current stock", "current", "qty_on_hand", "qty on hand", "quantity", "qty", "balance", "on_hand", "on hand", "stock", "closing_balance", "closing balance", "closing"}},
@@ -364,13 +365,9 @@ func extractYear(s string) int {
 	return 0
 }
 
-// ImportStock handles the daily Stock Balance History Report import.
-// Uses fixed column positions matching the Python items_screen._import_stock_excel:
-//
-//	col 4 (D): SKU Code → matched against items.stock_id
-//	col 11 (K): Actual Stock → written to items.current_stock
-//
-// Returns counts: {updated, skipped_empty, skipped_dash, errors}.
+// ImportStock treats the daily Stock Balance History Report as the source of
+// truth for catalogue fields and actual stock. It updates existing SKUs and
+// adds new ones; planning fields remain untouched.
 func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 	f, err := excelize.OpenReader(r)
 	if err != nil {
@@ -387,53 +384,62 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 		return nil, fmt.Errorf("read sheet: %w", err)
 	}
 
-	updated, skippedEmpty, skippedDash, errors := 0, 0, 0, 0
-	for i, row := range rows {
-		if i == 0 {
-			continue // skip header
-		}
-		// col 4 (index 3): SKU Code
-		sku := ""
-		if len(row) > 3 {
-			sku = strings.TrimSpace(row[3])
-		}
+	if len(rows) < 1 {
+		return nil, fmt.Errorf("empty stock balance report")
+	}
+	headers := applyInventoryAliases(normHeaders(rows[0]))
+	updated, added, skippedEmpty, skippedDash, errors := 0, 0, 0, 0, 0
+	now := time.Now().Format("2006-01-02T15:04:05")
+	for _, row := range rows[1:] {
+		fields := mapRow(headers, row)
+		sku := strVal(fields["stock_id"])
 		if sku == "" {
+			skippedEmpty++
 			continue
 		}
-		// col 11 (index 10): Actual Stock
-		stockRaw := ""
-		if len(row) > 10 {
-			stockRaw = strings.TrimSpace(row[10])
-		}
+		stockRaw := strVal(fields["current"])
 		if stockRaw == "" {
 			skippedEmpty++
 			continue
 		}
-		var stockVal int
+		stock := 0.0
 		if stockRaw == "-" {
-			stockVal = 0
 			skippedDash++
 		} else {
-			f, err := parseFloat(stockRaw)
+			stock, err = parseFloat(stockRaw)
 			if err != nil {
 				errors++
 				continue
 			}
-			stockVal = int(f)
 		}
-		result, err := s.DB.Exec("UPDATE items SET current_stock = ? WHERE stock_id = ?", stockVal, sku)
+
+		var exists int
+		s.DB.QueryRow("SELECT COUNT(*) FROM items WHERE stock_id = ?", sku).Scan(&exists)
+		if exists > 0 {
+			_, err = s.DB.Exec(`UPDATE items SET item_name=?, cost=?, selling_price=?, uom=?,
+				product_type=?, category=?, supplier_name=?, product_status=?, current_stock=?, last_updated=?
+				WHERE stock_id=?`, strVal(fields["item_name"]), floatVal(fields["cost"]),
+				floatVal(fields["selling_price"]), strVal(fields["uom"]), strVal(fields["product_type"]),
+				strVal(fields["category"]), strVal(fields["supplier"]), strVal(fields["product_status"]), stock, now, sku)
+		} else {
+			_, err = s.DB.Exec(`INSERT INTO items
+				(stock_id,item_name,cost,selling_price,uom,product_type,category,supplier_name,product_status,current_stock,last_updated)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?)`, sku, strVal(fields["item_name"]), floatVal(fields["cost"]),
+				floatVal(fields["selling_price"]), strVal(fields["uom"]), strVal(fields["product_type"]),
+				strVal(fields["category"]), strVal(fields["supplier"]), strVal(fields["product_status"]), stock, now)
+		}
 		if err != nil {
 			errors++
-			continue
-		}
-		n, _ := result.RowsAffected()
-		if n > 0 {
+		} else if exists > 0 {
 			updated++
+		} else {
+			added++
 		}
 	}
 
 	return map[string]int{
 		"updated":       updated,
+		"added":         added,
 		"skipped_empty": skippedEmpty,
 		"skipped_dash":  skippedDash,
 		"errors":        errors,
@@ -494,12 +500,12 @@ func normHeaders(headers []string) []string {
 	seen := map[string]int{}
 	for i, h := range headers {
 		h = strings.TrimSpace(h)
-		key := strings.ToLower(strings.Map(func(r rune) rune {
+		key := strings.Map(func(r rune) rune {
 			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 				return r
 			}
 			return '_'
-		}, h))
+		}, strings.ToLower(h))
 		key = strings.Trim(key, "_")
 		if key == "" {
 			key = fmt.Sprintf("column_%d", i+1)
