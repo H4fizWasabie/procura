@@ -22,6 +22,7 @@ import (
 const (
 	coverMonths    = 2.0 // single global cover period (ticket #3)
 	safetyMonths   = 1.0 // safety stock lives in the trigger only
+	incomingExpiry = 30  // unresolved incoming links expire after 30 calendar days
 	recentWindow   = 3   // trailing complete months for velocity
 	widenedWindow  = 6   // widened window when recent window is sparse
 	minActiveForHi = 3   // active months in recent window required for HIGH confidence
@@ -245,12 +246,14 @@ func excluded(excl, beh, status, ptype, category string) bool {
 	return strings.Contains(pt, "surgical") || strings.Contains(ct, "surgical")
 }
 
-// incomingPipeline returns per-stock-id everything currently in flight:
+// incomingPipeline returns per-stock-id recent, unresolved incoming links:
 // open PO lines (not Received/VOID), ACTIVE direct orders, and RFQs not yet
-// superseded by a linked PO. No date cutoffs — lifecycle is status-driven
-// (ticket #6).
+// superseded by a recent linked PO. Older links remain in history but no
+// longer suppress a fresh recommendation.
 func (s *Service) incomingPipeline() map[string][]Incoming {
 	out := map[string][]Incoming{}
+	cutoff := nowFn().AddDate(0, 0, -incomingExpiry)
+	cutoffDate := cutoff.Format("2006-01-02")
 
 	rows, err := s.DB.Query(`
 		SELECT poi.po_id, poi.stock_id, poi.quantity
@@ -259,7 +262,8 @@ func (s *Service) incomingPipeline() map[string][]Incoming {
 		WHERE COALESCE(poi.stock_id,'') != ''
 		  AND COALESCE(po.ship_status,'') != 'Received'
 		  AND COALESCE(po.status,'') != 'VOID'
-	`)
+		  AND substr(COALESCE(po.date,''),1,10) > ?
+	`, cutoffDate)
 	if err == nil {
 		for rows.Next() {
 			var ref, sid string
@@ -272,7 +276,11 @@ func (s *Service) incomingPipeline() map[string][]Incoming {
 		rows.Close()
 	}
 
-	rows, err = s.DB.Query(`SELECT order_id, stock_id, quantity FROM direct_orders WHERE status = 'ACTIVE'`)
+	rows, err = s.DB.Query(`
+		SELECT order_id, stock_id, quantity
+		FROM direct_orders
+		WHERE status = 'ACTIVE' AND substr(COALESCE(date,''),1,10) > ?
+	`, cutoffDate)
 	if err == nil {
 		for rows.Next() {
 			var ref, sid string
@@ -285,11 +293,19 @@ func (s *Service) incomingPipeline() map[string][]Incoming {
 		rows.Close()
 	}
 
-	// RFQs suppress until a PO links them (purchase_orders.linked_rfq).
+	// RFQs suppress until a recent PO links them. A stale PO must not keep its
+	// RFQ suppressed forever.
 	rows, err = s.DB.Query(`
 		SELECT rfq_id, raw_rfq_json FROM rfq_logs r
-		WHERE NOT EXISTS (SELECT 1 FROM purchase_orders po WHERE po.linked_rfq = r.rfq_id)
-	`)
+		WHERE substr(COALESCE(r.date,''),1,10) > ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM purchase_orders po
+			WHERE po.linked_rfq = r.rfq_id
+			  AND COALESCE(po.ship_status,'') != 'Received'
+			  AND COALESCE(po.status,'') != 'VOID'
+			  AND substr(COALESCE(po.date,''),1,10) > ?
+		  )
+	`, cutoffDate, cutoffDate)
 	if err == nil {
 		for rows.Next() {
 			var ref, raw string

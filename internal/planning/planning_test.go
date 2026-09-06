@@ -24,6 +24,13 @@ func mustExec(t *testing.T, s *Service, q string, args ...interface{}) {
 	}
 }
 
+func freezeNow(t *testing.T, when time.Time) {
+	t.Helper()
+	original := nowFn
+	nowFn = func() time.Time { return when }
+	t.Cleanup(func() { nowFn = original })
+}
+
 // seedItem inserts a plannable item.
 func seedItem(t *testing.T, s *Service, id string, current, rop float64) {
 	mustExec(t, s, `INSERT INTO items (stock_id, item_name, current_stock, rop, cost, uom) VALUES (?,?,?,?,?,?)`,
@@ -146,9 +153,10 @@ func TestVelocityOverrideWins(t *testing.T) {
 
 func TestIncomingNettingSuppressesSuggestion(t *testing.T) {
 	s := testDB(t)
+	freezeNow(t, time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC))
 	seedItem(t, s, "F", 2, 10)
 	seedUsage(t, s, "F", 5, 5, 5)
-	mustExec(t, s, `INSERT INTO purchase_orders (po_id, status, ship_status, raw_po_json) VALUES ('PO-X','Approved','Pending','[{"id":"F","n":"Item F","q":9}]')`)
+	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, status, ship_status, raw_po_json) VALUES ('PO-X','2026-09-05','Approved','Pending','[{"id":"F","n":"Item F","q":9}]')`)
 	mustExec(t, s, `INSERT INTO purchase_order_items (po_id, item_name, quantity, stock_id) VALUES ('PO-X','Item F',9,'F')`)
 
 	items := s.Plan()
@@ -164,13 +172,48 @@ func TestIncomingNettingSuppressesSuggestion(t *testing.T) {
 
 func TestHealthyOnOrderItemStillVisible(t *testing.T) {
 	s := testDB(t)
+	freezeNow(t, time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC))
 	seedItem(t, s, "G", 50, 10) // healthy stock
-	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-T','2026-01-01','G','Item G',3,'ACTIVE')`)
+	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-T','2026-09-05','G','Item G',3,'ACTIVE')`)
 
 	items := s.Plan()
 	it := find(t, items, "G") // would fail if hard-hidden
 	if !it.OnOrder {
 		t.Errorf("expected ON ORDER visibility")
+	}
+}
+
+func TestIncomingLinksExpireAfter30Days(t *testing.T) {
+	s := testDB(t)
+	freezeNow(t, time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC))
+
+	seedItem(t, s, "OLD-PO", 50, 10)
+	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, status, ship_status) VALUES ('PO-OLD','2026-08-07','Approved','Pending')`)
+	mustExec(t, s, `INSERT INTO purchase_order_items (po_id, item_name, quantity, stock_id) VALUES ('PO-OLD','Item OLD-PO',9,'OLD-PO')`)
+
+	seedItem(t, s, "NEW-PO", 50, 10)
+	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, status, ship_status) VALUES ('PO-NEW','2026-08-08','Approved','Pending')`)
+	mustExec(t, s, `INSERT INTO purchase_order_items (po_id, item_name, quantity, stock_id) VALUES ('PO-NEW','Item NEW-PO',9,'NEW-PO')`)
+
+	seedItem(t, s, "OLD-DIRECT", 50, 10)
+	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-OLD','2026-08-07','OLD-DIRECT','Item OLD-DIRECT',3,'ACTIVE')`)
+
+	seedItem(t, s, "OLD-RFQ", 50, 10)
+	mustExec(t, s, `INSERT INTO rfq_logs (rfq_id, date, raw_rfq_json) VALUES ('RFQ-OLD','2026-08-07','[{"id":"OLD-RFQ","q":4}]')`)
+
+	seedItem(t, s, "RFQ-AFTER-OLD-PO", 50, 10)
+	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, linked_rfq, status, ship_status) VALUES ('PO-RFQ-OLD','2026-08-01','RFQ-RECENT','Approved','Pending')`)
+	mustExec(t, s, `INSERT INTO rfq_logs (rfq_id, date, raw_rfq_json) VALUES ('RFQ-RECENT','2026-09-05','[{"id":"RFQ-AFTER-OLD-PO","q":4}]')`)
+
+	incoming := s.incomingPipeline()
+	if len(incoming["OLD-PO"]) != 0 || len(incoming["OLD-DIRECT"]) != 0 || len(incoming["OLD-RFQ"]) != 0 {
+		t.Fatalf("expired links remained: %#v", incoming)
+	}
+	if len(incoming["NEW-PO"]) != 1 || incoming["NEW-PO"][0].Qty != 9 {
+		t.Fatalf("fresh PO = %#v, want one incoming row", incoming["NEW-PO"])
+	}
+	if len(incoming["RFQ-AFTER-OLD-PO"]) != 1 {
+		t.Fatalf("recent RFQ stayed suppressed by expired PO: %#v", incoming["RFQ-AFTER-OLD-PO"])
 	}
 }
 

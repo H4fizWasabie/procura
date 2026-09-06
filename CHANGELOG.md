@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-09-06
+- [planning] Expire PO, RFQ, and active direct-order links from Planning after 30 calendar days; stale links no longer suppress fresh recommendations while history remains
+
 ## 2026-08-25
 - [auth] Added a 15-minute sliding idle timeout — active requests refresh the session; inactive browser sessions expire and return to login
 - [auth] Added a five-minute visible-page heartbeat so users can complete long forms without losing an active session

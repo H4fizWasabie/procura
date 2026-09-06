@@ -35,7 +35,7 @@ No transactional stock-editing features. Procura owns the delta knowledge: in-fl
 Both take explicit `{stock_id, qty, uom}` payloads + supplier from the UI; Plan() only prefills. Server never re-derives intent.
 
 - **Send to RFQ**: RFQ draft + `rfq_logs` entry (drives IN RFQ suppression) + PDF generation. Supplier is **fully manual per RFQ**, decoupled from item's registered supplier (hint only).
-- **Mark ordered**: direct-order rows (`DO-YYYY-nnn` kept). Statuses: ACTIVE → DELIVERED | CANCELLED | SUPERSEDED (new additive column `superseded_by_po TEXT`). A covering PO auto-supersedes ACTIVE rows for its stock_ids. Age badge on stale rows. No date expiry.
+- **Mark ordered**: direct-order rows (`DO-YYYY-nnn` kept). Statuses: ACTIVE → DELIVERED | CANCELLED | SUPERSEDED (new additive column `superseded_by_po TEXT`). A covering PO auto-supersedes ACTIVE rows for its stock_ids. Incoming links expire from Planning after 30 calendar days; records remain available in history.
 
 ## Linkage
 
