@@ -46,9 +46,21 @@ var (
 )
 
 func main() {
-	db, err := core.Open("data")
+	dataDir := os.Getenv("PROCURA_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "data"
+	}
+	db, err := core.Open(dataDir)
 	if err != nil {
 		log.Fatal(err)
+	}
+	demoMode := os.Getenv("PROCURA_DEMO") == "1"
+	if demoMode {
+		if err := core.SeedDemo(db); err != nil {
+			log.Fatal(err)
+		}
+	} else if pin := (&auth.Service{DB: db}).BootstrapAdmin(); pin != "" {
+		log.Printf("*** FIRST RUN: admin user created — email: admin@procura.local  PIN: %s ***", pin)
 	}
 
 	// Load logo and signature from embedded static
@@ -60,9 +72,6 @@ func main() {
 	}
 
 	authSvc := &auth.Service{DB: db}
-	if pin := authSvc.BootstrapAdmin(); pin != "" {
-		log.Printf("*** FIRST RUN: admin user created — email: admin@procura.local  PIN: %s ***", pin)
-	}
 
 	dashSvc := &dashboard.Service{DB: db}
 	invSvc := &inventory.Service{DB: db}
@@ -91,7 +100,11 @@ func main() {
 
 	// ── Public ──
 	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
-		tmpl.ExecuteTemplate(w, "login.html", nil)
+		demoURL := ""
+		if !demoMode {
+			demoURL = os.Getenv("PROCURA_DEMO_URL")
+		}
+		tmpl.ExecuteTemplate(w, "login.html", map[string]string{"DemoURL": demoURL})
 	})
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -1067,8 +1080,12 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 	}))
 
-	log.Println("procura listening on :8082")
-	http.ListenAndServe(":8082", mux)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8082"
+	}
+	log.Println("procura listening on :" + port)
+	http.ListenAndServe(":"+port, mux)
 }
 
 func userFromReq(r *http.Request) map[string]string {

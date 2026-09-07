@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-07
+- [demo] Auto-login after the real login page redirects to the demo — visitors no longer see a second email/PIN form
+- [demo] Added an isolated demo mode with seeded sample data, configurable SQLite directory/port, and demo-button routing — public visitors no longer need access to the real database
+
 ## 2026-09-06
 - [planning] Expire PO, RFQ, and active direct-order links from Planning after 30 calendar days; stale links no longer suppress fresh recommendations while history remains
 

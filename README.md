@@ -39,6 +39,9 @@ Environment variables:
 |-----|---------|
 | `PROCURA_SECRET` | JWT signing secret (required in production) |
 | `PROCURA_ADMIN_EMAIL` | Email for the bootstrapped admin user |
+| `PROCURA_DATA_DIR` | SQLite data directory (default `data`) |
+| `PROCURA_DEMO` | Set to `1` to seed and serve the isolated demo database |
+| `PROCURA_DEMO_URL` | URL opened by the demo button, for example `https://demo.procura.wasabietech.com/login?demo=1` |
 | `PORT` | HTTP listen port (default 8082) |
 
 Data lives in `data/procura.sqlite` (relative to working directory).
