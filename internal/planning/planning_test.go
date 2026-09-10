@@ -245,6 +245,16 @@ func TestDirectOrdersParsesTimestampDate(t *testing.T) {
 	}
 }
 
+func TestDirectOrdersIncludesStatus(t *testing.T) {
+	s := testDB(t)
+	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-STATUS','2026-09-01','STATUS','Status item',1,'ACTIVE')`)
+
+	orders := s.DirectOrders()
+	if len(orders) != 1 || orders[0].Status != "ACTIVE" {
+		t.Fatalf("status = %q, want ACTIVE", orders[0].Status)
+	}
+}
+
 func TestParseCompactItems(t *testing.T) {
 	raw := `[{"id":"SKU1","n":"Name One","u":"BOX","q":3},{"id":"SKU2","n":"Name Two","q":1.5}]`
 	got := parseCompactItems(raw)

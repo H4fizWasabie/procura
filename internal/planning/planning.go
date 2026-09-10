@@ -83,6 +83,7 @@ type DirectOrder struct {
 	Date           time.Time   `json:"date"`
 	OrderedBy      string      `json:"orderedBy"`
 	Notes          string      `json:"notes"`
+	Status         string      `json:"status"`
 	DaysOpen       int         `json:"daysOpen"`
 	SupersededByPO string      `json:"supersededByPo,omitempty"`
 	Items          []OrderItem `json:"items"`
@@ -457,12 +458,11 @@ func (s *Service) DirectOrders() []DirectOrder {
 		o, ok := orders[oid]
 		if !ok {
 			d := parseDirectOrderDate(dateStr)
-			o = &DirectOrder{OrderID: oid, Date: d, OrderedBy: strv(by), Notes: strv(notes),
+			o = &DirectOrder{OrderID: oid, Date: d, OrderedBy: strv(by), Notes: strv(notes), Status: status,
 				SupersededByPO: supPo, DaysOpen: int(time.Since(d).Hours() / 24)}
 			orders[oid] = o
 			keys = append(keys, oid)
 		}
-		_ = status // status is uniform per order_id in practice
 		rws = append(rws, row{o, OrderItem{StockID: sid, Name: name, Qty: qty}})
 	}
 

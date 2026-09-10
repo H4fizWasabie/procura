@@ -5,6 +5,7 @@
 - [planning] Keep the Planning filters compact and sticky while scrolling, and exclude items at or above 100% health from reorder recommendations
 - [planning] Keep the Planning table header sticky beneath the filters while scrolling
 - [planning] Parse timestamped direct-order dates correctly — stale ages no longer display as 106751 days
+- [planning] Include direct-order status in the Planning API — stale orders now expose Delivered and Cancel actions
 
 ## 2026-09-07
 - [demo] Auto-login after the real login page redirects to the demo — visitors no longer see a second email/PIN form
