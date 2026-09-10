@@ -3,6 +3,7 @@
 ## 2026-09-10
 - [po] Show full item names in the new-PO autocomplete — replaced the clipped native datalist with a searchable, keyboard-friendly dropdown
 - [planning] Keep the Planning filters compact and sticky while scrolling, and exclude items at or above 100% health from reorder recommendations
+- [planning] Keep the Planning table header sticky beneath the filters while scrolling
 
 ## 2026-09-07
 - [demo] Auto-login after the real login page redirects to the demo — visitors no longer see a second email/PIN form

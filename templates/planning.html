@@ -44,16 +44,24 @@
 <style>
 .planning-page{margin-top:-10px}
 .planning-filters{position:sticky;top:0;z-index:10;margin:0 0 12px;padding:8px 0 10px;background:var(--bg);border-bottom:1px solid var(--border-soft)}
+.planning-page>table:first-of-type th{position:sticky;top:var(--planning-table-head-top,58px);z-index:9;background:var(--surface)}
 </style>
 
 <script>
 let data = [], selected = new Set();
+
+function syncPlanningStickyHeader() {
+    const filters = document.querySelector('.planning-filters');
+    if (filters) document.documentElement.style.setProperty('--planning-table-head-top', (filters.offsetHeight + 12) + 'px');
+}
+window.addEventListener('resize', syncPlanningStickyHeader);
 
 async function load() {
     const res = await fetch('/api/planning');
     const d = await res.json();
     data = d.items || d;
     document.getElementById('data-note').textContent = d.dataThrough ? `Velocity & ROP based on movements through ${d.dataThrough}` : '';
+    syncPlanningStickyHeader();
     selected.clear();
     fillOptions();
     render();
