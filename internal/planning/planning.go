@@ -456,7 +456,7 @@ func (s *Service) DirectOrders() []DirectOrder {
 
 		o, ok := orders[oid]
 		if !ok {
-			d, _ := time.Parse("2006-01-02", dateStr)
+			d := parseDirectOrderDate(dateStr)
 			o = &DirectOrder{OrderID: oid, Date: d, OrderedBy: strv(by), Notes: strv(notes),
 				SupersededByPO: supPo, DaysOpen: int(time.Since(d).Hours() / 24)}
 			orders[oid] = o
@@ -477,6 +477,15 @@ func (s *Service) DirectOrders() []DirectOrder {
 		out = append(out, *o)
 	}
 	return out
+}
+
+func parseDirectOrderDate(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if len(value) > len("2006-01-02") {
+		value = value[:len("2006-01-02")]
+	}
+	d, _ := time.Parse("2006-01-02", value)
+	return d
 }
 
 func (s *Service) nextDirectOrderID() string {

@@ -231,6 +231,20 @@ func TestSupersedeDirectOrders(t *testing.T) {
 	}
 }
 
+func TestDirectOrdersParsesTimestampDate(t *testing.T) {
+	s := testDB(t)
+	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-TIME','2026-03-25T10:00:23','TIME','Timestamp item',1,'ACTIVE')`)
+
+	orders := s.DirectOrders()
+	if len(orders) != 1 {
+		t.Fatalf("orders = %d, want 1", len(orders))
+	}
+	want := time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC)
+	if !orders[0].Date.Equal(want) {
+		t.Errorf("date = %v, want %v", orders[0].Date, want)
+	}
+}
+
 func TestParseCompactItems(t *testing.T) {
 	raw := `[{"id":"SKU1","n":"Name One","u":"BOX","q":3},{"id":"SKU2","n":"Name Two","q":1.5}]`
 	got := parseCompactItems(raw)
