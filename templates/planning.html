@@ -1,5 +1,6 @@
 {{template "base.html" .}}
 {{define "content_planning"}}
+<div class="planning-page">
 <div class="top-bar">
     <h2>Planning</h2>
     <div style="display:flex;gap:8px">
@@ -8,7 +9,7 @@
     </div>
 </div>
 
-<div class="search-bar">
+<div class="planning-filters search-bar">
     <div id="data-note" style="color:var(--muted);font-size:13px;flex:1"></div>
     <input type="text" id="filter" placeholder="Search name, ID, supplier..." oninput="render()" style="flex:1">
     <select id="f-supplier" style="width:160px" onchange="render()"><option value="">All Suppliers</option></select>
@@ -39,6 +40,11 @@
 </table>
 
 <div id="toast" class="toast" style="display:none"></div>
+
+<style>
+.planning-page{margin-top:-10px}
+.planning-filters{position:sticky;top:0;z-index:10;margin:0 0 12px;padding:8px 0 10px;background:var(--bg);border-bottom:1px solid var(--border-soft)}
+</style>
 
 <script>
 let data = [], selected = new Set();
@@ -202,4 +208,5 @@ function toast(msg, ok) {
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 load();
 </script>
+</div>
 {{end}}

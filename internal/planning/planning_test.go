@@ -170,16 +170,17 @@ func TestIncomingNettingSuppressesSuggestion(t *testing.T) {
 	}
 }
 
-func TestHealthyOnOrderItemStillVisible(t *testing.T) {
+func TestHealthyOnOrderItemExcluded(t *testing.T) {
 	s := testDB(t)
 	freezeNow(t, time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC))
-	seedItem(t, s, "G", 50, 10) // healthy stock
+	seedItem(t, s, "G", 50, 10) // 500% health
 	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-T','2026-09-05','G','Item G',3,'ACTIVE')`)
 
 	items := s.Plan()
-	it := find(t, items, "G") // would fail if hard-hidden
-	if !it.OnOrder {
-		t.Errorf("expected ON ORDER visibility")
+	for _, it := range items {
+		if it.ID == "G" {
+			t.Fatalf("healthy on-order item remained in plan: %+v", it)
+		}
 	}
 }
 

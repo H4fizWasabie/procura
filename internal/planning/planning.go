@@ -92,9 +92,8 @@ type Service struct {
 	DB *sql.DB
 }
 
-// Plan returns every plannable item: those below their ROP, plus those with
-// incoming pipeline (ON ORDER) even when stock is healthy — suppression is
-// visibility with a flag, never silence.
+// Plan returns actionable plannable items below their ROP. Incoming pipeline
+// stays visible only while the item is below 100% health.
 func (s *Service) Plan() []Item {
 	incoming := s.incomingPipeline()
 	coverage := s.historyCoverage()
@@ -130,10 +129,11 @@ func (s *Service) Plan() []Item {
 		dbROP := orZero(rop)
 		inc := incoming[sid]
 		onOrder := len(inc) > 0
-		belowROP := dbROP > 0 && curr < dbROP
-
-		// Not below ROP and nothing in flight: nothing to decide.
-		if !belowROP && !onOrder {
+		health := 100.0
+		if dbROP > 0 {
+			health = math.Round(curr/dbROP*1000) / 10
+		}
+		if health >= 100 {
 			continue
 		}
 
@@ -199,11 +199,7 @@ func (s *Service) Plan() []Item {
 			it.Suggested = math.Ceil(gap)
 		}
 
-		if dbROP > 0 {
-			it.Health = math.Round(curr/dbROP*1000) / 10
-		} else {
-			it.Health = 100
-		}
+		it.Health = health
 
 		items = append(items, it)
 	}
