@@ -78,7 +78,7 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 func (s *Service) History() []RFQ {
 	rows, _ := s.DB.Query(`
 		SELECT rfq_id, date, supplier, items_count, raw_rfq_json
-		FROM rfq_logs ORDER BY date DESC LIMIT 100
+		FROM rfq_logs ORDER BY date DESC, CAST(SUBSTR(rfq_id, 12) AS INTEGER) DESC LIMIT 100
 	`)
 	if rows == nil {
 		return nil

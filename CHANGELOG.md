@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-10
+- [rfq] Sort same-day RFQs by generated sequence descending — newest requests now stay at the top
 - [analytics] Freeze months from raw movement data — an existing zero or stale snapshot can no longer reproduce itself
 
 ## 2026-09-10

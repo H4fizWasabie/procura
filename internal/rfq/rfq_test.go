@@ -32,3 +32,20 @@ func TestSavePreservesDateAndItemsWhenEditing(t *testing.T) {
 		t.Fatalf("edited RFQ = %+v", got)
 	}
 }
+
+func TestHistorySortsSameDayByRFQSequenceDescending(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{DB: db}
+	for _, id := range []string{"RFQ-092026-01", "RFQ-092026-02", "RFQ-092026-10"} {
+		if _, err := s.Save(RFQ{RFQID: id, Date: "2026-09-10"}, "buyer@example.com"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	history := s.History()
+	if len(history) != 3 || history[0].RFQID != "RFQ-092026-10" || history[1].RFQID != "RFQ-092026-02" || history[2].RFQID != "RFQ-092026-01" {
+		t.Fatalf("same-day RFQs = %+v", history)
+	}
+}
