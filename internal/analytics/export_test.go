@@ -16,6 +16,7 @@ func TestFreezeExport(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	defer db.Close()
 	s := &Service{DB: db}
+	if _, err := db.Exec(`INSERT INTO settings(key,value) VALUES('analytics_frozen','{"2026":{"6":{"ih":0,"val":0,"cons":0,"rev":0}}}') ON CONFLICT(key) DO UPDATE SET value=excluded.value`); err != nil { t.Fatal(err) }
 
 	vals, err := s.Freeze(2026, 6)
 	if err != nil { t.Fatal(err) }

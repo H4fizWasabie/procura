@@ -163,7 +163,8 @@ func (s *Service) settingsFrozen() map[string]map[string]map[string]float64 {
 
 // Freeze snapshots the four monthly trends for a month into settings; re-freezing is idempotent.
 func (s *Service) Freeze(year, month int) (map[string]float64, error) {
-	m := s.Compute(year, month, year, month)
+	// Freeze from raw data so an existing bad snapshot cannot reproduce itself.
+	m := s.compute(year, month, year, month, false)
 	vals := map[string]float64{"ih":m.Operation.InHouseConsumption[0], "val":m.Inventory.ValuationTrend[0], "cons":m.Inventory.ConsumptionTrend[0], "rev":m.Business.GrossRevenueTrend[0]}
 	frozen := s.settingsFrozen()
 	key := strconv.Itoa(year)
@@ -178,6 +179,10 @@ func (s *Service) Freeze(year, month int) (map[string]float64, error) {
 type Service struct{DB *sql.DB}
 
 func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
+	return s.compute(fromYear, fromMonth, toYear, toMonth, true)
+}
+
+func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen bool) Metrics {
 	window := buildWindow(fromYear, fromMonth, toYear, toMonth)
 	ws := len(window)
 	labels := make([]string, ws)
@@ -243,23 +248,25 @@ func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
 		}
 	}
 
-	// Apply frozen data (settings overrides legacy GAS baselines)
-	sf := s.settingsFrozen()
+	// Apply frozen data (settings overrides legacy GAS baselines).
+	var sf map[string]map[string]map[string]float64
+	if applyFrozen { sf = s.settingsFrozen() }
 	for i, w := range window {
 		if v, ok := frozenInHouse[w[0]][w[1]]; ok { m.Operation.InHouseConsumption[i] = v }
 		if v, ok := frozenVal[w[0]][w[1]]; ok { m.Inventory.ValuationTrend[i] = v }
 		if v, ok := frozenCons[w[0]][w[1]]; ok { m.Inventory.ConsumptionTrend[i] = v }
 		if v, ok := frozenRev[w[0]][w[1]]; ok { m.Business.GrossRevenueTrend[i] = v }
-		if fs, ok := sf[strconv.Itoa(w[0])][strconv.Itoa(w[1])]; ok {
-			if v, ok := fs["ih"]; ok { m.Operation.InHouseConsumption[i] = v }
-			if v, ok := fs["val"]; ok { m.Inventory.ValuationTrend[i] = v }
-			if v, ok := fs["cons"]; ok { m.Inventory.ConsumptionTrend[i] = v }
-			if v, ok := fs["rev"]; ok { m.Business.GrossRevenueTrend[i] = v }
+		if applyFrozen {
+			if fs, ok := sf[strconv.Itoa(w[0])][strconv.Itoa(w[1])]; ok {
+				if v, ok := fs["ih"]; ok { m.Operation.InHouseConsumption[i] = v }
+				if v, ok := fs["val"]; ok { m.Inventory.ValuationTrend[i] = v }
+				if v, ok := fs["cons"]; ok { m.Inventory.ConsumptionTrend[i] = v }
+				if v, ok := fs["rev"]; ok { m.Business.GrossRevenueTrend[i] = v }
+			}
 		}
 		if w[0]==2025 { if v, ok := legacy2025Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
 		if w[0]==2026 { if v, ok := legacy2026Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
 	}
-
 	// Product type split & high movers
 	allowedTypes := map[string]bool{"medicine":true,"pet food":true,"lab":true,"test kit":true,"vaccination":true}
 	deadTypes := map[string]bool{"medicine":true,"supplement":true,"vaccination":true,"pet food":true}

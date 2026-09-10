@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-09-10
+- [analytics] Freeze months from raw movement data — an existing zero or stale snapshot can no longer reproduce itself
+
+## 2026-09-10
 - [po] Show full item names in the new-PO autocomplete — replaced the clipped native datalist with a searchable, keyboard-friendly dropdown
 - [planning] Keep the Planning filters compact and sticky while scrolling, and exclude items at or above 100% health from reorder recommendations
 - [planning] Keep the Planning table header sticky beneath the filters while scrolling
