@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-10
+- [rfq] Expand generated RFQ documents from 15 to 20 item rows — items 16–20 now appear in preview and PDF
 - [rfq] Sort same-day RFQs by generated sequence descending — newest requests now stay at the top
 - [analytics] Freeze months from raw movement data — an existing zero or stale snapshot can no longer reproduce itself
 

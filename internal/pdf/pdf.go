@@ -285,9 +285,9 @@ func RenderRFQHTML(rfqID, date, supplier string, items []map[string]interface{},
 		supName = "N/A"
 	}
 
-	// Build 15 rows
+	// Build 20 rows
 	itemRows := &bytes.Buffer{}
-	for i := 0; i < 15; i++ {
+	for i := 0; i < 20; i++ {
 		bg := "#ffffff"
 		if i%2 == 1 {
 			bg = "#f8fafc"
