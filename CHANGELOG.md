@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-09-10
+- [po] Show full item names in the new-PO autocomplete — replaced the clipped native datalist with a searchable, keyboard-friendly dropdown
+
 ## 2026-09-07
 - [demo] Auto-login after the real login page redirects to the demo — visitors no longer see a second email/PIN form
 - [demo] Added an isolated demo mode with seeded sample data, configurable SQLite directory/port, and demo-button routing — public visitors no longer need access to the real database

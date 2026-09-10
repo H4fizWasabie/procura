@@ -94,8 +94,10 @@
         <!-- Add Item Row -->
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
             <span style="font-size:13px;font-weight:600">Item:</span>
-            <input id="npo-item-search" list="po-item-list" placeholder="Type item name or [STOCK_ID] name..." style="flex:1;min-width:200px">
-            <datalist id="po-item-list"></datalist>
+            <div id="npo-item-picker" class="po-item-picker">
+                <input id="npo-item-search" autocomplete="off" aria-autocomplete="list" aria-controls="po-item-suggestions" aria-expanded="false" placeholder="Type item name or [STOCK_ID] name...">
+                <div id="po-item-suggestions" class="po-item-suggestions" role="listbox" hidden></div>
+            </div>
             <span style="font-size:12px">Sup.UOM:</span><input id="npo-sup-uom" style="width:80px" placeholder="Box/Pack">
             <span style="font-size:12px">Qty:</span><input id="npo-qty" type="number" step="0.01" style="width:70px">
             <span style="font-size:12px">Line Total:</span><input id="npo-line-total" type="number" step="0.01" style="width:110px">
@@ -127,10 +129,19 @@
 .btn-sm{padding:4px 10px;font-size:11px;border-radius:4px}
 .btn-secondary{background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
 .btn-secondary:hover{background:var(--border)}
+.po-item-picker{position:relative;flex:1;min-width:200px}
+.po-item-picker>input{width:100%}
+.po-item-suggestions{position:absolute;top:calc(100% + 4px);left:0;width:min(760px,calc(100vw - 48px));max-height:320px;overflow-y:auto;z-index:30;background:var(--surface-raised);border:1px solid var(--border);border-radius:7px;box-shadow:0 12px 24px rgba(0,0,0,.28)}
+.po-item-option{display:grid;grid-template-columns:minmax(140px,220px) minmax(0,1fr);gap:12px;width:100%;padding:10px 12px;background:transparent;border:0;border-radius:0;box-shadow:none;color:var(--text);text-align:left;font-weight:400;cursor:pointer}
+.po-item-option:hover,.po-item-option.active{background:var(--accent-soft)}
+.po-item-option-id{color:var(--accent);font-family:monospace;font-size:12px;overflow-wrap:anywhere}
+.po-item-option-name{min-width:0;white-space:normal;overflow-wrap:anywhere}
+.po-item-empty{padding:12px;color:var(--muted);font-size:12px}
+@media (max-width:720px){.po-item-suggestions{width:calc(100vw - 32px)}.po-item-option{grid-template-columns:1fr;gap:3px}}
 </style>
 
 <script>
-let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='';
+let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='', poSuggestionItems=[], poSuggestionIndex=-1;
 
 // DD/MM/YYYY helpers
 function toDMY(iso){if(!iso)return'';const s=iso.slice(0,10);if(s.indexOf('/')!==-1)return s;const d=s.split('-');if(d.length!==3)return s;return d[2]+'/'+d[1]+'/'+d[0]}
@@ -146,8 +157,6 @@ async function initPo() {
         fetch('/api/uom/mappings'),
     ]);
     poItemMaster = await itemRes.json();
-    document.getElementById('po-item-list').innerHTML = poItemMaster.map(i =>
-        `<option value="[${esc(i.stock_id)}] ${esc(i.item_name)}">`).join('');
     poItemLookup = {};
     poItemMaster.forEach(i => {
         const d = `[${i.stock_id}] ${i.item_name}`;
@@ -173,13 +182,91 @@ async function initPo() {
         if (match) document.getElementById('npo-terms').value = match.payment_terms || '';
         fillSupplierUOM();
     });
-    document.getElementById('npo-item-search').addEventListener('change', fillSupplierUOM);
-    document.getElementById('npo-item-search').addEventListener('input', function() {
-        // debounce: only fire when value looks like a complete selection [STOCKID] or after pause
+    const itemInput = document.getElementById('npo-item-search');
+    itemInput.addEventListener('change', fillSupplierUOM);
+    itemInput.addEventListener('focus', renderPoSuggestions);
+    itemInput.addEventListener('input', function() {
+        poSuggestionIndex = -1;
+        renderPoSuggestions();
         const v = this.value.trim();
         if (v.includes(']') || v.length > 20) fillSupplierUOM();
     });
+    itemInput.addEventListener('keydown', handlePoItemKeydown);
+    document.addEventListener('click', function(event) {
+        if (!document.getElementById('npo-item-picker').contains(event.target)) hidePoSuggestions();
+    });
     loadPos();
+}
+
+function renderPoSuggestions() {
+    const input = document.getElementById('npo-item-search');
+    const list = document.getElementById('po-item-suggestions');
+    const query = input.value.trim().toLowerCase();
+    // ponytail: show first 50 matches; add server-side search if inventory outgrows client filtering.
+    poSuggestionItems = query ? poItemMaster.filter(i =>
+        String(i.stock_id||'').toLowerCase().includes(query) ||
+        String(i.item_name||'').toLowerCase().includes(query)
+    ).slice(0, 50) : [];
+    if (!query) return hidePoSuggestions();
+    if (!poSuggestionItems.length) {
+        list.innerHTML = '<div class="po-item-empty">No matching items</div>';
+        list.hidden = false;
+        input.setAttribute('aria-expanded', 'true');
+        return;
+    }
+    list.innerHTML = poSuggestionItems.map((item, index) =>
+        `<button type="button" class="po-item-option" role="option" data-index="${index}">
+            <span class="po-item-option-id">${esc(item.stock_id)}</span>
+            <span class="po-item-option-name">${esc(item.item_name)}</span>
+        </button>`).join('');
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    list.querySelectorAll('.po-item-option').forEach(option => option.addEventListener('mousedown', event => {
+        event.preventDefault();
+        selectPoItem(Number(option.dataset.index));
+    }));
+}
+
+function selectPoItem(index) {
+    const item = poSuggestionItems[index];
+    if (!item) return;
+    document.getElementById('npo-item-search').value = `[${item.stock_id}] ${item.item_name}`;
+    fillSupplierUOM();
+    hidePoSuggestions();
+    document.getElementById('npo-item-search').focus();
+}
+
+function updatePoSuggestionFocus() {
+    const options = document.querySelectorAll('#po-item-suggestions .po-item-option');
+    options.forEach((option, index) => option.classList.toggle('active', index === poSuggestionIndex));
+    if (options[poSuggestionIndex]) options[poSuggestionIndex].scrollIntoView({block:'nearest'});
+}
+
+function handlePoItemKeydown(event) {
+    const list = document.getElementById('po-item-suggestions');
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (list.hidden) renderPoSuggestions();
+        if (!poSuggestionItems.length) return;
+        event.preventDefault();
+        poSuggestionIndex = event.key === 'ArrowDown'
+            ? Math.min(poSuggestionIndex + 1, poSuggestionItems.length - 1)
+            : Math.max(poSuggestionIndex - 1, 0);
+        updatePoSuggestionFocus();
+    } else if (event.key === 'Enter' && !list.hidden && poSuggestionIndex >= 0) {
+        event.preventDefault();
+        selectPoItem(poSuggestionIndex);
+    } else if (event.key === 'Escape') {
+        hidePoSuggestions();
+    }
+}
+
+function hidePoSuggestions() {
+    const list = document.getElementById('po-item-suggestions');
+    if (!list) return;
+    list.hidden = true;
+    list.innerHTML = '';
+    poSuggestionIndex = -1;
+    document.getElementById('npo-item-search')?.setAttribute('aria-expanded', 'false');
 }
 
 function lookupSupplierUOM(item) {
