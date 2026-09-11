@@ -158,6 +158,8 @@ func TestIncomingNettingSuppressesSuggestion(t *testing.T) {
 	seedUsage(t, s, "F", 5, 5, 5)
 	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, status, ship_status, raw_po_json) VALUES ('PO-X','2026-09-05','Approved','Pending','[{"id":"F","n":"Item F","q":9}]')`)
 	mustExec(t, s, `INSERT INTO purchase_order_items (po_id, item_name, quantity, stock_id) VALUES ('PO-X','Item F',9,'F')`)
+	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, status, ship_status) VALUES ('PO-Y','2026-09-05','Approved','Delivered')`)
+	mustExec(t, s, `INSERT INTO purchase_order_items (po_id, item_name, quantity, stock_id) VALUES ('PO-Y','Item F',4,'F')`)
 
 	items := s.Plan()
 	it := find(t, items, "F")

@@ -47,6 +47,28 @@ func TestLinkLineUpdatesRowAndRawJSON(t *testing.T) {
 	}
 }
 
+func TestUnlinkedLinesExcludeReceivedAndDelivered(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{DB: db}
+	for _, status := range []string{"Received", "Delivered", "Pending"} {
+		poID := "PO-" + status
+		if _, err := db.Exec("INSERT INTO purchase_orders (po_id, date, ship_status, status) VALUES (?, '2026-09-01', ?, 'Approved')", poID, status); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec("INSERT INTO purchase_order_items (po_id, item_name, quantity, stock_id) VALUES (?, 'Unlinked', 1, '')", poID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	lines := s.UnlinkedLines(false)
+	if len(lines) != 1 || lines[0].POID != "PO-Pending" {
+		t.Fatalf("unlinked lines = %+v, want only pending PO", lines)
+	}
+}
+
 // Regression: MarshalJSON emits both "id" and long keys; UnmarshalJSON must
 // read long-format entries correctly instead of misreading them as GAS
 // compact format (empty names, zero quantities — the KM VET PO bug).

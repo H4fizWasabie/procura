@@ -76,7 +76,7 @@ func SeedDemo(db *sql.DB) error {
 	}{
 		{"PO-DEMO-001", "2026-09-02", "Northstar Medical", "INV-DEMO-001", "Pending Approval", "Pending", "Clinic", "30 days", 2220, 0, 2220},
 		{"PO-DEMO-002", "2026-08-25", "Northstar Medical", "INV-DEMO-002", "Pending Payment", "Pending", "Clinic", "30 days", 1760, 0, 1760},
-		{"PO-DEMO-003", "2026-07-18", "Mango Grove Distribution", "INV-DEMO-003", "PAID", "Received", "Facilities", "Cash on delivery", 444, 444, 0},
+		{"PO-DEMO-003", "2026-07-18", "Mango Grove Distribution", "INV-DEMO-003", "PAID", "Delivered", "Facilities", "Cash on delivery", 444, 444, 0},
 	} {
 		raw, _ := json.Marshal(poItems[p.id])
 		if _, err := tx.Exec(`INSERT INTO purchase_orders (po_id,date,supplier,bill_no,total,paid,balance,status,ship_status,department,terms,raw_po_json,linked_rfq) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.id, p.date, p.supplier, p.bill, p.total, p.paid, p.balance, p.status, p.ship, p.dept, p.terms, string(raw), ""); err != nil {

@@ -89,6 +89,9 @@
             <div class="form-group"><label>Bill #</label><input id="npo-bill" placeholder="Optional invoice ref"></div>
             <div class="form-group"><label>Invoice Date</label><input type="text" id="npo-inv-date" placeholder="DD/MM/YYYY"></div>
             <div class="form-group"><label>Terms</label><input id="npo-terms" readonly placeholder="Auto from supplier"></div>
+            <div class="form-group"><label>Shipping Status</label><select id="npo-ship">
+                <option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option>
+            </select></div>
         </div>
 
         <!-- Add Item Row -->
@@ -380,6 +383,7 @@ function editSelectedPo() {
     document.getElementById('npo-inv-date').value = toDMY(po.invoice_date);
     document.getElementById('npo-dept').value = po.department||'';
     document.getElementById('npo-terms').value = po.terms||'';
+    document.getElementById('npo-ship').value = po.ship_status||'Pending';
     poItems = (po.items||[]).map(it => ({
         stock_id: it.stock_id, item_name: it.item_name, uom: it.uom||'UNIT',
         supplier_uom: it.supplier_uom||'', quantity: it.quantity, cost: it.cost, total: it.total,
@@ -441,6 +445,7 @@ function resetPoForm() {
     document.getElementById('npo-bill').value='';
     document.getElementById('npo-inv-date').value='';
     document.getElementById('npo-terms').value='';
+    document.getElementById('npo-ship').value='Pending';
     poItems=[]; renderPoItems();
 }
 
@@ -454,6 +459,7 @@ async function savePo() {
         bill_no: document.getElementById('npo-bill').value,
         invoice_date: fromDMY(document.getElementById('npo-inv-date').value),
         terms: document.getElementById('npo-terms').value,
+        ship_status: document.getElementById('npo-ship').value,
         items: poItems.map(it => ({stock_id:it.stock_id,item_name:it.item_name,name:it.item_name,
             quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom,supplier_uom:it.supplier_uom})),
     };

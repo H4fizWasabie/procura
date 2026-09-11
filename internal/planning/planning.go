@@ -244,7 +244,7 @@ func excluded(excl, beh, status, ptype, category string) bool {
 }
 
 // incomingPipeline returns per-stock-id recent, unresolved incoming links:
-// open PO lines (not Received/VOID), ACTIVE direct orders, and RFQs not yet
+// open PO lines (not Received/Delivered/VOID), ACTIVE direct orders, and RFQs not yet
 // superseded by a recent linked PO. Older links remain in history but no
 // longer suppress a fresh recommendation.
 func (s *Service) incomingPipeline() map[string][]Incoming {
@@ -257,7 +257,7 @@ func (s *Service) incomingPipeline() map[string][]Incoming {
 		FROM purchase_order_items poi
 		JOIN purchase_orders po ON po.po_id = poi.po_id
 		WHERE COALESCE(poi.stock_id,'') != ''
-		  AND COALESCE(po.ship_status,'') != 'Received'
+		  AND COALESCE(po.ship_status,'') NOT IN ('Received', 'Delivered')
 		  AND COALESCE(po.status,'') != 'VOID'
 		  AND substr(COALESCE(po.date,''),1,10) > ?
 	`, cutoffDate)
@@ -298,7 +298,7 @@ func (s *Service) incomingPipeline() map[string][]Incoming {
 		  AND NOT EXISTS (
 			SELECT 1 FROM purchase_orders po
 			WHERE po.linked_rfq = r.rfq_id
-			  AND COALESCE(po.ship_status,'') != 'Received'
+			  AND COALESCE(po.ship_status,'') NOT IN ('Received', 'Delivered')
 			  AND COALESCE(po.status,'') != 'VOID'
 			  AND substr(COALESCE(po.date,''),1,10) > ?
 		  )

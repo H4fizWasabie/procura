@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-09-11
+- [po] Add shipping status to new/edit PO entry and treat Delivered as terminal alongside legacy Received — keeps history and planning consistent during the status migration
+
 ## 2026-09-10
 - [rfq] Expand generated RFQ documents from 15 to 20 item rows — items 16–20 now appear in preview and PDF
 - [rfq] Sort same-day RFQs by generated sequence descending — newest requests now stay at the top

@@ -29,7 +29,7 @@ func (s *Service) UnlinkedLines(all bool) []UnlinkedLine {
 		WHERE TRIM(COALESCE(poi.stock_id,'')) = ''
 	`
 	if !all {
-		q += ` AND COALESCE(po.ship_status,'') != 'Received' AND COALESCE(po.status,'') != 'VOID'`
+		q += ` AND COALESCE(po.ship_status,'') NOT IN ('Received', 'Delivered') AND COALESCE(po.status,'') != 'VOID'`
 	}
 	q += ` ORDER BY po.date DESC, poi.id`
 	rows, err := s.DB.Query(q)
