@@ -32,6 +32,9 @@ var frozenRev = map[int]map[int]float64{
 var legacy2025Spend = map[int]float64{0:32289.11,1:78097.61,2:70487.43,3:43317.38,4:74125.33,5:94482.73,6:75682.60,7:54335.47,8:72744.05,9:82888.69,10:92302.24}
 var legacy2026Spend = map[int]float64{0:198000,1:153181,2:146032,3:128991,4:129408,5:172574}
 
+// Legacy baseline maps cover the period before live analytics starts in September 2026.
+const legacyBaselineThroughYear, legacyBaselineThroughMonth = 2026, 7 // zero-based August boundary
+
 type Metrics struct {
 	Labels    []string            `json:"labels"`
 	Finance   FinanceMetrics      `json:"finance"`
@@ -152,7 +155,7 @@ func (s *Service) setSetting(key, value string) error {
 	return err
 }
 
-// user-frozen baselines from settings (key "analytics_frozen": {year:{month:{ih,val,cons,rev}}})
+// user-frozen baselines from settings (key "analytics_frozen": {year:{month:{ih,val,cons,rev,spend}}})
 func (s *Service) settingsFrozen() map[string]map[string]map[string]float64 {
 	m := map[string]map[string]map[string]float64{}
 	if raw := s.getSetting("analytics_frozen"); raw != "" {
@@ -161,11 +164,11 @@ func (s *Service) settingsFrozen() map[string]map[string]map[string]float64 {
 	return m
 }
 
-// Freeze snapshots the four monthly trends for a month into settings; re-freezing is idempotent.
+// Freeze snapshots the monthly trends and spend for a month into settings.
 func (s *Service) Freeze(year, month int) (map[string]float64, error) {
-	// Freeze from raw data so an existing bad snapshot cannot reproduce itself.
+	// Freeze from raw data so an existing baseline cannot reproduce itself.
 	m := s.compute(year, month, year, month, false)
-	vals := map[string]float64{"ih":m.Operation.InHouseConsumption[0], "val":m.Inventory.ValuationTrend[0], "cons":m.Inventory.ConsumptionTrend[0], "rev":m.Business.GrossRevenueTrend[0]}
+	vals := map[string]float64{"ih":m.Operation.InHouseConsumption[0], "val":m.Inventory.ValuationTrend[0], "cons":m.Inventory.ConsumptionTrend[0], "rev":m.Business.GrossRevenueTrend[0], "spend":m.Finance.MonthlySpend[0]}
 	frozen := s.settingsFrozen()
 	key := strconv.Itoa(year)
 	if frozen[key] == nil { frozen[key] = map[string]map[string]float64{} }
@@ -248,25 +251,31 @@ func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen 
 		}
 	}
 
-	// Apply frozen data (settings overrides legacy GAS baselines).
+	// Apply approved baseline data (settings overrides legacy GAS baselines).
 	var sf map[string]map[string]map[string]float64
 	if applyFrozen { sf = s.settingsFrozen() }
 	for i, w := range window {
-		if v, ok := frozenInHouse[w[0]][w[1]]; ok { m.Operation.InHouseConsumption[i] = v }
-		if v, ok := frozenVal[w[0]][w[1]]; ok { m.Inventory.ValuationTrend[i] = v }
-		if v, ok := frozenCons[w[0]][w[1]]; ok { m.Inventory.ConsumptionTrend[i] = v }
-		if v, ok := frozenRev[w[0]][w[1]]; ok { m.Business.GrossRevenueTrend[i] = v }
 		if applyFrozen {
+			legacy := w[0] < legacyBaselineThroughYear || (w[0] == legacyBaselineThroughYear && w[1] <= legacyBaselineThroughMonth)
+			if legacy {
+				if v, ok := frozenInHouse[w[0]][w[1]]; ok { m.Operation.InHouseConsumption[i] = v }
+				if v, ok := frozenVal[w[0]][w[1]]; ok { m.Inventory.ValuationTrend[i] = v }
+				if v, ok := frozenCons[w[0]][w[1]]; ok { m.Inventory.ConsumptionTrend[i] = v }
+				if v, ok := frozenRev[w[0]][w[1]]; ok { m.Business.GrossRevenueTrend[i] = v }
+				if w[0]==2025 { if v, ok := legacy2025Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
+				if w[0]==2026 { if v, ok := legacy2026Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
+			}
 			if fs, ok := sf[strconv.Itoa(w[0])][strconv.Itoa(w[1])]; ok {
 				if v, ok := fs["ih"]; ok { m.Operation.InHouseConsumption[i] = v }
 				if v, ok := fs["val"]; ok { m.Inventory.ValuationTrend[i] = v }
 				if v, ok := fs["cons"]; ok { m.Inventory.ConsumptionTrend[i] = v }
 				if v, ok := fs["rev"]; ok { m.Business.GrossRevenueTrend[i] = v }
+				if v, ok := fs["spend"]; ok { m.Finance.MonthlySpend[i] = v }
 			}
 		}
-		if w[0]==2025 { if v, ok := legacy2025Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
-		if w[0]==2026 { if v, ok := legacy2026Spend[w[1]]; ok { m.Finance.MonthlySpend[i] = v } }
 	}
+	// The KPI must use the same approved baseline/live series as its chart.
+	m.Finance.TotalSpend = sum(m.Finance.MonthlySpend)
 	// Product type split & high movers
 	allowedTypes := map[string]bool{"medicine":true,"pet food":true,"lab":true,"test kit":true,"vaccination":true}
 	deadTypes := map[string]bool{"medicine":true,"supplement":true,"vaccination":true,"pet food":true}

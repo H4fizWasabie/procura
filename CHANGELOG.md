@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-09-20
+- [analytics] Separate raw month freezing from legacy baseline overlays and reconcile Total PO Spend with the displayed monthly series — preserves approved historical values while keeping live-period KPIs consistent
+
 ## 2026-09-11
 - [po] Add shipping status to new/edit PO entry and treat Delivered as terminal alongside legacy Received — keeps history and planning consistent during the status migration
 
