@@ -155,6 +155,13 @@ func (s *Service) setSetting(key, value string) error {
 	return err
 }
 
+func normalizeDepartment(dept string) string {
+	dept = strings.TrimSpace(dept)
+	if dept == "" { return "General" }
+	if strings.EqualFold(dept, "Medical/Ward") || strings.EqualFold(dept, "Ward/Medical") { return "Medical/Ward" }
+	return dept
+}
+
 // user-frozen baselines from settings (key "analytics_frozen": {year:{month:{ih,val,cons,rev,spend}}})
 func (s *Service) settingsFrozen() map[string]map[string]map[string]float64 {
 	m := map[string]map[string]map[string]float64{}
@@ -231,7 +238,7 @@ func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen 
 			t := f64v(total)
 			m.Finance.TotalSpend += t
 			m.Finance.MonthlySpend[i] += t
-			dp := strv(dept); if dp=="" { dp="General" }
+			dp := normalizeDepartment(strv(dept))
 			m.Finance.DeptSpend[dp] += t
 			m.Operation.POCount++
 			sup := strv(supplier); if sup=="" { sup="Unknown" }

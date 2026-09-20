@@ -51,3 +51,23 @@ func TestTotalSpendMatchesBaselineMonthlySeries(t *testing.T) {
 		t.Fatalf("spend = total %v monthly %v, want both 198000", m.Finance.TotalSpend, m.Finance.MonthlySpend[0])
 	}
 }
+
+func TestDepartmentSpendNormalizesWardLabels(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	for _, po := range []struct{ id, date, department string; total float64; status string }{
+		{"PO-MED", "2026-09-01", "Medical/Ward", 100, "Paid"},
+		{"PO-WARD", "2026-09-02", "Ward/Medical", 50, "Paid"},
+		{"PO-GENERAL", "2026-09-03", "", 25, "Paid"},
+		{"PO-VOID", "2026-09-04", "Ward/Medical", 999, "VOID"},
+	} {
+		if _, err := db.Exec(`INSERT INTO purchase_orders (po_id, date, total, status, department) VALUES (?, ?, ?, ?, ?)`, po.id, po.date, po.total, po.status, po.department); err != nil { t.Fatal(err) }
+	}
+
+	m := (&Service{DB: db}).Compute(2026, 8, 2026, 8)
+	if m.Finance.DeptSpend["Medical/Ward"] != 150 || m.Finance.DeptSpend["General"] != 25 {
+		t.Fatalf("department spend = %#v, want Medical/Ward=150 General=25", m.Finance.DeptSpend)
+	}
+	if _, ok := m.Finance.DeptSpend["Ward/Medical"]; ok { t.Fatalf("un-normalized department remained: %#v", m.Finance.DeptSpend) }
+}
