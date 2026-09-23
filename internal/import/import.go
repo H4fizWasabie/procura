@@ -21,6 +21,7 @@ type Result struct {
 	Rows         int            `json:"rows"`
 	SheetsFound  []string       `json:"sheets_found"`
 	HeadersFound []string       `json:"headers_found,omitempty"`
+	Errors       []string       `json:"errors,omitempty"`
 }
 
 type Service struct {
@@ -60,6 +61,7 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 
 	tableRows := map[string]int{}
 	var headersFound []string
+	var importErrors []string
 
 	// DB_Items — try exact match first, then fall back to first sheet
 
@@ -133,31 +135,14 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 				if poID == "" {
 					continue
 				}
-				rawJSON := strVal(r["po_data_json"])
-				s.DB.Exec(`INSERT OR REPLACE INTO purchase_orders (po_id, date, supplier, bill_no, total, paid, balance, status, ship_status, department, terms, raw_po_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-					poID, strVal(r["date"]), strVal(r["supplier"]), strVal(r["bill"]), floatVal(r["total"]), floatVal(r["paid"]),
-					floatVal(r["balance"]), strVal(r["status"]), strVal(r["ship_status"]), strVal(r["dept"]), strVal(r["terms"]), rawJSON)
-				inserted++
-				// Parse items from JSON
-				var items []map[string]interface{}
-				if json.Unmarshal([]byte(rawJSON), &items) == nil {
-					s.DB.Exec("DELETE FROM purchase_order_items WHERE po_id = ?", poID)
-					for _, it := range items {
-						sid := strVal2(it["id"])
-						name := strVal2(it["n"])
-						if sid == "" {
-							// Opportunistic auto-link by normalized name / alias (#5).
-							// Never guesses beyond exact-after-normalization.
-							sid = nameIndex.lookup(name)
-							if sid != "" {
-								autoLinked++
-							}
-						}
-						s.DB.Exec("INSERT INTO purchase_order_items (po_id, item_name, quantity, cost, total, uom, stock_id) VALUES (?,?,?,?,?,?,?)",
-							poID, name, floatVal2(it["q"]), floatVal2(it["c"]), floatVal2(it["t"]), strVal2(it["u"]), sid)
-						itemRows++
-					}
+				lines, linked, err := s.savePORow(poID, r, nameIndex)
+				if err != nil {
+					importErrors = append(importErrors, fmt.Sprintf("PurchaseOrder %s: %v", poID, err))
+					continue
 				}
+				inserted++
+				itemRows += lines
+				autoLinked += linked
 			}
 			tableRows["purchase_orders"] = inserted
 			tableRows["purchase_order_items"] = itemRows
@@ -186,7 +171,56 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 		s.DB.Exec("INSERT INTO import_run_tables (run_id, table_name, rows_imported) VALUES (?,?,?)", runID, table, n)
 	}
 
-	return &Result{RunID: int(runID), Source: filename, TableRows: tableRows, Rows: total, SheetsFound: f.GetSheetList(), HeadersFound: headersFound}, nil
+	return &Result{RunID: int(runID), Source: filename, TableRows: tableRows, Rows: total, SheetsFound: f.GetSheetList(), HeadersFound: headersFound, Errors: importErrors}, nil
+}
+
+// savePORow replaces one PO's header and line items atomically: a failed
+// line insert or malformed po_data_json leaves the PO's previous header and
+// lines untouched instead of a half-written row (#38).
+func (s *Service) savePORow(poID string, r map[string]string, nameIndex *nameIndex) (itemRows, autoLinked int, err error) {
+	rawJSON := strVal(r["po_data_json"])
+	var items []map[string]interface{}
+	if rawJSON != "" {
+		if err := json.Unmarshal([]byte(rawJSON), &items); err != nil {
+			return 0, 0, fmt.Errorf("malformed po_data_json: %w", err)
+		}
+	}
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO purchase_orders (po_id, date, supplier, bill_no, total, paid, balance, status, ship_status, department, terms, raw_po_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		poID, strVal(r["date"]), strVal(r["supplier"]), strVal(r["bill"]), floatVal(r["total"]), floatVal(r["paid"]),
+		floatVal(r["balance"]), strVal(r["status"]), strVal(r["ship_status"]), strVal(r["dept"]), strVal(r["terms"]), rawJSON); err != nil {
+		return 0, 0, err
+	}
+	if _, err := tx.Exec("DELETE FROM purchase_order_items WHERE po_id = ?", poID); err != nil {
+		return 0, 0, err
+	}
+	for _, it := range items {
+		sid := strVal2(it["id"])
+		name := strVal2(it["n"])
+		if sid == "" {
+			// Opportunistic auto-link by normalized name / alias (#5).
+			// Never guesses beyond exact-after-normalization.
+			sid = nameIndex.lookup(name)
+			if sid != "" {
+				autoLinked++
+			}
+		}
+		if _, err := tx.Exec("INSERT INTO purchase_order_items (po_id, item_name, quantity, cost, total, uom, stock_id) VALUES (?,?,?,?,?,?,?)",
+			poID, name, floatVal2(it["q"]), floatVal2(it["c"]), floatVal2(it["t"]), strVal2(it["u"]), sid); err != nil {
+			return 0, 0, err
+		}
+		itemRows++
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return itemRows, autoLinked, nil
 }
 
 // inventoryFieldPatterns defines target schema columns and their aliases.
