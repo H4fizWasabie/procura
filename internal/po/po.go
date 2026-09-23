@@ -9,19 +9,19 @@ import (
 )
 
 type PO struct {
-	POID       string  `json:"po_id"`
-	Date       string  `json:"date"`
-	Supplier   string  `json:"supplier"`
-	BillNo     string  `json:"bill_no"`
-	Total      float64 `json:"total"`
-	Paid       float64 `json:"paid"`
-	Balance    float64 `json:"balance"`
-	Status     string  `json:"status"`
-	ShipStatus string  `json:"ship_status"`
-	Department string  `json:"department"`
-	Terms      string  `json:"terms"`
-	InvoiceDate string `json:"invoice_date"`
-	Items      []Item  `json:"items"`
+	POID        string  `json:"po_id"`
+	Date        string  `json:"date"`
+	Supplier    string  `json:"supplier"`
+	BillNo      string  `json:"bill_no"`
+	Total       float64 `json:"total"`
+	Paid        float64 `json:"paid"`
+	Balance     float64 `json:"balance"`
+	Status      string  `json:"status"`
+	ShipStatus  string  `json:"ship_status"`
+	Department  string  `json:"department"`
+	Terms       string  `json:"terms"`
+	InvoiceDate string  `json:"invoice_date"`
+	Items       []Item  `json:"items"`
 }
 
 type Item struct {
@@ -194,14 +194,22 @@ func (s *Service) Save(p PO) (string, error) {
 	}
 
 	p.Total = 0
-	for _, it := range p.Items {
-		it.Total = it.Qty * it.Cost
-		p.Total += it.Total
+	for i := range p.Items {
+		p.Items[i].Total = p.Items[i].Qty * p.Items[i].Cost
+		p.Total += p.Items[i].Total
 	}
 
-	itemsJSON, _ := json.Marshal(p.Items)
+	itemsJSON, err := json.Marshal(p.Items)
+	if err != nil {
+		return "", err
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
 
-	_, err := s.DB.Exec(`
+	_, err = tx.Exec(`
 		INSERT OR REPLACE INTO purchase_orders
 			(po_id, date, supplier, bill_no, total, status, ship_status, department, terms, invoice_date, raw_po_json)
 		VALUES (?, ?, ?, ?, ?, COALESCE(?, 'Pending Approval'), COALESCE(?, 'Pending'),
@@ -213,14 +221,22 @@ func (s *Service) Save(p PO) (string, error) {
 	}
 
 	// Replace items
-	s.DB.Exec("DELETE FROM purchase_order_items WHERE po_id = ?", p.POID)
+	if _, err = tx.Exec("DELETE FROM purchase_order_items WHERE po_id = ?", p.POID); err != nil {
+		return "", err
+	}
 	for _, it := range p.Items {
-		s.DB.Exec(`
+		_, err = tx.Exec(`
 			INSERT INTO purchase_order_items (po_id, item_name, quantity, cost, total, uom, stock_id, supplier_uom)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`, p.POID, it.Name, it.Qty, it.Cost, it.Total, it.UOM, it.StockID, it.SupplierUOM)
+		if err != nil {
+			return "", err
+		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
 	return p.POID, nil
 }
 
@@ -277,21 +293,43 @@ func (s *Service) FilterOptions() ([]string, []string, []string) {
 	rows, _ := s.DB.Query("SELECT DISTINCT supplier FROM purchase_orders WHERE supplier != '' ORDER BY supplier")
 	if rows != nil {
 		defer rows.Close()
-		for rows.Next() { var v string; rows.Scan(&v); suppliers = append(suppliers, v) }
+		for rows.Next() {
+			var v string
+			rows.Scan(&v)
+			suppliers = append(suppliers, v)
+		}
 	}
 	rows, _ = s.DB.Query("SELECT DISTINCT status FROM purchase_orders WHERE status != '' ORDER BY status")
 	if rows != nil {
 		defer rows.Close()
-		for rows.Next() { var v string; rows.Scan(&v); statuses = append(statuses, v) }
+		for rows.Next() {
+			var v string
+			rows.Scan(&v)
+			statuses = append(statuses, v)
+		}
 	}
 	rows, _ = s.DB.Query("SELECT DISTINCT ship_status FROM purchase_orders WHERE ship_status != '' ORDER BY ship_status")
 	if rows != nil {
 		defer rows.Close()
-		for rows.Next() { var v string; rows.Scan(&v); ships = append(ships, v) }
+		for rows.Next() {
+			var v string
+			rows.Scan(&v)
+			ships = append(ships, v)
+		}
 	}
 	return suppliers, statuses, ships
 }
 
 // helpers
-func strv(s sql.NullString) string { if s.Valid { return s.String }; return "" }
-func f64v(f sql.NullFloat64) float64 { if f.Valid { return f.Float64 }; return 0 }
+func strv(s sql.NullString) string {
+	if s.Valid {
+		return s.String
+	}
+	return ""
+}
+func f64v(f sql.NullFloat64) float64 {
+	if f.Valid {
+		return f.Float64
+	}
+	return 0
+}
