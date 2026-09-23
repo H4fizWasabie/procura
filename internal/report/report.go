@@ -101,10 +101,11 @@ func (s *Service) ItemHistory(items []struct{ ID, Name string }) []map[string]in
 			SELECT po.po_id, po.date, poi.quantity, poi.cost, poi.total, poi.uom
 			FROM purchase_order_items poi
 			JOIN purchase_orders po ON po.po_id = poi.po_id
-			WHERE LOWER(poi.item_name) = LOWER(?)
-			   OR (poi.stock_id != '' AND poi.stock_id = ?)
-			ORDER BY po.date DESC LIMIT 1
-		`, req.Name, req.ID)
+			WHERE (TRIM(?) != '' AND poi.stock_id = ?)
+			   OR (TRIM(COALESCE(poi.stock_id,'')) = '' AND LOWER(poi.item_name) = LOWER(?))
+			ORDER BY CASE WHEN poi.stock_id = ? AND TRIM(?) != '' THEN 0 ELSE 1 END,
+			         po.date DESC LIMIT 1
+		`, req.ID, req.ID, req.Name, req.ID, req.ID)
 
 		var poID, dateStr, uom sql.NullString
 		var qty, cost, total sql.NullFloat64
