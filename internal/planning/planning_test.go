@@ -70,7 +70,10 @@ func TestSteadyUsageHighConfidence(t *testing.T) {
 	setVelocity(t, s, "A", 5)     // as RecalcROP would persist
 	seedUsage(t, s, "A", 5, 5, 5) // 3 active recent months → HIGH
 
-	items := s.Plan()
+	items, err := s.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	it := find(t, items, "A")
 	if it.Confidence != ConfHigh {
 		t.Errorf("confidence = %v, want HIGH", it.Confidence)
@@ -93,7 +96,10 @@ func TestSparseUsageWidensAndLowConfidence(t *testing.T) {
 	setVelocity(t, s, "B", 2)              // weighted model's output; sparse recent data
 	seedUsage(t, s, "B", 6, 0, 0, 6, 0, 0) // only 2 active in recent window
 
-	items := s.Plan()
+	items, err := s.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	it := find(t, items, "B")
 	if it.Confidence != ConfLow {
 		t.Errorf("confidence = %v, want LOW", it.Confidence)
@@ -107,7 +113,10 @@ func TestNewItemAtialTargetReview(t *testing.T) {
 	s := testDB(t)
 	mustExec(t, s, `INSERT INTO items (stock_id, item_name, current_stock, rop, initial_stock_target) VALUES ('C','Item C',3,10,20)`)
 
-	items := s.Plan()
+	items, err := s.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	it := find(t, items, "C")
 	if it.Status != StatusReview || it.Confidence != ConfManual {
 		t.Errorf("status/conf = %v/%v, want REVIEW/MANUAL", it.Status, it.Confidence)
@@ -123,7 +132,10 @@ func TestZeroVelocityBelowROPGetsProxy(t *testing.T) {
 	mustExec(t, s, `INSERT INTO items (stock_id, item_name, current_stock, rop) VALUES ('D','Item D',1,10)`)
 	seedUsage(t, s, "D", 0, 0, 0, 0, 0, 0, 4, 4) // history exists but nothing recent
 
-	items := s.Plan()
+	items, err := s.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	it := find(t, items, "D")
 	if it.Confidence != ConfLow || it.Velocity != 5 { // proxy rop/2 = 5
 		t.Errorf("conf/velocity = %v/%v, want LOW/5", it.Confidence, it.Velocity)
@@ -137,7 +149,10 @@ func TestVelocityOverrideWins(t *testing.T) {
 	s := testDB(t)
 	mustExec(t, s, `INSERT INTO items (stock_id, item_name, current_stock, rop, velocity_override) VALUES ('E','Item E',5,10,'7')`)
 
-	items := s.Plan()
+	items, err := s.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	it := find(t, items, "E")
 	if it.Velocity != 7 || it.Confidence != ConfHigh {
 		t.Errorf("velocity/conf = %v/%v, want 7/HIGH", it.Velocity, it.Confidence)
@@ -161,7 +176,10 @@ func TestIncomingNettingSuppressesSuggestion(t *testing.T) {
 	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, status, ship_status) VALUES ('PO-Y','2026-09-05','Approved','Delivered')`)
 	mustExec(t, s, `INSERT INTO purchase_order_items (po_id, item_name, quantity, stock_id) VALUES ('PO-Y','Item F',4,'F')`)
 
-	items := s.Plan()
+	items, err := s.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	it := find(t, items, "F")
 	if !it.OnOrder || it.IncomingQty != 9 {
 		t.Fatalf("incoming = %v/%v, want on-order with qty 9", it.OnOrder, it.IncomingQty)
@@ -178,7 +196,10 @@ func TestHealthyOnOrderItemExcluded(t *testing.T) {
 	seedItem(t, s, "G", 50, 10) // 500% health
 	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-T','2026-09-05','G','Item G',3,'ACTIVE')`)
 
-	items := s.Plan()
+	items, err := s.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, it := range items {
 		if it.ID == "G" {
 			t.Fatalf("healthy on-order item remained in plan: %+v", it)
@@ -208,7 +229,10 @@ func TestIncomingLinksExpireAfter30Days(t *testing.T) {
 	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, linked_rfq, status, ship_status) VALUES ('PO-RFQ-OLD','2026-08-01','RFQ-RECENT','Approved','Pending')`)
 	mustExec(t, s, `INSERT INTO rfq_logs (rfq_id, date, raw_rfq_json) VALUES ('RFQ-RECENT','2026-09-05','[{"id":"RFQ-AFTER-OLD-PO","q":4}]')`)
 
-	incoming := s.incomingPipeline()
+	incoming, err := s.incomingPipeline()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(incoming["OLD-PO"]) != 0 || len(incoming["OLD-DIRECT"]) != 0 || len(incoming["OLD-RFQ"]) != 0 {
 		t.Fatalf("expired links remained: %#v", incoming)
 	}
@@ -217,6 +241,25 @@ func TestIncomingLinksExpireAfter30Days(t *testing.T) {
 	}
 	if len(incoming["RFQ-AFTER-OLD-PO"]) != 1 {
 		t.Fatalf("recent RFQ stayed suppressed by expired PO: %#v", incoming["RFQ-AFTER-OLD-PO"])
+	}
+}
+
+func TestIncomingPipelinePropagatesQueryError(t *testing.T) {
+	s := testDB(t)
+	// Break one of the three incoming queries (the RFQ query joins rfq_logs).
+	mustExec(t, s, `DROP TABLE rfq_logs`)
+
+	if _, err := s.incomingPipeline(); err == nil {
+		t.Fatal("expected error from broken rfq_logs table, got nil")
+	}
+}
+
+func TestPlanPropagatesIncomingPipelineError(t *testing.T) {
+	s := testDB(t)
+	mustExec(t, s, `DROP TABLE direct_orders`)
+
+	if _, err := s.Plan(); err == nil {
+		t.Fatal("expected Plan to propagate the incoming pipeline error, got nil")
 	}
 }
 
