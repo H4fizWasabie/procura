@@ -300,7 +300,7 @@ func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen 
 		high = append(high, acc)
 	}
 	sort.Slice(high, func(i,j int)bool{return high[i].totalOut>high[j].totalOut})
-	for i:=0; i<10 && i<len(high); i++ { m.Inventory.HighMovers = append(m.Inventory.HighMovers, MoverItem{Name:high[i].name, Qty:high[i].totalOut}) }
+	for i:=0; i<10 && i<len(high); i++ { m.Inventory.HighMovers = append(m.Inventory.HighMovers, MoverItem{Name:high[i].name, Qty:high[i].totalOut, Val:high[i].totalOut*high[i].meta.cost}) }
 
 	// Dead stock
 	for id, acc := range allItems {
