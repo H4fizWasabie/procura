@@ -2,11 +2,115 @@ package ximport
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
 	"procura/internal/core"
 )
+
+func poSheetFile(t *testing.T, dataRows [][]interface{}) *bytes.Buffer {
+	t.Helper()
+	f := excelize.NewFile()
+	header := []interface{}{"po_id", "date", "supplier", "bill", "total", "paid", "balance", "status", "ship_status", "dept", "terms", "po_data_json"}
+	if err := f.SetSheetName("Sheet1", "PurchaseOrder"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow("PurchaseOrder", "A1", &header); err != nil {
+		t.Fatal(err)
+	}
+	for i, row := range dataRows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+2)
+		if err := f.SetSheetRow("PurchaseOrder", cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	return &buf
+}
+
+func TestImportPOMalformedJSONReportedNotEmpty(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	buf := poSheetFile(t, [][]interface{}{
+		{"PO-BAD", "2026-01-01", "Sup", "B-1", "10", "0", "10", "OPEN", "PENDING", "Ward", "", "{not valid json"},
+	})
+
+	res, err := (&Service{DB: db, ImportsDir: t.TempDir()}).Import(buf, "wb.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TableRows["purchase_orders"] != 0 {
+		t.Fatalf("purchase_orders imported = %d, want 0 for malformed json", res.TableRows["purchase_orders"])
+	}
+	if len(res.Errors) == 0 || !strings.Contains(res.Errors[0], "PO-BAD") {
+		t.Fatalf("errors = %v, want a PO-BAD malformed json error", res.Errors)
+	}
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM purchase_orders WHERE po_id='PO-BAD'").Scan(&count)
+	if count != 0 {
+		t.Fatalf("purchase_orders row count = %d, want 0 (should not save header for malformed json)", count)
+	}
+}
+
+func TestImportPOFailedLineLeavesPreviousIntact(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// First import: a good PO with one line.
+	buf1 := poSheetFile(t, [][]interface{}{
+		{"PO-1", "2026-01-01", "Sup", "B-1", "10", "0", "10", "OPEN", "PENDING", "Ward", "", `[{"id":"A","n":"Item A","q":1,"c":5,"t":5,"u":"UNIT"}]`},
+	})
+	if _, err := (&Service{DB: db, ImportsDir: t.TempDir()}).Import(buf1, "wb1.xlsx"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force a failure on the re-import's line insert via a trigger, then
+	// re-import the same PO with a different header (date changed) and items.
+	if _, err := db.Exec(`CREATE TRIGGER fail_po_item BEFORE INSERT ON purchase_order_items
+		WHEN NEW.item_name = 'FAIL' BEGIN SELECT RAISE(ABORT, 'forced failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	buf2 := poSheetFile(t, [][]interface{}{
+		{"PO-1", "2026-02-02", "Sup", "B-1", "10", "0", "10", "OPEN", "PENDING", "Ward", "", `[{"id":"A","n":"FAIL","q":1,"c":5,"t":5,"u":"UNIT"}]`},
+	})
+	res, err := (&Service{DB: db, ImportsDir: t.TempDir()}).Import(buf2, "wb2.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TableRows["purchase_orders"] != 0 {
+		t.Fatalf("purchase_orders imported = %d, want 0 (the only PO row failed)", res.TableRows["purchase_orders"])
+	}
+	if len(res.Errors) == 0 {
+		t.Fatal("expected an error for the failed line insert")
+	}
+
+	var date string
+	if err := db.QueryRow("SELECT date FROM purchase_orders WHERE po_id='PO-1'").Scan(&date); err != nil {
+		t.Fatal(err)
+	}
+	if date != "2026-01-01" {
+		t.Fatalf("date = %q, want unchanged 2026-01-01 (failed re-import should not overwrite header)", date)
+	}
+	var itemName string
+	if err := db.QueryRow("SELECT item_name FROM purchase_order_items WHERE po_id='PO-1'").Scan(&itemName); err != nil {
+		t.Fatal(err)
+	}
+	if itemName != "Item A" {
+		t.Fatalf("item_name = %q, want unchanged Item A (failed re-import should not delete previous lines)", itemName)
+	}
+}
 
 func TestImportStockUpsertsCatalogueAndStock(t *testing.T) {
 	db, err := core.Open(t.TempDir())
