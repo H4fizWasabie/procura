@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-23
+- [analytics] Label Top 20 contributors as recalculated at current costs — distinguish them from frozen monthly chart values
 - [import] Archive uploaded workbook bytes before recording the import path — make import history usable for review
 - [analytics] Populate High Movers value from movement quantity and item cost — remove misleading RM0 entries
 - [workflow] Report failed approval and payment transitions instead of false success — expose missing POs, wrong status, and SQL errors
