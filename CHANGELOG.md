@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-23
+- [import] Validate monthly movement rows and replace the month atomically — preserve existing data when a reupload fails
 - [po] Save the header and lines atomically and persist calculated line totals — prevent partial orders and stale raw JSON
 - [auth] Validate sessions against current users and revoke them on account changes — stale roles and pre-fix demo tokens no longer retain access
 - [auth] Register demo login only in demo mode — prevent credential-free access to production data

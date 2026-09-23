@@ -454,6 +454,9 @@ func parseFloat(s string) (float64, error) {
 
 // ImportMovements handles standalone single-sheet Stock Movement Report (Sheet1, 7 columns).
 func (s *Service) ImportMovements(r io.Reader, filename string, year, month int) (int, error) {
+	if year < 1 || month < 1 || month > 12 {
+		return 0, fmt.Errorf("invalid movement year/month")
+	}
 	f, err := excelize.OpenReader(r)
 	if err != nil {
 		return 0, fmt.Errorf("open xlsx: %w", err)
@@ -474,10 +477,11 @@ func (s *Service) ImportMovements(r io.Reader, filename string, year, month int)
 		return 0, fmt.Errorf("expected 7 columns (SKU Code, Product Name, Purchase Qty, Sales Qty, Adj In, Adj Out, Closing), got %d", len(rows[0]))
 	}
 
-	// Delete existing rows for this year/month
-	s.DB.Exec("DELETE FROM stock_movements WHERE year = ? AND month = ?", year, month)
-
-	count := 0
+	type movementRow struct {
+		stockID, name                 string
+		in, out, adjIn, adjOut, close float64
+	}
+	var parsed []movementRow
 	for _, row := range rows[1:] {
 		if len(row) < 7 {
 			continue
@@ -486,13 +490,31 @@ func (s *Service) ImportMovements(r io.Reader, filename string, year, month int)
 		if sid == "" {
 			continue
 		}
-		s.DB.Exec(`
+		parsed = append(parsed, movementRow{sid, strVal(row[1]), floatVal(row[2]), floatVal(row[3]), floatVal(row[4]), floatVal(row[5]), floatVal(row[6])})
+	}
+	if len(parsed) == 0 {
+		return 0, fmt.Errorf("movement sheet has no usable rows")
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM stock_movements WHERE year = ? AND month = ?", year, month); err != nil {
+		return 0, err
+	}
+	for _, row := range parsed {
+		if _, err := tx.Exec(`
 			INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, sid, strVal(row[1]), year, month, floatVal(row[2]), floatVal(row[3]), floatVal(row[4]), floatVal(row[5]), floatVal(row[6]))
-		count++
+		`, row.stockID, row.name, year, month, row.in, row.out, row.adjIn, row.adjOut, row.close); err != nil {
+			return 0, err
+		}
 	}
-	return count, nil
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(parsed), nil
 }
 
 func normHeaders(headers []string) []string {
