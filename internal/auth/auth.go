@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type Claims struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
 	Name  string `json:"name"`
+	Demo  bool   `json:"demo,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -59,11 +61,11 @@ func (s *Service) Login(email, pin string) (string, *Claims, error) {
 	mu.Unlock()
 
 	var storedHash, role, name string
-	var mustChange int
+	var mustChange, version int
 	err := s.DB.QueryRow(
-		"SELECT pin_hash, role, name, must_change_pin FROM users WHERE email = ?",
+		"SELECT pin_hash, role, name, must_change_pin, auth_version FROM users WHERE email = ?",
 		email,
-	).Scan(&storedHash, &role, &name, &mustChange)
+	).Scan(&storedHash, &role, &name, &mustChange, &version)
 	if err != nil {
 		s.recordFailure(email)
 		return "", nil, fmtError("Invalid credentials")
@@ -82,21 +84,23 @@ func (s *Service) Login(email, pin string) (string, *Claims, error) {
 	// Update last access
 	s.DB.Exec("UPDATE users SET last_access = ? WHERE email = ?", time.Now().Format(time.RFC3339), email)
 
-	return issueToken(email, role, name)
+	return issueToken(email, role, name, version, false)
 }
 
 // DemoLogin issues a read-only VIEWER token without credentials. No DB row needed.
 func (s *Service) DemoLogin() (string, *Claims, error) {
-	return issueToken("demo@procura.app", "VIEWER", "Demo User")
+	return issueToken("demo@procura.app", "VIEWER", "Demo User", 0, true)
 }
 
-func issueToken(email, role, name string) (string, *Claims, error) {
+func issueToken(email, role, name string, version int, demo bool) (string, *Claims, error) {
 	claims := &Claims{
 		Email: email,
 		Role:  role,
 		Name:  name,
+		Demo:  demo,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(idleTimeout)),
+			ID:        strconv.Itoa(version),
 		},
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(jwtSecret)
@@ -136,7 +140,7 @@ func (s *Service) ChangePIN(email, oldPin, newPin string) error {
 		return fmtError("New PIN must be at least 6 digits")
 	}
 	newHash, _ := bcrypt.GenerateFromPassword([]byte(newPin), bcrypt.DefaultCost)
-	_, err := s.DB.Exec("UPDATE users SET pin_hash = ?, must_change_pin = 0 WHERE email = ?", string(newHash), email)
+	_, err := s.DB.Exec("UPDATE users SET pin_hash = ?, must_change_pin = 0, auth_version = auth_version + 1 WHERE email = ?", string(newHash), email)
 	return err
 }
 
@@ -157,6 +161,18 @@ func (s *Service) Middleware(next http.HandlerFunc) http.HandlerFunc {
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) { return jwtSecret, nil })
 		if err != nil || !token.Valid {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		validSession := claims.Demo && os.Getenv("PROCURA_DEMO") == "1" &&
+			claims.Email == "demo@procura.app" && claims.Role == "VIEWER" && claims.ID == "0"
+		if !claims.Demo {
+			var role string
+			var version int
+			err := s.DB.QueryRow("SELECT role, auth_version FROM users WHERE email = ?", claims.Email).Scan(&role, &version)
+			validSession = err == nil && role == claims.Role && claims.ID == strconv.Itoa(version)
+		}
+		if !validSession {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
@@ -291,14 +307,14 @@ func (s *Service) AddUser(email, name, role string) (string, error) {
 }
 
 func (s *Service) UpdateUser(email, name, role string) error {
-	_, err := s.DB.Exec("UPDATE users SET name = ?, role = ? WHERE email = ?", name, role, email)
+	_, err := s.DB.Exec("UPDATE users SET name = ?, role = ?, auth_version = auth_version + 1 WHERE email = ?", name, role, email)
 	return err
 }
 
 func (s *Service) ResetUserPIN(email string) (string, error) {
 	pin := randomPIN(6)
 	hash, _ := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
-	res, err := s.DB.Exec("UPDATE users SET pin_hash = ?, must_change_pin = 1 WHERE email = ?", string(hash), email)
+	res, err := s.DB.Exec("UPDATE users SET pin_hash = ?, must_change_pin = 1, auth_version = auth_version + 1 WHERE email = ?", string(hash), email)
 	if err != nil {
 		return "", err
 	}

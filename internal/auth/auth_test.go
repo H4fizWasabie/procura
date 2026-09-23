@@ -7,6 +7,7 @@ import (
 )
 
 func TestViewerReadOnly(t *testing.T) {
+	t.Setenv("PROCURA_DEMO", "1")
 	s := &Service{}
 	token, _, err := s.DemoLogin()
 	if err != nil {

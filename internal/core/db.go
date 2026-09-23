@@ -17,6 +17,7 @@ var schema = []string{
 		department TEXT,
 		pin_hash TEXT NOT NULL,
 		must_change_pin INTEGER NOT NULL DEFAULT 0,
+		auth_version INTEGER NOT NULL DEFAULT 0,
 		last_access TEXT
 	)`,
 	`CREATE TABLE IF NOT EXISTS logs (
@@ -231,6 +232,7 @@ var schema = []string{
 // migrations are additive ALTERs applied on every start; duplicate-column
 // errors mean already applied and are ignored.
 var migrations = []string{
+	"ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE items ADD COLUMN initial_stock_target REAL",
 	"ALTER TABLE direct_orders ADD COLUMN superseded_by_po TEXT",
 	"ALTER TABLE items ADD COLUMN velocity REAL",
