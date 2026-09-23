@@ -135,7 +135,8 @@ var schema = []string{
 		raw_rfq_json TEXT
 	)`,
 	`CREATE TABLE IF NOT EXISTS direct_orders (
-		order_id TEXT PRIMARY KEY,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		order_id TEXT,
 		date TEXT,
 		stock_id TEXT,
 		item_name TEXT,
@@ -254,6 +255,59 @@ func Open(dataDir string) (*sql.DB, error) {
 	for _, m := range migrations {
 		db.Exec(m) // ignore errors: duplicate column = already applied
 	}
+	if err := rebuildDirectOrdersPK(db); err != nil {
+		return nil, err
+	}
 	log.Printf("core: database ready at %s", path)
 	return db, nil
+}
+
+// rebuildDirectOrdersPK replaces the legacy single-column order_id PRIMARY
+// KEY with a surrogate autoincrement id, so a direct order can hold more
+// than one item row (issue #37). SQLite can't ALTER a column's key
+// constraint, so this rebuilds the table when the old schema is detected.
+func rebuildDirectOrdersPK(db *sql.DB) error {
+	rows, err := db.Query(`SELECT pk FROM pragma_table_info('direct_orders') WHERE name = 'order_id'`)
+	if err != nil {
+		return err
+	}
+	var pk int
+	if rows.Next() {
+		rows.Scan(&pk)
+	}
+	rows.Close()
+	if pk == 0 {
+		return nil // already migrated (or table not created yet)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, stmt := range []string{
+		`CREATE TABLE direct_orders_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			order_id TEXT,
+			date TEXT,
+			stock_id TEXT,
+			item_name TEXT,
+			supplier TEXT,
+			quantity REAL,
+			ordered_by TEXT,
+			notes TEXT,
+			status TEXT,
+			superseded_by_po TEXT
+		)`,
+		`INSERT INTO direct_orders_new (order_id, date, stock_id, item_name, supplier, quantity, ordered_by, notes, status, superseded_by_po)
+			SELECT order_id, date, stock_id, item_name, supplier, quantity, ordered_by, notes, status, superseded_by_po FROM direct_orders`,
+		`DROP TABLE direct_orders`,
+		`ALTER TABLE direct_orders_new RENAME TO direct_orders`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

@@ -220,6 +220,59 @@ func TestIncomingLinksExpireAfter30Days(t *testing.T) {
 	}
 }
 
+func TestMarkOrderedMultiItem(t *testing.T) {
+	s := testDB(t)
+	items := []OrderItem{
+		{StockID: "A", Name: "Item A", Qty: 1},
+		{StockID: "B", Name: "Item B", Qty: 2},
+	}
+	orderID, err := s.MarkOrdered(items, "Sup", "notes", "me")
+	if err != nil {
+		t.Fatalf("MarkOrdered multi-item: %v", err)
+	}
+	var count int
+	s.DB.QueryRow("SELECT COUNT(*) FROM direct_orders WHERE order_id=?", orderID).Scan(&count)
+	if count != 2 {
+		t.Errorf("rows for order = %d, want 2", count)
+	}
+}
+
+func TestMarkOrderedRollsBackOnFailure(t *testing.T) {
+	s := testDB(t)
+	mustExec(t, s, `CREATE TRIGGER fail_second_item BEFORE INSERT ON direct_orders
+		WHEN NEW.item_name = 'FAIL' BEGIN SELECT RAISE(ABORT, 'forced failure'); END`)
+
+	items := []OrderItem{
+		{StockID: "A", Name: "Item A", Qty: 1},
+		{StockID: "B", Name: "FAIL", Qty: 2},
+	}
+	if _, err := s.MarkOrdered(items, "Sup", "notes", "me"); err == nil {
+		t.Fatal("expected error from forced failure on second item")
+	}
+	var count int
+	s.DB.QueryRow("SELECT COUNT(*) FROM direct_orders").Scan(&count)
+	if count != 0 {
+		t.Errorf("rows left after failed batch = %d, want 0 (first item should be rolled back)", count)
+	}
+}
+
+func TestSupersedeDirectOrdersRollsBackOnFailure(t *testing.T) {
+	s := testDB(t)
+	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-1','2026-01-01','A','Item A',1,'ACTIVE')`)
+	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-1','2026-01-01','B','Item B',2,'ACTIVE')`)
+	mustExec(t, s, `CREATE TRIGGER fail_supersede_b BEFORE UPDATE ON direct_orders
+		WHEN NEW.stock_id = 'B' BEGIN SELECT RAISE(ABORT, 'forced failure'); END`)
+
+	if err := s.SupersedeDirectOrders("PO-1", []string{"A", "B"}); err == nil {
+		t.Fatal("expected error from forced failure on second update")
+	}
+	var status string
+	s.DB.QueryRow("SELECT status FROM direct_orders WHERE stock_id='A'").Scan(&status)
+	if status != "ACTIVE" {
+		t.Errorf("status for A = %s, want ACTIVE (rollback should undo A's update too)", status)
+	}
+}
+
 func TestSupersedeDirectOrders(t *testing.T) {
 	s := testDB(t)
 	mustExec(t, s, `INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, status) VALUES ('DO-S','2026-01-01','H','Item H',3,'ACTIVE')`)
