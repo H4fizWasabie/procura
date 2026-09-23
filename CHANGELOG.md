@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-23
+- [audit] Record the 11 Procura findings, merged fixes, and live verification — keep the review trail in the repository
 - [report] Prefer exact SKU for last purchase and limit name fallback to unlinked lines — avoid another SKU's purchase history
 - [analytics] Label Top 20 contributors as recalculated at current costs — distinguish them from frozen monthly chart values
 - [import] Archive uploaded workbook bytes before recording the import path — make import history usable for review
