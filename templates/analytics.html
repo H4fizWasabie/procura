@@ -110,6 +110,7 @@ function renderTab(tab) {
             </div>
             <div class="ana-chart-grid" style="margin-top:14px">
                 <div class="ana-chart-card"><h4>Top 20 In-House Usage Contributors</h4>
+                    <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Recalculated from movement rows at current item costs. Frozen chart months may differ.</p>
                     <table><thead><tr><th>#</th><th>Item</th><th style="text-align:right">Total (RM)</th><th style="text-align:center">Peak Month</th></tr></thead><tbody>
                     ${(anaData.operation?.inHouseTopItems||[]).map((it,i) => `<tr><td style="color:var(--muted);font-size:11px">${i+1}</td><td style="font-weight:600">${esc(it.name)}</td><td style="text-align:right">${fmtDetail(it.totalVal)}</td><td style="text-align:center"><span style="background:var(--bg);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;color:var(--amber)">${esc(it.peakMonth||'-')}</span></td></tr>`).join('')}</tbody></table>
                 </div>
