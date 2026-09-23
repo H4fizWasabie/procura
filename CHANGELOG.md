@@ -2,6 +2,7 @@
 
 ## 2026-09-23
 - [import] Save each PurchaseOrder sheet row's header and lines atomically and report malformed po_data_json and SQL errors instead of counting them as imported — a failed PO row no longer overwrites its previous header/lines or inflates import_runs counts (#38)
+- [planning] Wrap direct-order batch inserts and supersede updates in transactions, and rebuild the legacy single-column order_id primary key into a surrogate id — a failed row no longer leaves partial direct orders or blocks every multi-item order from ever saving (#37)
 - [audit] Record the 11 Procura findings, merged fixes, and live verification — keep the review trail in the repository
 - [report] Prefer exact SKU for last purchase and limit name fallback to unlinked lines — avoid another SKU's purchase history
 - [analytics] Label Top 20 contributors as recalculated at current costs — distinguish them from frozen monthly chart values
