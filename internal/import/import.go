@@ -1,6 +1,7 @@
 package ximport
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -28,23 +29,34 @@ type Service struct {
 }
 
 func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
-	os.MkdirAll(s.ImportsDir, 0755)
-
-	f, err := excelize.OpenReader(r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read xlsx: %w", err)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("open xlsx: %w", err)
 	}
 	defer f.Close()
+	if err := os.MkdirAll(s.ImportsDir, 0755); err != nil {
+		return nil, fmt.Errorf("create imports dir: %w", err)
+	}
+	src, err := os.CreateTemp(s.ImportsDir, "import-*"+filepath.Ext(filename))
+	if err != nil {
+		return nil, fmt.Errorf("archive xlsx: %w", err)
+	}
+	copiedPath := src.Name()
+	if _, err := src.Write(data); err != nil {
+		src.Close()
+		os.Remove(copiedPath)
+		return nil, fmt.Errorf("archive xlsx: %w", err)
+	}
+	if err := src.Close(); err != nil {
+		os.Remove(copiedPath)
+		return nil, fmt.Errorf("close archive: %w", err)
+	}
 
 	now := time.Now()
-	stamp := now.Format("20060102_150405")
-	copiedName := strings.TrimSuffix(filename, filepath.Ext(filename)) + "_" + stamp + filepath.Ext(filename)
-	copiedPath := filepath.Join(s.ImportsDir, copiedName)
-
-	// Copy to imports dir
-	src, _ := os.Create(copiedPath)
-	// ponytail: skip file copy for now, just record
-	src.Close()
 
 	tableRows := map[string]int{}
 	var headersFound []string
