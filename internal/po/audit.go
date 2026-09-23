@@ -56,29 +56,36 @@ func (s *Service) LinkLine(lineID int64, stockID string) error {
 	if stockID == "" {
 		return errBad("stock_id required")
 	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var poID, itemName string
-	err := s.DB.QueryRow(
+	err = tx.QueryRow(
 		"SELECT po_id, COALESCE(item_name,'') FROM purchase_order_items WHERE id = ?", lineID,
 	).Scan(&poID, &itemName)
 	if err != nil {
 		return err
 	}
-
-	if _, err := s.DB.Exec(
+	var position int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM purchase_order_items WHERE po_id = ? AND id < ?", poID, lineID).Scan(&position); err != nil {
+		return err
+	}
+	if err := updateRawJSON(tx, poID, position, itemName, stockID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
 		"UPDATE purchase_order_items SET stock_id = ? WHERE id = ?", stockID, lineID); err != nil {
 		return err
 	}
-	return s.updateRawJSON(poID, itemName, stockID)
+	return tx.Commit()
 }
 
-// updateRawJSON rewrites every matching item entry in raw_po_json with the
-// linked stock_id. Handles both GAS short format ("n"/"id") and long format.
-func (s *Service) updateRawJSON(poID, itemName, stockID string) error {
-	if itemName == "" {
-		return nil
-	}
+// updateRawJSON links the raw entry at the selected relational line's position.
+func updateRawJSON(tx *sql.Tx, poID string, position int, itemName, stockID string) error {
 	var raw sql.NullString
-	if err := s.DB.QueryRow(
+	if err := tx.QueryRow(
 		"SELECT raw_po_json FROM purchase_orders WHERE po_id = ?", poID).Scan(&raw); err != nil {
 		return err
 	}
@@ -87,32 +94,27 @@ func (s *Service) updateRawJSON(poID, itemName, stockID string) error {
 	}
 
 	var items []map[string]interface{}
-	if json.Unmarshal([]byte(raw.String), &items) != nil {
-		return nil // unparseable legacy JSON: leave it alone
+	if err := json.Unmarshal([]byte(raw.String), &items); err != nil {
+		return err
 	}
-	changed := false
-	for _, it := range items {
-		name := jsonString(it, "item_name")
-		if name == "" {
-			name = jsonString(it, "n")
-		}
-		if !strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(itemName)) {
-			continue
-		}
-		if jsonString(it, "id") == "" || jsonString(it, "stock_id") == "" {
-			it["id"] = stockID
-			it["stock_id"] = stockID
-			changed = true
-		}
+	if position >= len(items) {
+		return errBad("PO line does not match raw JSON")
 	}
-	if !changed {
-		return nil
+	it := items[position]
+	name := jsonString(it, "item_name")
+	if name == "" {
+		name = jsonString(it, "n")
 	}
+	if !strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(itemName)) {
+		return errBad("PO line does not match raw JSON")
+	}
+	it["id"] = stockID
+	it["stock_id"] = stockID
 	b, err := json.Marshal(items)
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.Exec("UPDATE purchase_orders SET raw_po_json = ? WHERE po_id = ?", string(b), poID)
+	_, err = tx.Exec("UPDATE purchase_orders SET raw_po_json = ? WHERE po_id = ?", string(b), poID)
 	return err
 }
 
