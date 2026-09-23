@@ -943,16 +943,38 @@ func main() {
 		var body struct {
 			POID string `json:"po_id"`
 		}
-		json.NewDecoder(r.Body).Decode(&body)
-		wfSvc.Approve(body.POID)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.POID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "po_id required"})
+			return
+		}
+		if err := wfSvc.Approve(body.POID); err != nil {
+			if err == sql.ErrNoRows {
+				writeJSON(w, http.StatusConflict, map[string]interface{}{"success": false, "error": "PO missing or not pending approval"})
+			} else {
+				log.Printf("approve PO %q: %v", body.POID, err)
+				writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "Workflow update failed"})
+			}
+			return
+		}
 		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 	mux.HandleFunc("POST /api/workflow/payment", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			POID string `json:"po_id"`
 		}
-		json.NewDecoder(r.Body).Decode(&body)
-		wfSvc.RequestPayment(body.POID)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.POID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "po_id required"})
+			return
+		}
+		if err := wfSvc.RequestPayment(body.POID); err != nil {
+			if err == sql.ErrNoRows {
+				writeJSON(w, http.StatusConflict, map[string]interface{}{"success": false, "error": "PO missing or not approved"})
+			} else {
+				log.Printf("request payment for PO %q: %v", body.POID, err)
+				writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "Workflow update failed"})
+			}
+			return
+		}
 		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 	mux.HandleFunc("GET /api/workflow/pending", protected(func(w http.ResponseWriter, r *http.Request) {

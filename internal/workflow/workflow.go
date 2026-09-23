@@ -6,18 +6,38 @@ type Service struct{ DB *sql.DB }
 
 // Approve moves a PO from "Pending Approval" to "Approved".
 func (s *Service) Approve(poID string) error {
-	_, err := s.DB.Exec(`
+	res, err := s.DB.Exec(`
 		UPDATE purchase_orders SET status = 'Approved' WHERE po_id = ? AND status = 'Pending Approval'
 	`, poID)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // RequestPayment moves from "Approved" to "Pending Payment".
 func (s *Service) RequestPayment(poID string) error {
-	_, err := s.DB.Exec(`
+	res, err := s.DB.Exec(`
 		UPDATE purchase_orders SET status = 'Pending Payment' WHERE po_id = ? AND status = 'Approved'
 	`, poID)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // MarkPaid sets PO status to "Paid" and sets paid amount.
@@ -42,6 +62,8 @@ func (s *Service) PendingActions() map[string]int {
 	s.DB.QueryRow("SELECT COUNT(*) FROM purchase_orders WHERE status = 'Pending Approval'").Scan(&a)
 	s.DB.QueryRow("SELECT COUNT(*) FROM purchase_orders WHERE status = 'Pending Payment'").Scan(&p)
 	s.DB.QueryRow("SELECT COUNT(*) FROM purchase_orders WHERE ship_status = 'Pending' AND status NOT IN ('VOID','CANCELLED')").Scan(&sh)
-	result["approvals"] = a; result["payments"] = p; result["shipping"] = sh
+	result["approvals"] = a
+	result["payments"] = p
+	result["shipping"] = sh
 	return result
 }
