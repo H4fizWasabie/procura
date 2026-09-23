@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-09-23
+- [auth] Register demo login only in demo mode — prevent credential-free access to production data
+
 ## 2026-09-20
 - [analytics] Merge Medical/Ward and Ward/Medical department labels in spending reports — removes duplicate department slices without rewriting PO history
 - [analytics] Separate raw month freezing from legacy baseline overlays and reconcile Total PO Spend with the displayed monthly series — preserves approved historical values while keeping live-period KPIs consistent
