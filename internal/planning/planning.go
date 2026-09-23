@@ -412,14 +412,23 @@ func lastCompleteMonthIdx() int {
 func (s *Service) MarkOrdered(items []OrderItem, supplier, notes, orderedBy string) (string, error) {
 	now := time.Now()
 	orderID := s.nextDirectOrderID()
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
 	for _, item := range items {
-		_, err := s.DB.Exec(`
+		if _, err := tx.Exec(`
 			INSERT INTO direct_orders (order_id, date, stock_id, item_name, quantity, ordered_by, notes, status)
 			VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
-		`, orderID, now.Format("2006-01-02"), item.StockID, item.Name, item.Qty, orderedBy, notes)
-		if err != nil {
+		`, orderID, now.Format("2006-01-02"), item.StockID, item.Name, item.Qty, orderedBy, notes); err != nil {
 			return "", err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
 	}
 	return orderID, nil
 }
@@ -427,18 +436,24 @@ func (s *Service) MarkOrdered(items []OrderItem, supplier, notes, orderedBy stri
 // SupersedeDirectOrders resolves ACTIVE direct orders covered by a saved PO
 // (ticket #6: the eventual PO closes the loop automatically).
 func (s *Service) SupersedeDirectOrders(poID string, stockIDs []string) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	for _, sid := range stockIDs {
 		if strings.TrimSpace(sid) == "" {
 			continue
 		}
-		if _, err := s.DB.Exec(`
+		if _, err := tx.Exec(`
 			UPDATE direct_orders SET status='SUPERSEDED', superseded_by_po=?
 			WHERE status='ACTIVE' AND TRIM(stock_id)=?
 		`, poID, strings.TrimSpace(sid)); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // MarkDelivered marks a direct order as arrived (one click when goods land).

@@ -1093,7 +1093,7 @@ func main() {
 			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, 200, map[string]interface{}{"success": true, "run_id": result.RunID, "tables": len(result.TableRows), "rows": result.Rows, "sheets_found": result.SheetsFound, "headers_found": result.HeadersFound})
+		writeJSON(w, 200, map[string]interface{}{"success": true, "run_id": result.RunID, "tables": len(result.TableRows), "rows": result.Rows, "sheets_found": result.SheetsFound, "headers_found": result.HeadersFound, "errors": result.Errors})
 	})))
 
 	// ── Change PIN ──
