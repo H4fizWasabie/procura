@@ -358,8 +358,14 @@ func main() {
 	}))
 
 	mux.HandleFunc("GET /api/planning", protected(func(w http.ResponseWriter, r *http.Request) {
+		items, err := planSvc.Plan()
+		if err != nil {
+			log.Printf("planning: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "Planning data unavailable"})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"items":       planSvc.Plan(),
+			"items":       items,
 			"dataThrough": planSvc.DataThrough(),
 		})
 	}))

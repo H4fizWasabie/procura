@@ -95,8 +95,11 @@ type Service struct {
 
 // Plan returns actionable plannable items below their ROP. Incoming pipeline
 // stays visible only while the item is below 100% health.
-func (s *Service) Plan() []Item {
-	incoming := s.incomingPipeline()
+func (s *Service) Plan() ([]Item, error) {
+	incoming, err := s.incomingPipeline()
+	if err != nil {
+		return nil, fmt.Errorf("plan: %w", err)
+	}
 	coverage := s.historyCoverage()
 
 	rows, err := s.DB.Query(`
@@ -106,7 +109,7 @@ func (s *Service) Plan() []Item {
 		FROM items
 	`)
 	if err != nil {
-		return []Item{}
+		return nil, fmt.Errorf("plan: items query: %w", err)
 	}
 	defer rows.Close()
 
@@ -211,7 +214,7 @@ func (s *Service) Plan() []Item {
 		}
 		return items[i].Name < items[j].Name
 	})
-	return items
+	return items, nil
 }
 
 // Plannable reports whether an item participates in reorder planning.
@@ -247,7 +250,7 @@ func excluded(excl, beh, status, ptype, category string) bool {
 // open PO lines (not Received/Delivered/VOID), ACTIVE direct orders, and RFQs not yet
 // superseded by a recent linked PO. Older links remain in history but no
 // longer suppress a fresh recommendation.
-func (s *Service) incomingPipeline() map[string][]Incoming {
+func (s *Service) incomingPipeline() (map[string][]Incoming, error) {
 	out := map[string][]Incoming{}
 	cutoff := nowFn().AddDate(0, 0, -incomingExpiry)
 	cutoffDate := cutoff.Format("2006-01-02")
@@ -261,34 +264,50 @@ func (s *Service) incomingPipeline() map[string][]Incoming {
 		  AND COALESCE(po.status,'') != 'VOID'
 		  AND substr(COALESCE(po.date,''),1,10) > ?
 	`, cutoffDate)
-	if err == nil {
-		for rows.Next() {
-			var ref, sid string
-			var qty float64
-			rows.Scan(&ref, &sid, &qty)
-			if sid = strings.TrimSpace(sid); sid != "" {
-				out[sid] = append(out[sid], Incoming{Stage: "PO", Ref: ref, Qty: qty})
-			}
-		}
-		rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("incoming PO query: %w", err)
 	}
+	for rows.Next() {
+		var ref, sid string
+		var qty float64
+		if err := rows.Scan(&ref, &sid, &qty); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("incoming PO scan: %w", err)
+		}
+		if sid = strings.TrimSpace(sid); sid != "" {
+			out[sid] = append(out[sid], Incoming{Stage: "PO", Ref: ref, Qty: qty})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("incoming PO rows: %w", err)
+	}
+	rows.Close()
 
 	rows, err = s.DB.Query(`
 		SELECT order_id, stock_id, quantity
 		FROM direct_orders
 		WHERE status = 'ACTIVE' AND substr(COALESCE(date,''),1,10) > ?
 	`, cutoffDate)
-	if err == nil {
-		for rows.Next() {
-			var ref, sid string
-			var qty float64
-			rows.Scan(&ref, &sid, &qty)
-			if sid = strings.TrimSpace(sid); sid != "" {
-				out[sid] = append(out[sid], Incoming{Stage: "DIRECT", Ref: ref, Qty: qty})
-			}
-		}
-		rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("incoming direct order query: %w", err)
 	}
+	for rows.Next() {
+		var ref, sid string
+		var qty float64
+		if err := rows.Scan(&ref, &sid, &qty); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("incoming direct order scan: %w", err)
+		}
+		if sid = strings.TrimSpace(sid); sid != "" {
+			out[sid] = append(out[sid], Incoming{Stage: "DIRECT", Ref: ref, Qty: qty})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("incoming direct order rows: %w", err)
+	}
+	rows.Close()
 
 	// RFQs suppress until a recent PO links them. A stale PO must not keep its
 	// RFQ suppressed forever.
@@ -303,20 +322,28 @@ func (s *Service) incomingPipeline() map[string][]Incoming {
 			  AND substr(COALESCE(po.date,''),1,10) > ?
 		  )
 	`, cutoffDate, cutoffDate)
-	if err == nil {
-		for rows.Next() {
-			var ref, raw string
-			rows.Scan(&ref, &raw)
-			for _, it := range parseCompactItems(raw) {
-				if it.ID != "" {
-					out[it.ID] = append(out[it.ID], Incoming{Stage: "RFQ", Ref: ref, Qty: it.Qty})
-				}
+	if err != nil {
+		return nil, fmt.Errorf("incoming RFQ query: %w", err)
+	}
+	for rows.Next() {
+		var ref, raw string
+		if err := rows.Scan(&ref, &raw); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("incoming RFQ scan: %w", err)
+		}
+		for _, it := range parseCompactItems(raw) {
+			if it.ID != "" {
+				out[it.ID] = append(out[it.ID], Incoming{Stage: "RFQ", Ref: ref, Qty: it.Qty})
 			}
 		}
-		rows.Close()
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("incoming RFQ rows: %w", err)
+	}
+	rows.Close()
 
-	return out
+	return out, nil
 }
 
 // historyCoverage returns per stock_id: total months with any movement row,

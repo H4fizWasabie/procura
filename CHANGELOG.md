@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-23
+- [planning] Propagate incoming-pipeline query, scan, and rows.Err failures through Plan and the /api/planning route instead of returning a silent empty pipeline — a database fault now surfaces as a server error, not a false "no incoming stock" (#39)
 - [audit] Record the 11 Procura findings, merged fixes, and live verification — keep the review trail in the repository
 - [report] Prefer exact SKU for last purchase and limit name fallback to unlinked lines — avoid another SKU's purchase history
 - [analytics] Label Top 20 contributors as recalculated at current costs — distinguish them from frozen monthly chart values
