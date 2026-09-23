@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-23
+- [analytics] Populate High Movers value from movement quantity and item cost — remove misleading RM0 entries
 - [workflow] Report failed approval and payment transitions instead of false success — expose missing POs, wrong status, and SQL errors
 - [po] Link only the selected duplicate-name line and save both PO representations together — prevent wrong SKU links
 - [import] Validate monthly movement rows and replace the month atomically — preserve existing data when a reupload fails
