@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-09-23
+- [import] Archive uploaded workbook bytes before recording the import path — make import history usable for review
 - [analytics] Populate High Movers value from movement quantity and item cost — remove misleading RM0 entries
 - [workflow] Report failed approval and payment transitions instead of false success — expose missing POs, wrong status, and SQL errors
 - [po] Link only the selected duplicate-name line and save both PO representations together — prevent wrong SKU links
