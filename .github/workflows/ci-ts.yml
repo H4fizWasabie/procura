@@ -3,9 +3,13 @@ name: ci-typecheck
 on:
   push:
     branches: [master]
-    paths: ["extension/*.ts", "types/**", ".github/workflows/ci-ts.yml", "package.json", "tsconfig.ci.json"]
+    paths: ["extension/**", ".github/workflows/ci-ts.yml"]
   pull_request:
-    paths: ["extension/*.ts", "types/**", ".github/workflows/ci-ts.yml", "package.json", "tsconfig.ci.json"]
+    paths: ["extension/**", ".github/workflows/ci-ts.yml"]
+
+defaults:
+  run:
+    working-directory: extension
 
 jobs:
   typecheck:
@@ -18,4 +22,4 @@ jobs:
       - name: Install pinned deps (typescript 5.9.3, typebox 1.3.7, @types/node 22)
         run: npm install --no-fund --no-audit
       - name: tsc --noEmit
-        run: npx tsc -p extension/tsconfig.ci.json
+        run: npx tsc -p tsconfig.ci.json
