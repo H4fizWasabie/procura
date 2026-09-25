@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-25
+- [po] Wire Set Inv Date to a role-protected API that validates and persists invoice dates — prevent false success without updating the PO
+- [uom] Prefer the matching item label when updating supplier mappings by stock ID — avoid renaming a legacy duplicate and violating the supplier/name unique constraint
+
 ## 2026-09-23
 - [planning] Propagate incoming-pipeline query, scan, and rows.Err failures through Plan and the /api/planning route instead of returning a silent empty pipeline — a database fault now surfaces as a server error, not a false "no incoming stock" (#39)
 - [import] Save each PurchaseOrder sheet row's header and lines atomically and report malformed po_data_json and SQL errors instead of counting them as imported — a failed PO row no longer overwrites its previous header/lines or inflates import_runs counts (#38)

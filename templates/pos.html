@@ -367,6 +367,10 @@ async function updatePoField(field) {
             body:JSON.stringify({field:'ship',status:body.status})});
     } else if (field==='invdate') {
         body = {invoice_date: fromDMY(document.getElementById('po-edit-invdate').value)};
+        const res = await fetch('/api/pos/'+encodeURIComponent(selectedPoId)+'/invoice-date',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(body)});
+        const d = await res.json();
+        if (!res.ok || !d.success) return toast('Error: '+(d.error||'Could not update invoice date'), false);
     }
     toast('Updated', true); loadPos();
 }

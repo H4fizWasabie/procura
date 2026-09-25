@@ -502,6 +502,31 @@ func main() {
 		poSvc.UpdateStatus(r.PathValue("poId"), body.Status, col)
 		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
+	mux.HandleFunc("POST /api/pos/{poId}/invoice-date", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			InvoiceDate string `json:"invoice_date"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid request body"})
+			return
+		}
+		body.InvoiceDate = strings.TrimSpace(body.InvoiceDate)
+		if body.InvoiceDate != "" {
+			if _, err := time.Parse("2006-01-02", body.InvoiceDate); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invoice_date must be YYYY-MM-DD or blank"})
+				return
+			}
+		}
+		if err := poSvc.UpdateInvoiceDate(r.PathValue("poId"), body.InvoiceDate); err != nil {
+			if err == sql.ErrNoRows {
+				writeJSON(w, http.StatusNotFound, map[string]interface{}{"success": false, "error": "PO not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+	})))
 
 	// ── PO PDF preview & download ──
 	mux.HandleFunc("GET /pos/{poId}/preview", protected(func(w http.ResponseWriter, r *http.Request) {
