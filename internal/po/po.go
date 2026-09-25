@@ -240,6 +240,21 @@ func (s *Service) Save(p PO) (string, error) {
 	return p.POID, nil
 }
 
+func (s *Service) UpdateInvoiceDate(poID, invoiceDate string) error {
+	res, err := s.DB.Exec("UPDATE purchase_orders SET invoice_date = ? WHERE po_id = ?", invoiceDate, poID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // UpdateStatus sets PO status or ship_status.
 func (s *Service) UpdateStatus(poID, newStatus, field string) error {
 	col := "status"

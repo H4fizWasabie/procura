@@ -71,11 +71,13 @@ func (s *Service) UpsertItemMapping(supplier, stockID, itemName, supplierUOM str
 	}
 
 	var id int
+	// Prefer the exact label when legacy rows share a stock ID; otherwise,
+	// renaming the first row can collide with the unique supplier/name key.
 	err := s.DB.QueryRow(`
 		SELECT id FROM supplier_item_mappings
 		WHERE supplier_name = ? AND TRIM(stock_id) = TRIM(?)
-		ORDER BY id LIMIT 1
-	`, supplier, stockID).Scan(&id)
+		ORDER BY CASE WHEN supplier_item_name = ? THEN 0 ELSE 1 END, id LIMIT 1
+	`, supplier, stockID, itemName).Scan(&id)
 	if err == nil {
 		_, err = s.DB.Exec(`UPDATE supplier_item_mappings
 			SET supplier_item_name = ?, supplier_uom = ? WHERE id = ?`, itemName, supplierUOM, id)
