@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-09-27
+- [movement] fit the movement table to the remaining viewport and keep its headings sticky while rows scroll — leaves ROP actions and period/search controls in view
+- [po] Keep history controls visible while the order list scrolls, with sticky column headings — retain access to filters and actions on long lists
+- [po] Require date, department, and supplier before saving POs in the form and service — prevent incomplete headers while keeping invoice fields optional
 - [inventory] Filter before pagination, report load/save errors and export real XLSX or CSV for all matching rows — prevent missing results and mislabeled exports
 - [inventory] Return pack size and exclusion in item details — preserve anchors when other fields are edited
 - [po] Remove unintended approval calls and surface invalid, missing and failed status/shipment updates — prevent false success and side effects
@@ -194,6 +197,7 @@
 - [import] Make Stock Balance History uploads authoritative: header-map catalogue fields, update existing items, and add new SKUs such as Renadyl.
 
 ## 2026-09-27
+- [rfq] add typeable supplier suggestions with substring, ordered-character and typo matching; require choosing an existing supplier and retain it on edit — prevents unmatched text being saved as a supplier
 - [ui] implement direction A with five priority navigation links, grouped supporting workspaces, lighter work surfaces and Overview shortcuts — makes frequent procurement work easier to reach while retaining every destination and server contract.
 - [po] separate list, details and editing; retain filters/selection, optional invoice columns, all detail fields, unsaved-change protection and full CSV data — reduces table density without removing information or actions.
 - [po] replace destructive order replacement with an upsert that preserves payment totals, balance, workflow status and RFQ linkage during edits — prevents existing metadata from being lost when saving the redesigned form.
