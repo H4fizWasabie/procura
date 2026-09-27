@@ -192,3 +192,10 @@
 - [uom] UpsertItemMapping: TRIM-tolerant lookups + INSERT falls back to UPDATE on UNIQUE conflicts — whitespace-variant legacy mappings no longer fail every PO save with "supplier UOM mapping failed"
 ## 2026-08-26
 - [import] Make Stock Balance History uploads authoritative: header-map catalogue fields, update existing items, and add new SKUs such as Renadyl.
+
+## 2026-09-27
+- [ui] implement direction A with five priority navigation links, grouped supporting workspaces, lighter work surfaces and Overview shortcuts — makes frequent procurement work easier to reach while retaining every destination and server contract.
+- [po] separate list, details and editing; retain filters/selection, optional invoice columns, all detail fields, unsaved-change protection and full CSV data — reduces table density without removing information or actions.
+- [po] replace destructive order replacement with an upsert that preserves payment totals, balance, workflow status and RFQ linkage during edits — prevents existing metadata from being lost when saving the redesigned form.
+- [ui] restore the Unlinked Lines template dispatch and handle empty results — the retained linking route now renders its existing controls correctly.
+- [ui] add authenticated direction A checks for every operational route, PO editing/readbacks, Planning→RFQ, desktop/mobile navigation and role/demo isolation — makes the approved redesign verifiable on disposable sample data.

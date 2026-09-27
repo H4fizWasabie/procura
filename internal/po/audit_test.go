@@ -96,3 +96,44 @@ func TestItemJSONRoundTrip(t *testing.T) {
 		t.Errorf("gas parse = %+v", gas)
 	}
 }
+
+func TestSavePreservesPaymentAndWorkflowState(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`INSERT INTO purchase_orders (po_id,status,paid,balance,linked_rfq)
+		VALUES ('PO-EDIT','Partial',10,27,'RFQ-KEEP')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{DB: db}
+	p := PO{POID: "PO-EDIT", Supplier: "Supplier", BillNo: "EDITED", ShipStatus: "Received",
+		Items: []Item{{StockID: "I001", Name: "Item", Qty: 2, Cost: 18.5}}}
+	if _, err := s.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	var status, linked, bill string
+	var paid, balance, total float64
+	if err := db.QueryRow(`SELECT status,paid,balance,linked_rfq,bill_no,total FROM purchase_orders WHERE po_id='PO-EDIT'`).Scan(&status, &paid, &balance, &linked, &bill, &total); err != nil {
+		t.Fatal(err)
+	}
+	if status != "Partial" || paid != 10 || balance != 27 || linked != "RFQ-KEEP" || bill != "EDITED" || total != 37 {
+		t.Fatalf("edit lost state: status=%s paid=%v balance=%v linked=%s bill=%s total=%v", status, paid, balance, linked, bill, total)
+	}
+	p.Status = "Paid"
+	if _, err := s.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT status FROM purchase_orders WHERE po_id='PO-EDIT'`).Scan(&status); err != nil || status != "Paid" {
+		t.Fatalf("explicit status change: %q, %v", status, err)
+	}
+	p.POID, p.BillNo, p.Status = "PO-NEW", "", ""
+	if _, err := s.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT status FROM purchase_orders WHERE po_id='PO-NEW'`).Scan(&status); err != nil || status != "Pending Approval" {
+		t.Fatalf("new order status: %q, %v", status, err)
+	}
+}

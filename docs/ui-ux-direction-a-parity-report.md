@@ -1,7 +1,7 @@
 # Procura UI direction A: feature parity report
 
-**Status:** decisions approved; defect fixes verified locally, 27 September 2026  
-**Chosen direction:** A — Grouped Workspaces  
+**Status:** direction A implemented and verified locally for review, 27 September 2026
+**Chosen direction:** A — Grouped Workspaces
 **Scope:** fix the approved existing defects first, then redesign navigation and presentation with feature parity. Production deployment is a separate approval gate.
 
 ## Approved decisions
@@ -26,11 +26,11 @@
 | Data & setup | UOM mappings (`/uom`), Import data (`/import`), Validation (`/validation`), Users (`/users`, ADMIN only) |
 | Secondary / account | Unlinked PO lines (`/pos/unlinked`) from Purchase orders; Change PIN (`/change-pin`), Logout, identity and demo indicator in the account area |
 
-This is the approved navigation plan, not an implemented redesign. The existing concept preview remains illustrative and does not demonstrate full feature parity.
+The approved navigation is implemented in the local review app. The original three-direction concept preview remains illustrative; review the functional app at http://localhost:8766 instead.
 
 ## Defect phase: local implementation and verification
 
-Changes are isolated on branch `fix/ui-parity-defects`, checkout `/home/hafiz/procura-defect-fixes`, based on `10beb1a`. They have not been merged, pushed or deployed. The original working checkout's settings and changes remain intact.
+The defect phase was merged through PR #48 into GitHub master at `1ba6ac8`. It has not been deployed. The redesign is isolated on branch `redesign/direction-a`, checkout `/home/hafiz/procura-ui-redesign`, based on that merged commit. The original checkout remains unchanged.
 
 | Defect | Local result |
 |---|---|
@@ -52,12 +52,28 @@ Verified locally against a freshly created disposable database, never the produc
 
 Coverage is focused on the approved defects. Full application and redesigned UI parity remain future acceptance gates; these checks are not a claim that every unrelated workflow has been exercised. Chrome checks need `google-chrome`, Node.js with WebSocket support and Python 3; no new dependencies were added.
 
-## Implementation sequence and gates
+## Direction A local review
 
-1. Review the defect changes as a separate phase. Any merge or deploy remains explicitly separate.
-2. Implement the approved navigation shell and Overview priority actions while retaining page behavior, routes and session handling.
-3. Redesign PO list/details/editing and then remaining pages. Carry every row of the feature inventory forward, including optional columns and exports.
-4. Complete authenticated parity checks for every page/action/role and saved-data readbacks on isolated data before production release.
+Functional app: **http://localhost:8766**. Sign in as `admin@preview.local` with PIN `246810`. This account and the EDITOR/VIEWER accounts with the same PIN exist only in a fictional, isolated local workspace at `/home/hafiz/procura-ui-preview/app/data`. They are not production credentials. The existing demo button remains available for read-only review.
+
+Implemented: five permanent priority links; expandable supporting workspaces with active-page disclosure; all destinations and account actions; consistent light tables/forms and slate sidebar; four Overview shortcuts above all retained metrics/alerts; eight default PO columns with optional invoice fields; separate order detail and edit views; all twelve header fields and line-item data; retained filter/selection state on Back/reload; invoice date set/clear; keyboard item suggestions and supplier UOM; unsaved edit checks; accurate CSV column alignment/escaping. Existing module handlers, APIs, permission checks and session timers remain in use.
+
+### Additional defects uncovered in real browser checks
+
+- `/pos/unlinked` had no content-block dispatch in the shared shell, so the route did not render its linking controls. The dispatch is restored, and null empty results render normally.
+- PO Save used `INSERT OR REPLACE`, dropping payment totals, outstanding balance, status and RFQ linkage when editing. Save now uses an upsert that preserves those existing values; explicitly supplied status changes still work. New orders without a supplied status default to Pending Approval. A service regression and actual paid-order browser edit/reload confirm preservation. No database columns or routes changed.
+
+### Verification completed
+
+- `node scripts/check-ui-redesign.mjs`: passes all 18 operational page/navigation checks; Overview shortcut order and six metrics; PO optional columns, twelve details, Back/reload context, invoice set/clear and unsaved protection; keyboard item choice/UOM; create/edit/readback and preview/PDF; paid-edit payment/status retention; actual Planning→RFQ handoff/save/PDF; desktop/mobile layout and Users restrictions; demo write isolation and logout. No JavaScript exceptions were observed.
+- `python3 scripts/check-ui-defects.py`: the existing 27 HTTP, UI-handler and authenticated Chrome checks pass against this redesign.
+- `GOFLAGS=-buildvcs=false go test ./...`: full suite passes, including the new preservation regression and existing direct-order/PO tests.
+- Impeccable mechanical detector: no findings on the shared shell, dashboard, PO, Planning and stylesheet.
+- Desktop and mobile screenshots inspected in bounded passes; the mobile filter-checkbox layout defect was corrected. Screenshots are retained in `/home/hafiz/procura-ui-preview/screenshots`.
+
+### Remaining release gates
+
+This is ready for local user review, not a production release. Every feature in the inventory is retained in source, and every operational page renders; the checks above do not claim every unchanged action has been exercised. Before release, complete the remaining inventory acceptance on disposable data, especially workbook imports, Analytics freeze/export, supplier/task/UOM/user mutations, alias linking and long-duration heartbeat/idle expiry. Merge and deployment remain separate gates. Production has not changed.
 
 ## Feature parity inventory
 

@@ -1,6 +1,6 @@
 {{template "base.html" .}}
 {{define "content_pos"}}
-<div class="top-bar">
+<div class="top-bar" id="po-list-actions">
     <h2>Purchase Orders</h2>
     <div style="display:flex;gap:8px">
         <button class="btn-sm" onclick="window.location='/pos/unlinked'" title="PO lines without stock_id — link them to catalogue items">Unlinked Lines</button>
@@ -8,23 +8,17 @@
     </div>
 </div>
 
-<!-- Tabs -->
-<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
-    <button class="sub-tab active" onclick="switchTab('history')">Order History</button>
-    <button class="sub-tab" onclick="switchTab('new')">New PO</button>
-</div>
-
 <!-- Order History Tab -->
 <div id="tab-history">
     <div class="search-bar">
-        <input type="text" id="search" placeholder="PO ID or supplier..." style="width:180px" oninput="loadPos()">
-        <select id="f-supplier" style="width:160px" onchange="loadPos()"><option value="">All Suppliers</option></select>
-        <select id="f-status" style="width:130px" onchange="loadPos()">
+        <input type="text" id="search" aria-label="Search purchase orders" placeholder="PO ID or supplier..." style="width:180px" oninput="loadPos()">
+        <select id="f-supplier" aria-label="Filter by supplier" style="width:160px" onchange="loadPos()"><option value="">All Suppliers</option></select>
+        <select id="f-status" aria-label="Filter by approval or payment status" style="width:130px" onchange="loadPos()">
             <option value="">All Status</option><option>Pending Approval</option><option>Approved</option>
             <option>Pending Payment</option><option>Paid</option><option>Partial</option><option>Void</option>
         </select>
-        <select id="f-ship" style="width:120px" onchange="loadPos()">
-            <option value="">All Ship</option><option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option>
+        <select id="f-ship" aria-label="Filter by shipping status" style="width:120px" onchange="loadPos()">
+            <option value="">All Ship</option><option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option><option>Received</option>
         </select>
         <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)">
             <input type="checkbox" id="f-unpaid" onchange="loadPos()"> Unpaid only
@@ -35,38 +29,44 @@
         <button onclick="editSelectedPo()">Edit Selected</button>
     </div>
 
-    <div class="card" style="padding:0;overflow-x:auto;max-height:50vh;overflow-y:auto">
+    <div class="po-column-options" aria-label="Optional columns">
+        <span>Optional columns:</span>
+        <label><input type="checkbox" id="show-invoice-number" onchange="renderPoList()"> Invoice number</label>
+        <label><input type="checkbox" id="show-invoice-date" onchange="renderPoList()"> Invoice date</label>
+        <span id="po-count" role="status"></span>
+    </div>
+    <div class="table-scroll po-list-table" id="po-list-scroll">
         <table>
-            <thead><tr>
-                <th>PO ID</th><th>Inv No</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Balance</th><th>Eff Balance</th>
-                <th>Status</th><th>Ship</th><th>Terms</th><th>Dept</th><th>Invoice Date</th>
-            </tr></thead>
+            <thead id="po-head"></thead>
             <tbody id="po-body"></tbody>
         </table>
     </div>
 
-    <!-- PO Detail Panel -->
-    <div id="po-detail" style="display:none;margin-top:12px">
+</div>
+
+    <!-- Dedicated PO detail view -->
+    <div id="po-detail" style="display:none">
+        <div class="po-view-header"><button class="btn-secondary" onclick="closePoDetail()">Back to orders</button><button onclick="editSelectedPo()">Edit order</button></div>
         <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
                 <h3 id="po-detail-title">PO Details</h3>
                 <div style="display:flex;gap:6px;align-items:center">
-                    <button onclick="previewPO()" style="font-size:11px;padding:3px 8px">👁 Preview</button>
-                    <button onclick="downloadPO()" style="font-size:11px;padding:3px 8px">📥 PDF</button>
-                    <span style="cursor:pointer;color:var(--muted);font-size:20px" onclick="closePoDetail()">&times;</span>
+                    <button onclick="previewPO()" style="font-size:11px;padding:3px 8px">Preview</button>
+                    <button onclick="downloadPO()" style="font-size:11px;padding:3px 8px">Download PDF</button>
+
                 </div>
             </div>
-            <div class="grid-3" style="margin-bottom:12px" id="po-detail-grid"></div>
+            <dl class="po-detail-summary" id="po-detail-grid"></dl>
             <!-- Status / Ship / Invoice row -->
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-                <select id="po-edit-status" style="width:150px" onchange="updatePoField('status')">
+                <select id="po-edit-status" aria-label="Approval or payment status" style="width:150px" onchange="updatePoField('status')">
                     <option value="">Status</option><option>Pending Approval</option><option>Approved</option>
                     <option>Pending Payment</option><option>Paid</option><option>Partial</option><option>Void</option>
                 </select>
-                <select id="po-edit-ship" style="width:130px" onchange="updatePoField('ship')">
-                    <option value="">Ship Status</option><option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option>
+                <select id="po-edit-ship" aria-label="Shipping status" style="width:130px" onchange="updatePoField('ship')">
+                    <option value="">Ship Status</option><option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option><option>Received</option>
                 </select>
-                <input type="text" id="po-edit-invdate" style="width:130px" placeholder="DD/MM/YYYY">
+                <input type="text" id="po-edit-invdate" aria-label="Invoice date, day/month/year" style="width:130px" placeholder="DD/MM/YYYY">
                 <button class="btn-secondary btn-sm" onclick="updatePoField('invdate')">Set Inv Date</button>
             </div>
             <h4 style="margin-bottom:8px">Items</h4>
@@ -74,13 +74,13 @@
                 <tbody id="po-detail-items"></tbody></table>
         </div>
     </div>
-</div>
 
-<!-- New PO Tab -->
+<!-- Dedicated PO form -->
 <div id="tab-new" style="display:none">
+    <div class="po-view-header"><button class="btn-secondary" onclick="switchTab('history')">Back to orders</button><h2 id="po-form-title">New purchase order</h2><span class="muted" id="po-edit-state" role="status"></span></div>
     <div class="card">
         <h3>PO Header</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+        <div class="po-edit-fields">
             <div class="form-group"><label>PO ID</label><input id="npo-id" style="font-family:monospace;font-weight:700;color:var(--accent)" placeholder="Auto-generated" onchange="checkPoId()"></div>
             <div class="form-group"><label>Date</label><input type="text" id="npo-date" placeholder="DD/MM/YYYY"></div>
             <div class="form-group"><label>Department</label><select id="npo-dept"><option value="">-- Select --</option>
@@ -90,7 +90,7 @@
             <div class="form-group"><label>Invoice Date</label><input type="text" id="npo-inv-date" placeholder="DD/MM/YYYY"></div>
             <div class="form-group"><label>Terms</label><input id="npo-terms" readonly placeholder="Auto from supplier"></div>
             <div class="form-group"><label>Shipping Status</label><select id="npo-ship">
-                <option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option>
+                <option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option><option>Received</option>
             </select></div>
         </div>
 
@@ -117,7 +117,7 @@
             <div class="stat" id="npo-total" style="color:var(--accent)">RM 0.00</div>
             <div style="display:flex;gap:8px">
                 <button class="btn-secondary" onclick="resetPoForm()">Reset</button>
-                <button onclick="savePo()">Save Order</button>
+                <button id="po-save" onclick="savePo()">Save Order</button>
             </div>
         </div>
     </div>
@@ -145,6 +145,7 @@
 
 <script>
 let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='', poSuggestionItems=[], poSuggestionIndex=-1;
+let poView='history', selectedPo=null, poFormBaseline='', poListScroll=0, poRequest=0;
 
 // DD/MM/YYYY helpers
 function toDMY(iso){if(!iso)return'';const s=iso.slice(0,10);if(s.indexOf('/')!==-1)return s;const d=s.split('-');if(d.length!==3)return s;return d[2]+'/'+d[1]+'/'+d[0]}
@@ -153,10 +154,9 @@ function todayDMY(){const d=new Date();return ('0'+d.getDate()).slice(-2)+'/'+('
 
 async function initPo() {
     document.getElementById('npo-date').value = todayDMY();
-    const [itemRes,supRes,histRes,uomRes] = await Promise.all([
+    const [itemRes,supRes,uomRes] = await Promise.all([
         fetch('/api/inventory?page=1&pageSize=5000'),
         fetch('/api/suppliers'),
-        fetch('/api/pos?limit=200'),
         fetch('/api/uom/mappings'),
     ]);
     poItemMaster = await itemRes.json();
@@ -198,7 +198,27 @@ async function initPo() {
     document.addEventListener('click', function(event) {
         if (!document.getElementById('npo-item-picker').contains(event.target)) hidePoSuggestions();
     });
-    loadPos();
+    restorePoList();
+    await loadPos();
+    poFormBaseline = poFormSnapshot();
+    const requestedId = new URLSearchParams(location.search).get('order');
+    if (requestedId) await selectPo(requestedId, false);
+    window.addEventListener('popstate', async () => {
+        if (!canLeavePoForm()) {
+            history.pushState({}, '', '/pos?edit=1');
+            return;
+        }
+        const id = new URLSearchParams(location.search).get('order');
+        if (id) await selectPo(id, false); else showPoView('history');
+    });
+    window.addEventListener('beforeunload', event => {
+        if (poView === 'new' && poFormChanged()) { event.preventDefault(); event.returnValue = ''; }
+    });
+    document.addEventListener('click', event => {
+        if (event.target.closest('a[href]') && poView === 'new' && !canLeavePoForm()) event.preventDefault();
+    });
+    document.getElementById('tab-new').addEventListener('input', updatePoEditState);
+    document.getElementById('tab-new').addEventListener('change', updatePoEditState);
 }
 
 function renderPoSuggestions() {
@@ -288,14 +308,52 @@ function fillSupplierUOM() {
     }
 }
 
-function switchTab(name) {
-    document.getElementById('tab-history').style.display = name==='history'?'block':'none';
-    document.getElementById('tab-new').style.display = name==='new'?'block':'none';
-    document.querySelectorAll('.sub-tab').forEach((b,i) => b.classList.toggle('active', (i===0&&name==='history')||(i===1&&name==='new')));
-    if (name==='history') loadPos();
+function poFormSnapshot() {
+    return JSON.stringify({fields: Array.from(document.querySelectorAll('#tab-new input, #tab-new select')).map(e => [e.id,e.value]), items:poItems});
 }
-
+function poFormChanged() { return poFormSnapshot() !== poFormBaseline; }
+function canLeavePoForm() {
+    if (poView !== 'new' || !poFormChanged()) return true;
+    if (!confirm('Discard your unsaved purchase order changes?')) return false;
+    poFormBaseline = poFormSnapshot();
+    return true;
+}
+function updatePoEditState() { document.getElementById('po-edit-state').textContent = poFormChanged() ? 'Unsaved changes' : ''; }
+function showPoView(name) {
+    poView = name;
+    for (const [id, view] of [['tab-history','history'],['tab-new','new'],['po-detail','detail']]) document.getElementById(id).style.display = name === view ? 'block' : 'none';
+    document.getElementById('po-list-actions').style.display = name === 'history' ? 'flex' : 'none';
+    if (name === 'history') {
+        document.getElementById('po-list-scroll').scrollTop = poListScroll;
+        renderPoList();
+    }
+    window.scrollTo({top:0});
+}
+function switchTab(name) {
+    if (!canLeavePoForm()) return;
+    if (name === 'new') {
+        resetPoForm(false);
+        document.getElementById('po-form-title').textContent = 'New purchase order';
+    }
+    showPoView(name);
+    history.replaceState({}, '', '/pos');
+}
+function storePoList() {
+    sessionStorage.setItem('procura-po-list', JSON.stringify({fields:Object.fromEntries(['search','f-supplier','f-status','f-ship'].map(id => [id,document.getElementById(id).value])), unpaid:document.getElementById('f-unpaid').checked, invoiceNumber:document.getElementById('show-invoice-number').checked, invoiceDate:document.getElementById('show-invoice-date').checked, selected:selectedPoId, scroll:poListScroll}));
+}
+function restorePoList() {
+    try {
+        const saved = JSON.parse(sessionStorage.getItem('procura-po-list') || 'null');
+        if (!saved) return;
+        for (const [id,value] of Object.entries(saved.fields || {})) document.getElementById(id).value = value;
+        document.getElementById('f-unpaid').checked = !!saved.unpaid;
+        document.getElementById('show-invoice-number').checked = !!saved.invoiceNumber;
+        document.getElementById('show-invoice-date').checked = !!saved.invoiceDate;
+        selectedPoId = saved.selected || ''; poListScroll = saved.scroll || 0;
+    } catch {} // Invalid or expired saved UI state falls back to the default list.
+}
 async function loadPos() {
+    const request = ++poRequest;
     const params = new URLSearchParams();
     const add = (k,v) => {if(v) params.set(k,v)};
     add('search', document.getElementById('search').value);
@@ -303,22 +361,32 @@ async function loadPos() {
     add('status', document.getElementById('f-status').value);
     add('ship_status', document.getElementById('f-ship').value);
     if (document.getElementById('f-unpaid').checked) params.set('unpaid','1');
-    allPos = await (await fetch('/api/pos?'+params)).json();
-    document.getElementById('po-body').innerHTML = (allPos||[]).map(p => {
-        const effBalance = (p.total||0) - (p.paid||0) - (p.balance||0);
-        return `<tr style="cursor:pointer" onclick="selectPo('${esc(p.po_id)}')">
-            <td style="font-family:monospace;font-weight:600">${esc(p.po_id)}</td>
-            <td>${esc(p.bill_no)||'-'}</td>
-            <td>${toDMY(p.date)}</td><td>${esc(p.supplier)||'-'}</td>
-            <td class="text-right">RM ${(p.total||0).toFixed(2)}</td>
-            <td class="text-right">RM ${(p.paid||0).toFixed(2)}</td>
-            <td class="text-right">RM ${(p.balance||0).toFixed(2)}</td>
-            <td class="text-right" style="color:${effBalance>0?'var(--amber)':'var(--green)'}">RM ${effBalance.toFixed(2)}</td>
-            <td><span class="badge ${(p.status||'').toLowerCase().includes('paid')?'badge-green':(p.status||'').toLowerCase().includes('pending')?'badge-amber':'badge-blue'}">${esc(p.status)||'-'}</span></td>
-            <td>${esc(p.ship_status)||'-'}</td><td>${esc(p.terms)||'-'}</td>
-            <td>${esc(p.department)||'-'}</td><td>${esc(p.invoice_date)||'-'}</td>
-        </tr>`;
-    }).join('');
+    storePoList();
+    try {
+        const res = await fetch('/api/pos?'+params);
+        const orders = await res.json();
+        if (request !== poRequest) return;
+        if (!res.ok || !Array.isArray(orders)) throw new Error(orders.error || 'Could not load orders');
+        allPos = orders;
+        renderPoList();
+    } catch (err) { if (request === poRequest) toast(err.message, false); }
+}
+function renderPoList() {
+    const invoiceNumber = document.getElementById('show-invoice-number').checked;
+    const invoiceDate = document.getElementById('show-invoice-date').checked;
+    document.getElementById('po-head').innerHTML = '<tr><th>PO ID</th><th>Supplier</th><th>Order date</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th>Approval / payment</th><th>Shipping</th>'+(invoiceNumber?'<th>Invoice number</th>':'')+(invoiceDate?'<th>Invoice date</th>':'')+'</tr>';
+    document.getElementById('po-body').innerHTML = (allPos||[]).map(p => `<tr class="${selectedPoId === p.po_id ? 'selected' : ''}">
+        <td><button data-po-id="${esc(p.po_id)}">${esc(p.po_id)}</button></td>
+        <td>${esc(p.supplier)||'-'}</td><td>${toDMY(p.date)||'-'}</td>
+        <td class="text-right money">RM ${(p.total||0).toFixed(2)}</td>
+        <td class="text-right money">RM ${(p.paid||0).toFixed(2)}</td>
+        <td class="text-right money">RM ${(p.balance||0).toFixed(2)}</td>
+        <td><span class="badge ${(p.status||'').toLowerCase().includes('paid')?'badge-green':(p.status||'').toLowerCase().includes('pending')?'badge-amber':'badge-blue'}">${esc(p.status)||'-'}</span></td>
+        <td>${esc(p.ship_status)||'-'}</td>${invoiceNumber?`<td>${esc(p.bill_no)||'-'}</td>`:''}${invoiceDate?`<td>${toDMY(p.invoice_date)||'-'}</td>`:''}
+    </tr>`).join('') || `<tr><td colspan="${8+Number(invoiceNumber)+Number(invoiceDate)}" class="empty">No orders match these filters. Reset filters to see all orders.</td></tr>`;
+    document.querySelectorAll('#po-body [data-po-id]').forEach(button => button.addEventListener('click', () => selectPo(button.dataset.poId)));
+    document.getElementById('po-count').textContent = `${allPos.length} orders`;
+    storePoList();
 }
 
 function resetPoFilters() {
@@ -327,21 +395,29 @@ function resetPoFilters() {
     loadPos();
 }
 
-async function selectPo(poId) {
-    selectedPoId = poId; loadPos();
-    const po = allPos.find(p => p.po_id === poId);
-    if (!po) return;
-    document.getElementById('po-detail').style.display = 'block';
+async function selectPo(poId, push = true) {
+    if (!canLeavePoForm()) return;
+    if (poView === 'history') poListScroll = document.getElementById('po-list-scroll').scrollTop;
+    let po = allPos.find(p => p.po_id === poId);
+    if (!po) {
+        try {
+            const res = await fetch('/api/pos?search='+encodeURIComponent(poId));
+            if (!res.ok) throw new Error();
+            po = (await res.json()).find(p => p.po_id === poId);
+        } catch { return toast('Could not load this order. Please retry.', false); }
+    }
+    if (!po) return toast('This order could not be found.',false);
+    selectedPoId = poId; selectedPo = po; storePoList();
+    showPoView('detail');
+    if (push) history.pushState({}, '', '/pos?order='+encodeURIComponent(poId));
+    renderPoDetail(po);
+}
+function renderPoDetail(po) {
     document.getElementById('po-detail-title').textContent = po.po_id;
-    document.getElementById('po-detail-grid').innerHTML = `
-        <div class="card"><div class="stat-label">Date</div>${toDMY(po.date)||'-'}</div>
-        <div class="card"><div class="stat-label">Supplier</div>${esc(po.supplier)||'-'}</div>
-        <div class="card"><div class="stat-label">Total</div>RM ${(po.total||0).toFixed(2)}</div>
-        <div class="card"><div class="stat-label">Paid</div>RM ${(po.paid||0).toFixed(2)}</div>
-        <div class="card"><div class="stat-label">Balance</div>RM ${(po.balance||0).toFixed(2)}</div>
-        <div class="card"><div class="stat-label">Eff Balance</div>RM ${((po.total||0)-(po.paid||0)-(po.balance||0)).toFixed(2)}</div>`;
-    document.getElementById('po-edit-status').value = po.status||'';
-    document.getElementById('po-edit-ship').value = po.ship_status||'';
+    const details = [['Order date',toDMY(po.date)||'-'],['Supplier',po.supplier||'-'],['Total','RM '+(po.total||0).toFixed(2)],['Paid','RM '+(po.paid||0).toFixed(2)],['Outstanding balance','RM '+(po.balance||0).toFixed(2)],['Effective balance','RM '+((po.total||0)-(po.paid||0)-(po.balance||0)).toFixed(2)],['Invoice number',po.bill_no||'-'],['Invoice date',toDMY(po.invoice_date)||'-'],['Terms',po.terms||'-'],['Department',po.department||'-'],['Approval / payment',po.status||'-'],['Shipping',po.ship_status||'-']];
+    document.getElementById('po-detail-grid').innerHTML = details.map(([label,value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join('');
+    setPoSelect('po-edit-status', po.status||'');
+    setPoSelect('po-edit-ship', po.ship_status||'');
     document.getElementById('po-edit-invdate').value = toDMY(po.invoice_date);
     document.getElementById('po-detail-items').innerHTML = (po.items||[]).map(it => `
         <tr><td>${esc(it.stock_id)||'-'}</td><td>${esc(it.item_name)||''}</td>
@@ -349,10 +425,16 @@ async function selectPo(poId) {
         <td class="text-right">RM ${(it.cost||0).toFixed(2)}</td>
         <td class="text-right">RM ${(it.total||0).toFixed(2)}</td><td>${esc(it.uom)||'UNIT'}</td>
         <td>${esc(it.supplier_uom)||'-'}</td></tr>`).join('');
-    document.getElementById('po-detail').scrollIntoView({behavior:'smooth'});
 }
-
-function closePoDetail() { document.getElementById('po-detail').style.display = 'none'; }
+function setPoSelect(id, value) {
+    const select = document.getElementById(id);
+    if (value && !Array.from(select.options).some(option => option.value === value)) select.add(new Option(value, value));
+    select.value = value;
+}
+function closePoDetail() {
+    showPoView('history');
+    history.replaceState({}, '', '/pos');
+}
 
 async function updatePoField(field) {
     if (!selectedPoId) return;
@@ -371,6 +453,10 @@ async function updatePoField(field) {
         if (!res.ok || !d.success) return toast('Error: '+(d.error||'Could not update order'), false);
         toast('Updated', true);
         await loadPos();
+        const resRead = await fetch('/api/pos?search='+encodeURIComponent(selectedPoId));
+        if (!resRead.ok) throw new Error();
+        selectedPo = (await resRead.json()).find(p => p.po_id === selectedPoId);
+        if (selectedPo) renderPoDetail(selectedPo);
     } catch (err) {
         toast('Could not confirm the update. Reload the order before retrying.', false);
     }
@@ -378,22 +464,26 @@ async function updatePoField(field) {
 
 function editSelectedPo() {
     if (!selectedPoId) return toast('Select a PO first', false);
-    const po = allPos.find(p => p.po_id === selectedPoId);
+    if (!canLeavePoForm()) return;
+    const po = selectedPo || allPos.find(p => p.po_id === selectedPoId);
     if (!po) return;
-    switchTab('new');
+    showPoView('new');
+    document.getElementById('po-form-title').textContent = 'Edit '+po.po_id;
     document.getElementById('npo-id').value = po.po_id;
     document.getElementById('npo-date').value = toDMY(po.date);
     document.getElementById('npo-supplier').value = po.supplier||'';
     document.getElementById('npo-bill').value = po.bill_no||'';
     document.getElementById('npo-inv-date').value = toDMY(po.invoice_date);
-    document.getElementById('npo-dept').value = po.department||'';
+    setPoSelect('npo-dept', po.department||'');
     document.getElementById('npo-terms').value = po.terms||'';
-    document.getElementById('npo-ship').value = po.ship_status||'Pending';
+    setPoSelect('npo-ship', po.ship_status||'Pending');
     poItems = (po.items||[]).map(it => ({
         stock_id: it.stock_id, item_name: it.item_name, uom: it.uom||'UNIT',
         supplier_uom: it.supplier_uom||'', quantity: it.quantity, cost: it.cost, total: it.total,
     }));
     renderPoItems();
+    poFormBaseline = poFormSnapshot();
+    updatePoEditState();
 }
 
 async function checkPoId() {
@@ -401,6 +491,7 @@ async function checkPoId() {
     if (!id||id.length<5) return;
     const po = allPos.find(p => p.po_id === id);
     if (po) {
+        selectedPoId = id; selectedPo = po;
         editSelectedPo();
     }
 }
@@ -428,6 +519,7 @@ function addPoItem() {
 function removePoItem(i) { poItems.splice(i,1); renderPoItems(); }
 
 function renderPoItems() {
+    updatePoEditState();
     const tbody = document.getElementById('npo-items');
     if (!poItems.length) { tbody.innerHTML=''; document.getElementById('npo-empty').style.display='block';
         document.getElementById('npo-total').textContent='RM 0.00'; return; }
@@ -442,7 +534,8 @@ function renderPoItems() {
         <td><button class="btn-secondary btn-sm" onclick="removePoItem(${i})" style="color:var(--red)">x</button></td></tr>`).join('');
 }
 
-function resetPoForm() {
+function resetPoForm(ask = true) {
+    if (ask && !canLeavePoForm()) return;
     document.getElementById('npo-id').value='';
     document.getElementById('npo-date').value=todayDMY();
     document.getElementById('npo-supplier').value='';
@@ -452,6 +545,7 @@ function resetPoForm() {
     document.getElementById('npo-terms').value='';
     document.getElementById('npo-ship').value='Pending';
     poItems=[]; renderPoItems();
+    poFormBaseline = poFormSnapshot(); updatePoEditState();
 }
 
 async function savePo() {
@@ -468,21 +562,30 @@ async function savePo() {
         items: poItems.map(it => ({stock_id:it.stock_id,item_name:it.item_name,name:it.item_name,
             quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom,supplier_uom:it.supplier_uom})),
     };
+    const button = document.getElementById('po-save');
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
     const res = await fetch('/api/pos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d = await res.json();
-    if(d.success){ toast('PO '+d.po_id+' saved!',true); document.getElementById('npo-id').value=d.po_id; loadPos(); }
+    if(res.ok && d.success){ toast('PO '+d.po_id+' saved!',true); document.getElementById('npo-id').value=d.po_id; poFormBaseline = poFormSnapshot(); updatePoEditState(); await loadPos(); selectedPoId=d.po_id; selectedPo=allPos.find(p => p.po_id === d.po_id)||null; }
     else toast('Error: '+d.error,false);
+    } catch { toast('Could not confirm the save. Reload the order before retrying.',false); }
+    finally { button.disabled = false; }
 }
 
 function exportPoCSV() {
-    let csv='PO ID,Date,Supplier,Total,Paid,Balance,Status,Ship,Terms,Department,Invoice Date\n';
-    allPos.forEach(p=>csv+=`${p.po_id},${p.bill_no||''},${toDMY(p.date)},${p.supplier||''},${p.total||0},${p.paid||0},${p.balance||0},${p.status||''},${p.ship_status||''},${p.terms||''},${p.department||''},${toDMY(p.invoice_date)}\n`);
-    const b=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a');
-    a.href=URL.createObjectURL(b); a.download='pos.csv'; a.click();
+    const headers=['PO ID','Invoice number','Order date','Supplier','Total','Paid','Outstanding balance','Effective balance','Approval / payment','Shipping','Terms','Department','Invoice date'];
+    const quote = value => '"'+String(value??'').replaceAll('"','""')+'"';
+    const rows=allPos.map(p => [p.po_id,p.bill_no,toDMY(p.date),p.supplier,p.total||0,p.paid||0,p.balance||0,(p.total||0)-(p.paid||0)-(p.balance||0),p.status,p.ship_status,p.terms,p.department,toDMY(p.invoice_date)]);
+    const csv=[headers,...rows].map(row => row.map(quote).join(',')).join('\r\n');
+    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+    const a=document.createElement('a'); a.href=url; a.download='pos.csv'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 function toast(m,ok){const t=document.getElementById('toast');t.textContent=m;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
-function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function esc(s){if(s==null)return'';const d=document.createElement('div');d.textContent=String(s);return d.innerHTML.replaceAll('\"','&quot;').replaceAll("'",'&#39;')}
 function previewPO(){if(!selectedPoId)return;window.open('/pos/'+encodeURIComponent(selectedPoId)+'/preview','_blank')}
 function downloadPO(){if(!selectedPoId)return;window.location='/pos/'+encodeURIComponent(selectedPoId)+'/pdf'}
 initPo();

@@ -8,43 +8,56 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <div class="app-shell">
-    <button class="mobile-menu" onclick="toggleNav()" aria-label="Open navigation"><span class="material-icons">menu</span></button>
+    <button class="mobile-menu" onclick="toggleNav()" aria-controls="sidebar" aria-expanded="false" aria-label="Open navigation"><span class="material-icons">menu</span></button>
     <aside class="sidebar" id="sidebar">
         <div class="brand-wrap"><a href="/" class="brand"><span class="brand-mark">P</span><span>Procura</span></a><button class="nav-close" onclick="toggleNav()" aria-label="Close navigation">×</button></div>
-        <div class="nav-caption">Workspace</div>
-        <nav class="side-nav">
-            <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}"><span class="material-icons">space_dashboard</span>Overview</a>
-            <a href="/items" class="{{if eq .Active "inventory"}}active{{end}}"><span class="material-icons">inventory_2</span>Inventory</a>
-            <a href="/suppliers" class="{{if eq .Active "suppliers"}}active{{end}}"><span class="material-icons">local_shipping</span>Suppliers</a>
-            <a href="/pos" class="{{if eq .Active "pos"}}active{{end}}"><span class="material-icons">receipt_long</span>Purchase orders</a>
-            <a href="/planning" class="{{if eq .Active "planning"}}active{{end}}"><span class="material-icons">event_note</span>Planning</a>
-            <a href="/rfq" class="{{if eq .Active "rfq"}}active{{end}}"><span class="material-icons">request_quote</span>RFQs</a>
-            <a href="/movement" class="{{if eq .Active "movement"}}active{{end}}"><span class="material-icons">swap_vert</span>Stock movement</a>
-            <div class="nav-caption">Insights</div>
-            <a href="/reports" class="{{if eq .Active "reports"}}active{{end}}"><span class="material-icons">summarize</span>Reports</a>
-            <a href="/analytics" class="{{if eq .Active "analytics"}}active{{end}}"><span class="material-icons">query_stats</span>Analytics</a>
-            <a href="/scorecard" class="{{if eq .Active "scorecard"}}active{{end}}"><span class="material-icons">grade</span>Scorecard</a>
-            <a href="/tasks" class="{{if eq .Active "tasks"}}active{{end}}"><span class="material-icons">task_alt</span>Tasks</a>
-            <a href="/workflow" class="{{if eq .Active "workflow"}}active{{end}}"><span class="material-icons">fact_check</span>Workflow</a>
-            <div class="nav-caption">Data &amp; setup</div>
-            <a href="/catalogue" class="{{if eq .Active "catalogue"}}active{{end}}"><span class="material-icons">menu_book</span>Catalogue</a>
-            <a href="/uom" class="{{if eq .Active "uom"}}active{{end}}"><span class="material-icons">straighten</span>UOM mappings</a>
-            <a href="/import" class="{{if eq .Active "import"}}active{{end}}"><span class="material-icons">upload_file</span>Import data</a>
-            <a href="/validation" class="{{if eq .Active "validation"}}active{{end}}"><span class="material-icons">verified</span>Validation</a>
-            {{if eq .User.role "ADMIN"}}<a href="/users" class="{{if eq .Active "users"}}active{{end}}"><span class="material-icons">group</span>Users</a>{{end}}
+        <nav class="side-nav" aria-label="Main navigation">
+            <div class="primary-nav">
+                <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}" {{if eq .Active "dashboard"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">space_dashboard</span>Overview</a>
+                <a href="/pos" class="{{if eq .Active "pos"}}active{{end}}" {{if eq .Active "pos"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">receipt_long</span>Purchase orders</a>
+                <a href="/items" class="{{if eq .Active "inventory"}}active{{end}}" {{if eq .Active "inventory"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">inventory_2</span>Inventory</a>
+                <a href="/planning" class="{{if eq .Active "planning"}}active{{end}}" {{if eq .Active "planning"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">event_note</span>Planning</a>
+                <a href="/rfq" class="{{if eq .Active "rfq"}}active{{end}}" {{if eq .Active "rfq"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">request_quote</span>RFQs</a>
+            </div>
+            <details class="nav-group" {{if or (eq .Active "suppliers") (eq .Active "catalogue") (eq .Active "workflow") (eq .Active "tasks")}}open{{end}}>
+                <summary>Purchasing support</summary>
+                <a href="/suppliers" class="{{if eq .Active "suppliers"}}active{{end}}" {{if eq .Active "suppliers"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">local_shipping</span>Suppliers</a>
+                <a href="/catalogue" class="{{if eq .Active "catalogue"}}active{{end}}" {{if eq .Active "catalogue"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">menu_book</span>Catalogue</a>
+                <a href="/workflow" class="{{if eq .Active "workflow"}}active{{end}}" {{if eq .Active "workflow"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">fact_check</span>Approvals & payments</a>
+                <a href="/tasks" class="{{if eq .Active "tasks"}}active{{end}}" {{if eq .Active "tasks"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">task_alt</span>Tasks</a>
+            </details>
+            <details class="nav-group" {{if or (eq .Active "movement")}}open{{end}}>
+                <summary>Stock</summary>
+                <a href="/movement" class="{{if eq .Active "movement"}}active{{end}}" {{if eq .Active "movement"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">swap_vert</span>Stock movement</a>
+            </details>
+            <details class="nav-group" {{if or (eq .Active "reports") (eq .Active "analytics") (eq .Active "scorecard")}}open{{end}}>
+                <summary>Insights</summary>
+                <a href="/reports" class="{{if eq .Active "reports"}}active{{end}}" {{if eq .Active "reports"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">summarize</span>Reports</a>
+                <a href="/analytics" class="{{if eq .Active "analytics"}}active{{end}}" {{if eq .Active "analytics"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">query_stats</span>Analytics</a>
+                <a href="/scorecard" class="{{if eq .Active "scorecard"}}active{{end}}" {{if eq .Active "scorecard"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">grade</span>Supplier scorecard</a>
+            </details>
+            <details class="nav-group" {{if or (eq .Active "uom") (eq .Active "import") (eq .Active "validation") (eq .Active "users")}}open{{end}}>
+                <summary>Data & setup</summary>
+                <a href="/uom" class="{{if eq .Active "uom"}}active{{end}}" {{if eq .Active "uom"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">straighten</span>UOM mappings</a>
+                <a href="/import" class="{{if eq .Active "import"}}active{{end}}" {{if eq .Active "import"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">upload_file</span>Import data</a>
+                <a href="/validation" class="{{if eq .Active "validation"}}active{{end}}" {{if eq .Active "validation"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">verified</span>Validation</a>
+                {{if eq .User.role "ADMIN"}}<a href="/users" class="{{if eq .Active "users"}}active{{end}}" {{if eq .Active "users"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">group</span>Users</a>{{end}}
+            </details>
         </nav>
-        <div class="sidebar-footer"><div class="user-chip"><span class="avatar">{{slice .User.name 0 1}}</span><span class="user-name">{{.User.name}}<small>Signed in</small></span></div><a href="/change-pin" title="Change PIN"><span class="material-icons">settings</span></a><a href="#" onclick="logout()" title="Logout"><span class="material-icons">logout</span></a></div>
+        <div class="sidebar-footer"><div class="user-chip"><span class="avatar">{{if .User.name}}{{slice .User.name 0 1}}{{else}}P{{end}}</span><span class="user-name">{{.User.name}}<small>Signed in</small></span></div><a href="/change-pin" title="Change PIN" aria-label="Change PIN"><span class="material-icons">settings</span></a><a href="#" onclick="logout()" title="Logout" aria-label="Logout"><span class="material-icons">logout</span></a></div>
     </aside>
     <div class="main-shell">
     {{if eq .User.email "demo@procura.app"}}<div style="background:#17324a;color:#bfe7ff;padding:8px 18px;text-align:center;font-size:12px">Demo workspace — sample data only</div>{{end}}
-    <header class="topbar"><div><span class="eyebrow">Procurement workspace</span><h1>{{if eq .Active "dashboard"}}Overview{{else if eq .Active "inventory"}}Inventory{{else if eq .Active "suppliers"}}Suppliers{{else if eq .Active "pos"}}Purchase orders{{else if eq .Active "planning"}}Planning{{else if eq .Active "rfq"}}RFQs{{else if eq .Active "movement"}}Stock movement{{else if eq .Active "reports"}}Reports{{else if eq .Active "analytics"}}Analytics{{else if eq .Active "scorecard"}}Supplier scorecard{{else if eq .Active "tasks"}}Tasks{{else if eq .Active "workflow"}}Workflow{{else if eq .Active "catalogue"}}Catalogue{{else if eq .Active "uom"}}UOM mappings{{else if eq .Active "import"}}Import data{{else if eq .Active "validation"}}Validation{{else if eq .Active "users"}}Users{{else}}Procura{{end}}</h1></div><div class="topbar-status"><span class="status-dot"></span>Workspace online</div></header>
-    <main>
+    <header class="topbar"><div><h1>{{if eq .Active "dashboard"}}Overview{{else if eq .Active "inventory"}}Inventory{{else if eq .Active "suppliers"}}Suppliers{{else if eq .Active "pos"}}Purchase orders{{else if eq .Active "planning"}}Planning{{else if eq .Active "rfq"}}RFQs{{else if eq .Active "movement"}}Stock movement{{else if eq .Active "reports"}}Reports{{else if eq .Active "analytics"}}Analytics{{else if eq .Active "scorecard"}}Supplier scorecard{{else if eq .Active "tasks"}}Tasks{{else if eq .Active "workflow"}}Workflow{{else if eq .Active "catalogue"}}Catalogue{{else if eq .Active "uom"}}UOM mappings{{else if eq .Active "import"}}Import data{{else if eq .Active "validation"}}Validation{{else if eq .Active "users"}}Users{{else}}Procura{{end}}</h1></div><div class="topbar-status"><span class="status-dot"></span>Workspace online</div></header>
+    <main id="main-content" tabindex="-1">
         {{if eq .ContentBlock "content_dashboard"}}{{template "content_dashboard" .}}
         {{else if eq .ContentBlock "content_inventory"}}{{template "content_inventory" .}}
         {{else if eq .ContentBlock "content_suppliers"}}{{template "content_suppliers" .}}
         {{else if eq .ContentBlock "content_planning"}}{{template "content_planning" .}}
         {{else if eq .ContentBlock "content_pos"}}{{template "content_pos" .}}
+        {{else if eq .ContentBlock "content_unlinked"}}{{template "content_unlinked" .}}
         {{else if eq .ContentBlock "content_rfq"}}{{template "content_rfq" .}}
         {{else if eq .ContentBlock "content_movement"}}{{template "content_movement" .}}
         {{else if eq .ContentBlock "content_reports"}}{{template "content_reports" .}}
@@ -61,6 +74,23 @@
     </main>
     </div></div>
 <script>
+// Give wide operational tables their own scroll surface on every page.
+document.querySelectorAll('main table').forEach(table => {
+    if (table.closest('.table-scroll')) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-scroll';
+    table.before(wrapper); wrapper.append(table);
+});
+document.querySelectorAll('main input, main select, main textarea').forEach(input => {
+    if (input.id) {
+        const label = input.closest('.form-group')?.querySelector('label');
+        if (label && !label.contains(input)) label.htmlFor = input.id;
+    }
+    if (!input.labels?.length && !input.hasAttribute('aria-label') && input.type !== 'hidden') {
+        const text = input.placeholder || input.querySelector('option')?.textContent || input.title;
+        if (text) input.setAttribute('aria-label', text);
+    }
+});
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 const HEARTBEAT_MS = 5 * 60 * 1000;
 let idleTimer;
@@ -83,7 +113,13 @@ setInterval(() => {
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') resetIdleTimer();
 });
-function toggleNav() { document.body.classList.toggle('nav-open'); }
+function toggleNav() {
+    const open = document.body.classList.toggle('nav-open');
+    document.querySelector('.mobile-menu').setAttribute('aria-expanded', String(open));
+}
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && document.body.classList.contains('nav-open')) toggleNav();
+});
 async function logout() {
     await fetch('/api/logout', {method:'POST'});
     window.location.href = '/login';
