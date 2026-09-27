@@ -1,6 +1,12 @@
 {{template "base.html" .}}
 {{define "content_dashboard"}}
-<div class="grid-3 section">
+<section class="priority-actions section" aria-label="Daily work">
+    <a href="/pos"><strong>Purchase orders</strong><span>Review, create and track orders</span><span aria-hidden="true">→</span></a>
+    <a href="/items"><strong>Inventory</strong><span>Check stock and item details</span><span aria-hidden="true">→</span></a>
+    <a href="/planning"><strong>Planning</strong><span>Review what to buy next</span><span aria-hidden="true">→</span></a>
+    <a href="/rfq"><strong>RFQs</strong><span>Prepare and manage quotations</span><span aria-hidden="true">→</span></a>
+</section>
+<div class="grid-3 section overview-metrics">
     <div class="card">
         <div class="stat-label">Total Items</div>
         <div class="stat">{{.Stats.Inventory.TotalItems}}</div>

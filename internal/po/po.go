@@ -210,12 +210,17 @@ func (s *Service) Save(p PO) (string, error) {
 	defer tx.Rollback()
 
 	_, err = tx.Exec(`
-		INSERT OR REPLACE INTO purchase_orders
+		INSERT INTO purchase_orders
 			(po_id, date, supplier, bill_no, total, status, ship_status, department, terms, invoice_date, raw_po_json)
-		VALUES (?, ?, ?, ?, ?, COALESCE(?, 'Pending Approval'), COALESCE(?, 'Pending'),
+		VALUES (?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), 'Pending Approval'), COALESCE(NULLIF(?, ''), 'Pending'),
 		        ?, ?, ?, ?)
+		ON CONFLICT(po_id) DO UPDATE SET
+			date=excluded.date, supplier=excluded.supplier, bill_no=excluded.bill_no,
+			total=excluded.total, status=COALESCE(NULLIF(?, ''), purchase_orders.status),
+			ship_status=excluded.ship_status, department=excluded.department,
+			terms=excluded.terms, invoice_date=excluded.invoice_date, raw_po_json=excluded.raw_po_json
 	`, p.POID, p.Date, p.Supplier, p.BillNo, p.Total, p.Status, p.ShipStatus,
-		p.Department, p.Terms, p.InvoiceDate, string(itemsJSON))
+		p.Department, p.Terms, p.InvoiceDate, string(itemsJSON), p.Status)
 	if err != nil {
 		return "", err
 	}

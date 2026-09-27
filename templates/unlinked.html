@@ -1,5 +1,6 @@
 {{template "base.html" .}}
 {{define "content_unlinked"}}
+<a class="link" href="/pos">Back to orders</a>
 <div class="top-bar">
     <h2>Unlinked PO Lines</h2>
     <label style="display:flex;align-items:center;gap:6px;color:var(--muted)">
@@ -25,7 +26,7 @@ async function load() {
     }
     const all = document.getElementById('show-all').checked ? '?all=1' : '';
     const res = await fetch('/api/pos/unlinked' + all);
-    const lines = await res.json();
+    const lines = (await res.json()) || [];
     document.getElementById('body').innerHTML = lines.length ? lines.map(l => `
         <tr>
             <td>${esc(l.poId)}</td><td>${(l.date||'').slice(0,10)}</td><td>${esc(l.supplier||'')}</td>
