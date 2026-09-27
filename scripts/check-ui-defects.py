@@ -61,6 +61,14 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             check('failed PO update returns 500',lambda:expect(request('/api/pos/PO-CHECK/status',{'status':'Void'})[0],500))
             check('malformed status returns 400',lambda:expect(request('/api/pos/PO-CHECK/status',{'status':1})[0],400))
             check('unknown status rejected',lambda:expect(request('/api/pos/PO-CHECK/status',{'status':'nonsense'})[0],400))
+            def po_header_validation():
+                before=db.execute('SELECT COUNT(*) FROM purchase_orders').fetchone()[0]
+                status,_,data=request('/api/pos',{'date':'2026-09-27','supplier':'Supplier'})
+                expect(status,400);assert 'department' in json.loads(data)['error']
+                status,_,data=request('/api/pos','{')
+                expect(status,400);expect(json.loads(data)['error'],'invalid PO request body')
+                expect(db.execute('SELECT COUNT(*) FROM purchase_orders').fetchone()[0],before)
+            check('PO header and malformed-body validation reject without writing',po_header_validation)
             score={'po_id':'PO-FAIL','supplier_name':'Supplier','accuracy':4,'speed':3,'quality':5,'comments':'Regression note'}
             check('failed score save returns 500',lambda:expect(request('/api/scorecard',score)[0],500))
             def save_score():

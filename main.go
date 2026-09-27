@@ -472,7 +472,14 @@ func main() {
 	}))
 	mux.HandleFunc("POST /api/pos", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body po.PO
-		json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid PO request body"})
+			return
+		}
+		if err := po.ValidateRequired(body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
 		id, err := poSvc.Save(body)
 		if err != nil {
 			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})

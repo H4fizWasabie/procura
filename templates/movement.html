@@ -24,7 +24,7 @@
 
 <div id="upload-preview" class="card" style="display:none;margin-bottom:12px"></div>
 
-<div class="card" style="padding:0;overflow-x:auto;max-height:60vh;overflow-y:auto">
+<div class="card table-scroll movement-list" id="movement-list" style="padding:0">
     <table>
         <thead><tr id="movement-header"></tr></thead>
         <tbody id="movement-body"></tbody>
@@ -39,12 +39,26 @@
 
 <div id="toast" class="toast" style="display:none"></div>
 
+<style>
+.movement-list{overflow:auto;max-height:62vh}
+.movement-list th{position:sticky;top:0;z-index:1}
+</style>
+
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <script>
 let movData=[], movPage=1, movPageSize=100, selectedYear=0, selectedMonth=0;
 const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+function sizeMovementList() {
+    const list = document.getElementById('movement-list');
+    const bottomSpace = parseFloat(getComputedStyle(document.querySelector('main')).paddingBottom);
+    list.style.maxHeight = Math.max(160, innerHeight - list.getBoundingClientRect().top - scrollY - bottomSpace - 56) + 'px';
+}
+
 async function initMovement() {
+    window.addEventListener('resize', sizeMovementList);
+    const movementLayoutObserver = new ResizeObserver(sizeMovementList);
+    ['.top-bar', '.search-bar', '#upload-preview'].forEach(selector => movementLayoutObserver.observe(document.querySelector(selector)));
     // Populate years
     const yrRes = await fetch('/api/movement/years');
     const years = await yrRes.json();
@@ -55,6 +69,7 @@ async function initMovement() {
     document.getElementById('m-month').innerHTML = '<option value="">All Months</option>' +
         months.map((m,i) => `<option value="${i+1}">${m}</option>`).join('');
     loadMovements();
+    sizeMovementList();
 }
 
 async function loadMovements() {

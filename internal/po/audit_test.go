@@ -109,7 +109,7 @@ func TestSavePreservesPaymentAndWorkflowState(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Service{DB: db}
-	p := PO{POID: "PO-EDIT", Supplier: "Supplier", BillNo: "EDITED", ShipStatus: "Received",
+	p := PO{POID: "PO-EDIT", Date: "2026-09-27", Department: "Pharmacy", Supplier: "Supplier", BillNo: "EDITED", ShipStatus: "Received",
 		Items: []Item{{StockID: "I001", Name: "Item", Qty: 2, Cost: 18.5}}}
 	if _, err := s.Save(p); err != nil {
 		t.Fatal(err)
@@ -135,5 +135,42 @@ func TestSavePreservesPaymentAndWorkflowState(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT status FROM purchase_orders WHERE po_id='PO-NEW'`).Scan(&status); err != nil || status != "Pending Approval" {
 		t.Fatalf("new order status: %q, %v", status, err)
+	}
+}
+
+func TestSaveRequiresHeaderWithoutWritingAndAllowsOptionalBlanks(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Service{DB: db}
+
+	if _, err := s.Save(PO{Supplier: "Supplier"}); err == nil {
+		t.Fatal("Save() accepted a PO missing required header fields")
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM purchase_orders").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("rejected save wrote %d purchase orders", count)
+	}
+	if _, err := s.Save(PO{Date: "2026-99-99", Department: "Pharmacy", Supplier: "Supplier"}); err == nil {
+		t.Fatal("Save() accepted an invalid date")
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM purchase_orders").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("invalid date save wrote a purchase order: count=%d err=%v", count, err)
+	}
+
+	if _, err := s.Save(PO{Date: "2026-09-27", Department: "Pharmacy", Supplier: "Supplier"}); err != nil {
+		t.Fatalf("Save() rejected blank optional fields: %v", err)
+	}
+	var bill, invoiceDate, terms string
+	if err := db.QueryRow("SELECT bill_no, invoice_date, terms FROM purchase_orders").Scan(&bill, &invoiceDate, &terms); err != nil {
+		t.Fatal(err)
+	}
+	if bill != "" || invoiceDate != "" || terms != "" {
+		t.Fatalf("optional fields changed: bill=%q invoice_date=%q terms=%q", bill, invoiceDate, terms)
 	}
 }

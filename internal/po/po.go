@@ -178,6 +178,9 @@ func (s *Service) GenerateID() string {
 
 // Save creates or updates a PO with its items.
 func (s *Service) Save(p PO) (string, error) {
+	if err := ValidateRequired(p); err != nil {
+		return "", err
+	}
 	isNew := p.POID == ""
 	if isNew {
 		p.POID = s.GenerateID()
@@ -243,6 +246,27 @@ func (s *Service) Save(p PO) (string, error) {
 		return "", err
 	}
 	return p.POID, nil
+}
+
+// ValidateRequired checks the PO header fields users must provide. PO IDs and
+// shipping status are generated/defaulted; invoice references and terms are optional.
+func ValidateRequired(p PO) error {
+	var missing []string
+	if strings.TrimSpace(p.Date) == "" {
+		missing = append(missing, "date")
+	} else if _, err := time.Parse("2006-01-02", p.Date); err != nil {
+		return fmt.Errorf("date must be a valid date in YYYY-MM-DD format")
+	}
+	if strings.TrimSpace(p.Department) == "" {
+		missing = append(missing, "department")
+	}
+	if strings.TrimSpace(p.Supplier) == "" {
+		missing = append(missing, "supplier")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("required PO fields missing: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func (s *Service) UpdateInvoiceDate(poID, invoiceDate string) error {

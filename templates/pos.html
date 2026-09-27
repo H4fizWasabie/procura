@@ -82,10 +82,10 @@
         <h3>PO Header</h3>
         <div class="po-edit-fields">
             <div class="form-group"><label>PO ID</label><input id="npo-id" style="font-family:monospace;font-weight:700;color:var(--accent)" placeholder="Auto-generated" onchange="checkPoId()"></div>
-            <div class="form-group"><label>Date</label><input type="text" id="npo-date" placeholder="DD/MM/YYYY"></div>
-            <div class="form-group"><label>Department</label><select id="npo-dept"><option value="">-- Select --</option>
+            <div class="form-group"><label>Date</label><input type="text" id="npo-date" placeholder="DD/MM/YYYY" required></div>
+            <div class="form-group"><label>Department</label><select id="npo-dept" required><option value="">-- Select --</option>
                 <option>Pharmacy</option><option>Surgical</option><option>Diagnostic</option><option>Lab</option><option>Medical/Ward</option></select></div>
-            <div class="form-group"><label>Supplier</label><input id="npo-supplier" list="po-sup-list" placeholder="Search supplier..."><datalist id="po-sup-list"></datalist></div>
+            <div class="form-group"><label>Supplier</label><input id="npo-supplier" list="po-sup-list" placeholder="Search supplier..." required><datalist id="po-sup-list"></datalist></div>
             <div class="form-group"><label>Bill #</label><input id="npo-bill" placeholder="Optional invoice ref"></div>
             <div class="form-group"><label>Invoice Date</label><input type="text" id="npo-inv-date" placeholder="DD/MM/YYYY"></div>
             <div class="form-group"><label>Terms</label><input id="npo-terms" readonly placeholder="Auto from supplier"></div>
@@ -132,6 +132,8 @@
 .btn-sm{padding:4px 10px;font-size:11px;border-radius:4px}
 .btn-secondary{background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
 .btn-secondary:hover{background:var(--border)}
+.po-list-table{max-height:62vh}
+.po-list-table th{position:sticky;top:0;z-index:1}
 .po-item-picker{position:relative;flex:1;min-width:200px}
 .po-item-picker>input{width:100%}
 .po-item-suggestions{position:absolute;top:calc(100% + 4px);left:0;width:min(760px,calc(100vw - 48px));max-height:320px;overflow-y:auto;z-index:30;background:var(--surface-raised);border:1px solid var(--border);border-radius:7px;box-shadow:0 12px 24px rgba(0,0,0,.28)}
@@ -147,12 +149,24 @@
 let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='', poSuggestionItems=[], poSuggestionIndex=-1;
 let poView='history', selectedPo=null, poFormBaseline='', poListScroll=0, poRequest=0;
 
+function sizePoList() {
+    if (poView !== 'history') return;
+    const list = document.getElementById('po-list-scroll');
+    const bottomSpace = parseFloat(getComputedStyle(document.querySelector('main')).paddingBottom);
+    list.style.maxHeight = Math.max(160, innerHeight - list.getBoundingClientRect().top - scrollY - bottomSpace) + 'px';
+}
+
+
 // DD/MM/YYYY helpers
 function toDMY(iso){if(!iso)return'';const s=iso.slice(0,10);if(s.indexOf('/')!==-1)return s;const d=s.split('-');if(d.length!==3)return s;return d[2]+'/'+d[1]+'/'+d[0]}
 function fromDMY(dmy){if(!dmy)return'';const p=dmy.split('/');if(p.length!==3)return dmy;return p[2]+'-'+p[1]+'-'+p[0]}
 function todayDMY(){const d=new Date();return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear()}
 
 async function initPo() {
+    window.addEventListener('resize', sizePoList);
+    const poLayoutObserver = new ResizeObserver(sizePoList);
+    ['#po-list-actions', '#tab-history .search-bar', '.po-column-options'].forEach(selector => poLayoutObserver.observe(document.querySelector(selector)));
+
     document.getElementById('npo-date').value = todayDMY();
     const [itemRes,supRes,uomRes] = await Promise.all([
         fetch('/api/inventory?page=1&pageSize=5000'),
@@ -326,6 +340,7 @@ function showPoView(name) {
     if (name === 'history') {
         document.getElementById('po-list-scroll').scrollTop = poListScroll;
         renderPoList();
+        sizePoList();
     }
     window.scrollTo({top:0});
 }
@@ -549,8 +564,14 @@ function resetPoForm(ask = true) {
 }
 
 async function savePo() {
+    const required = [['npo-date','Date'],['npo-dept','Department'],['npo-supplier','Supplier']];
+    const missing = required.filter(([id]) => !document.getElementById(id).value.trim());
+    if (missing.length) {
+        toast('Required: '+missing.map(([,label]) => label).join(', '), false);
+        document.getElementById(missing[0][0]).focus();
+        return;
+    }
     const supplier = document.getElementById('npo-supplier').value.trim();
-    if(!supplier) return toast('Supplier required',false);
     if(!poItems.length) return toast('Add at least one item',false);
     const body = { po_id: document.getElementById('npo-id').value,
         date: fromDMY(document.getElementById('npo-date').value), supplier: supplier,

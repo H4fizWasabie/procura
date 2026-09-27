@@ -16,7 +16,7 @@
                 <div class="form-group"><label>RFQ ID</label><input id="c-id" disabled></div>
                 <div class="form-group"><label>Date</label><input type="text" id="c-date" placeholder="DD/MM/YYYY"></div>
             </div>
-            <div class="form-group"><label>Supplier</label><select id="c-supplier"><option value="">- Select -</option></select></div>
+            <div class="form-group rfq-supplier-picker"><label for="c-supplier">Supplier</label><input id="c-supplier" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="rfq-supplier-options" aria-expanded="false" placeholder="Search suppliers..." oninput="searchSuppliers()" onkeydown="supplierKeydown(event)"><div id="rfq-supplier-options" class="rfq-supplier-options" role="listbox" hidden></div><small id="rfq-supplier-status" aria-live="polite"></small></div>
             <div class="form-group"><label>Notes</label><textarea id="c-notes" rows="2" placeholder="Additional notes..."></textarea></div>
             <h4 style="margin:12px 0 8px">Items</h4>
             <table id="c-items"><thead><tr><th>Stock ID</th><th>Name</th><th>Qty</th><th>UOM</th><th></th></tr></thead><tbody></tbody></table>
@@ -30,16 +30,69 @@
     </div>
 </div>
 
+<style>
+.rfq-supplier-picker{position:relative}.rfq-supplier-picker input{width:100%}.rfq-supplier-options{position:absolute;top:100%;left:0;right:0;max-height:240px;overflow:auto;z-index:30;background:var(--surface-raised);border:1px solid var(--border);border-radius:7px;box-shadow:0 12px 24px rgba(0,0,0,.28)}.rfq-supplier-option{padding:8px 10px;cursor:pointer}.rfq-supplier-option[aria-selected="true"],.rfq-supplier-option:hover{background:var(--accent-soft);color:var(--text)}#rfq-supplier-status{display:block;color:var(--muted);margin-top:4px}
+</style>
 <script>
 let suppliers = [], rfqData = [], invItems = [];
+let selectedSupplier = '', supplierMatches = [], supplierActive = -1;
+const supplierInput = () => document.getElementById('c-supplier');
+function supplierScore(name, query) {
+    const value = name.toLocaleLowerCase(), term = query.toLocaleLowerCase();
+    const at = value.indexOf(term);
+    if (at >= 0) return at / 100;
+    let i = 0;
+    for (const char of value) if (char === term[i]) i++;
+    if (i === term.length) return 1 + value.length / 100;
+    if (term.length < 3) return Infinity;
+    let prev = Array.from({length: term.length + 1}, (_, n) => n);
+    for (let row = 1; row <= value.length; row++) {
+        const next = [row];
+        for (let col = 1; col <= term.length; col++) next[col] = Math.min(next[col - 1] + 1, prev[col] + 1, prev[col - 1] + (value[row - 1] === term[col - 1] ? 0 : 1));
+        prev = next;
+    }
+    return prev[term.length] <= 2 ? 2 + prev[term.length] + value.length / 100 : Infinity;
+}
+function setSupplier(name) {
+    selectedSupplier = name;
+    supplierInput().value = name;
+    hideSupplierOptions();
+    document.getElementById('rfq-supplier-status').textContent = '';
+}
+function hideSupplierOptions() {
+    document.getElementById('rfq-supplier-options').hidden = true;
+    supplierInput().setAttribute('aria-expanded', 'false');
+    supplierInput().removeAttribute('aria-activedescendant');
+    supplierActive = -1;
+}
+function searchSuppliers() {
+    const query = supplierInput().value.trim();
+    selectedSupplier = '';
+    const list = document.getElementById('rfq-supplier-options');
+    supplierMatches = query ? suppliers.map(s => s.supplier_name).map(name => ({name, score: supplierScore(name, query)})).filter(x => Number.isFinite(x.score)).sort((a,b) => a.score-b.score || a.name.localeCompare(b.name)).slice(0, 8).map(x => x.name) : [];
+    supplierActive = -1;
+    list.innerHTML = supplierMatches.map((name, i) => `<div id="rfq-supplier-option-${i}" class="rfq-supplier-option" role="option" aria-selected="false" onmousedown="event.preventDefault();setSupplier(suppliers.find(s=>s.supplier_name===this.textContent).supplier_name)">${esc(name)}</div>`).join('');
+    list.hidden = !supplierMatches.length;
+    supplierInput().setAttribute('aria-expanded', String(supplierMatches.length > 0));
+    document.getElementById('rfq-supplier-status').textContent = query && !supplierMatches.length ? 'No matching suppliers' : '';
+}
+function supplierKeydown(event) {
+    if (event.key === 'Escape') { hideSupplierOptions(); return; }
+    if (!['ArrowDown','ArrowUp','Enter'].includes(event.key) || !supplierMatches.length) return;
+    event.preventDefault();
+    if (event.key === 'Enter') { if (supplierActive >= 0) setSupplier(supplierMatches[supplierActive]); return; }
+    supplierActive = (supplierActive + (event.key === 'ArrowDown' ? 1 : -1) + supplierMatches.length) % supplierMatches.length;
+    document.querySelectorAll('#rfq-supplier-options [role=option]').forEach((option, i) => {
+        option.setAttribute('aria-selected', String(i === supplierActive));
+        if (i === supplierActive) { option.scrollIntoView({block:'nearest'}); supplierInput().setAttribute('aria-activedescendant', option.id); }
+    });
+}
 function toDMY(iso){if(!iso)return'';const s=iso.slice(0,10);if(s.indexOf('/')!==-1)return s;const d=s.split('-');if(d.length!==3)return s;return d[2]+'/'+d[1]+'/'+d[0]}
 function fromDMY(dmy){if(!dmy)return'';const p=dmy.split('/');if(p.length!==3)return dmy;return p[2]+'-'+p[1]+'-'+p[0]}
 function todayDMY(){const d=new Date();return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear()}
 async function init() {
     const sr = await fetch('/api/suppliers');
     suppliers = await sr.json();
-    document.getElementById('c-supplier').innerHTML = '<option value="">- Select -</option>' +
-        suppliers.map(s => `<option value="${esc(s.supplier_name)}">${esc(s.supplier_name)}</option>`).join('');
     // Item suggestions from inventory (free text still allowed for new items)
     const ir = await fetch('/api/inventory/basic');
     invItems = await ir.json();
@@ -58,7 +111,7 @@ async function init() {
     }
 }
 async function load() {
-    const res = await fetch('/api/rfq'); rfqData = await res.json();
+    const res = await fetch('/api/rfq'); rfqData = await res.json() || [];
     const sup = document.getElementById('f-supplier').value;
     document.getElementById('f-supplier').innerHTML = '<option value="">All Suppliers</option>' +
         [...new Set(rfqData.map(r => r.supplier).filter(Boolean))].sort().map(s => `<option>${esc(s)}</option>`).join('');
@@ -88,7 +141,7 @@ async function openCreate() {
     document.getElementById('c-title').textContent = 'New RFQ';
     document.getElementById('c-id').value = id;
     document.getElementById('c-date').value = todayDMY();
-    document.getElementById('c-supplier').value = '';
+    setSupplier('');
     document.getElementById('c-notes').value = '';
     document.getElementById('c-items').querySelector('tbody').innerHTML = '';
     addItem();
@@ -101,7 +154,7 @@ function editRFQ(id) {
     document.getElementById('c-title').textContent = 'Edit RFQ';
     document.getElementById('c-id').value = r.rfq_id;
     document.getElementById('c-date').value = toDMY(r.date);
-    document.getElementById('c-supplier').value = r.supplier || '';
+    setSupplier(r.supplier || '');
     document.getElementById('c-notes').value = '';
     const tbody = document.getElementById('c-items').querySelector('tbody');
     tbody.innerHTML = '';
@@ -116,7 +169,7 @@ async function openCreateWithDraft(supplier, items) {
     document.getElementById('c-id').value = id;
     document.getElementById('c-date').value = todayDMY();
     document.getElementById('c-notes').value = '';
-    if (supplier) document.getElementById('c-supplier').value = supplier;
+    setSupplier(supplier || '');
     const tbody = document.getElementById('c-items').querySelector('tbody');
     tbody.innerHTML = '';
     if (!items || !items.length) { addItem(); } else {
@@ -148,6 +201,11 @@ function addItem(it = {}) {
     tbody.appendChild(row);
 }
 async function saveRFQ() {
+    if (supplierInput().value.trim() && !selectedSupplier) {
+        document.getElementById('rfq-supplier-status').textContent = 'Select a supplier from the suggestions.';
+        supplierInput().focus();
+        return;
+    }
     const items = Array.from(document.querySelectorAll('#c-items tbody tr')).map(row => ({
         stock_id: row.querySelector('.ri-stock')?.value || '',
         item_name: row.querySelector('.ri-name')?.value || '',
@@ -156,7 +214,7 @@ async function saveRFQ() {
     }));
     const body = {
         rfq_id: document.getElementById('c-id').value,
-        supplier: document.getElementById('c-supplier').value,
+        supplier: selectedSupplier,
         date: fromDMY(document.getElementById('c-date').value),
         notes: document.getElementById('c-notes').value,
         items: items,
