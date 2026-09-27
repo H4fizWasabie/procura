@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-27
+- [inventory] Filter before pagination, report load/save errors and export real XLSX or CSV for all matching rows — prevent missing results and mislabeled exports
+- [inventory] Return pack size and exclusion in item details — preserve anchors when other fields are edited
+- [po] Remove unintended approval calls and surface invalid, missing and failed status/shipment updates — prevent false success and side effects
+- [workflow] Report per-order batch failures and retain failed selections — allow accurate retry without repeating successful work
+- [scorecard] Persist supplier, comments, rater, timestamp and equal-weight ratings; report save failures and correct summary fields — make ratings reliable
+- [report] Remove an undefined item-history checkbox handler — keep selection usable without JavaScript errors
+- [auth] Require Editor/Admin for inventory edits and analytics freezing — apply the approved write-access policy explicitly
+- [ui] Record approved direction A navigation, feature parity and defect verification — establish the implementation and release gates
+
 ## 2026-09-25
 - [po] Wire Set Inv Date to a role-protected API that validates and persists invoice dates — prevent false success without updating the PO
 - [uom] Prefer the matching item label when updating supplier mappings by stock ID — avoid renaming a legacy duplicate and violating the supplier/name unique constraint

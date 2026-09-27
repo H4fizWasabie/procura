@@ -1,10 +1,16 @@
 package inventory
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/csv"
+	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xuri/excelize/v2"
 )
 
 // Anchor fields that can be edited (matches GAS apiSaveInventoryItem).
@@ -37,69 +43,119 @@ type Service struct {
 	DB *sql.DB
 }
 
-// List returns paginated items. Empty search = newest first (page 1 = most recent).
+// Filters apply to the full inventory before pagination or export.
+type Filters struct {
+	Search, StockID, Name, Supplier, Category string
+	LowStock, Active                          bool
+}
+
 func (s *Service) List(search string, page, pageSize int) []Item {
-	if page < 1 {
-		page = 1
-	}
 	if pageSize < 1 {
 		pageSize = 50
 	}
-
-	if search == "" {
-		// No search: paginate from bottom (newest first — mimics GAS sheet behavior)
-		var total int
-		s.DB.QueryRow("SELECT COUNT(*) FROM items").Scan(&total)
-		endRow := total - ((page - 1) * pageSize)
-		startRow := endRow - pageSize
-		if startRow < 0 {
-			startRow = 0
-		}
-		if endRow <= 0 {
-			return nil
-		}
-		limit := endRow - startRow
-		if limit <= 0 {
-			return nil
-		}
-
-		rows, err := s.DB.Query(`
-			SELECT i.stock_id, i.item_name, i.cost, i.uom, i.product_type, i.category,
-			       i.current_stock, i.rop, i.selling_price, i.last_updated, i.pack_size,
-			       i.exclude, i.product_status, i.velocity_override, i.supplier_name, i.item_behaviour,
-			       COALESCE(m.supplier_uom, '')
-			FROM items i
-			LEFT JOIN supplier_item_mappings m ON m.stock_id = i.stock_id AND m.supplier_name = i.supplier_name
-			ORDER BY i.stock_id DESC
-			LIMIT ? OFFSET ?
-		`, limit, startRow)
-		if err != nil {
-			return []Item{}
-		}
-		defer rows.Close()
-		return scanItems(rows)
+	items, _ := s.ListFiltered(Filters{Search: search}, page, pageSize)
+	if pageSize > 0 && len(items) > pageSize {
+		items = items[:pageSize]
 	}
+	return items
+}
 
-	// Search: filter all matching rows, then paginate
-	term := "%" + strings.ToLower(search) + "%"
-	rows, err := s.DB.Query(`
-		SELECT i.stock_id, i.item_name, i.cost, i.uom, i.product_type, i.category,
-		       i.current_stock, i.rop, i.selling_price, i.last_updated, i.pack_size,
-		       i.exclude, i.product_status, i.velocity_override, i.supplier_name, i.item_behaviour,
-		       COALESCE(m.supplier_uom, '')
-		FROM items i
-		LEFT JOIN supplier_item_mappings m ON m.stock_id = i.stock_id AND m.supplier_name = i.supplier_name
-		WHERE LOWER(COALESCE(i.stock_id,'')) LIKE ?
-		   OR LOWER(COALESCE(i.item_name,'')) LIKE ?
-		   OR LOWER(COALESCE(i.supplier_name,'')) LIKE ?
-		ORDER BY i.item_name
-		LIMIT ? OFFSET ?
-	`, term, term, term, pageSize, (page-1)*pageSize)
+// ListFiltered includes one extra row when paginated, so callers can detect a next page.
+func (s *Service) ListFiltered(f Filters, page, pageSize int) ([]Item, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if f.Search != "" {
+		where = append(where, "(LOWER(COALESCE(i.stock_id,'')) LIKE ? OR LOWER(COALESCE(i.item_name,'')) LIKE ? OR LOWER(COALESCE(i.supplier_name,'')) LIKE ?)")
+		term := "%" + strings.ToLower(f.Search) + "%"
+		args = append(args, term, term, term)
+	}
+	for _, filter := range []struct{ column, value string }{{"stock_id", f.StockID}, {"item_name", f.Name}} {
+		if filter.value != "" {
+			where = append(where, "LOWER(COALESCE(i."+filter.column+",'')) LIKE ?")
+			args = append(args, "%"+strings.ToLower(filter.value)+"%")
+		}
+	}
+	for _, filter := range []struct{ column, value string }{{"supplier_name", f.Supplier}, {"category", f.Category}} {
+		if filter.value != "" {
+			where = append(where, "i."+filter.column+" = ?")
+			args = append(args, filter.value)
+		}
+	}
+	if f.LowStock {
+		where = append(where, "COALESCE(i.current_stock,0) <= COALESCE(i.rop,0) AND COALESCE(i.rop,0) > 0")
+	}
+	if f.Active {
+		where = append(where, "UPPER(TRIM(COALESCE(i.exclude,''))) NOT IN ('1','TRUE','YES','EXCLUDE') AND LOWER(TRIM(COALESCE(i.item_behaviour,''))) != 'exclude'")
+	}
+	order := "i.stock_id DESC"
+	if f.Search != "" || f.StockID != "" || f.Name != "" {
+		order = "i.item_name, i.stock_id"
+	}
+	query := `SELECT i.stock_id, i.item_name, i.cost, i.uom, i.product_type, i.category,
+ i.current_stock, i.rop, i.selling_price, i.last_updated, i.pack_size,
+ i.exclude, i.product_status, i.velocity_override, i.supplier_name, i.item_behaviour,
+ COALESCE((SELECT m.supplier_uom FROM supplier_item_mappings m
+ WHERE m.stock_id = i.stock_id AND m.supplier_name = i.supplier_name ORDER BY m.id LIMIT 1), '')
+ FROM items i WHERE ` + strings.Join(where, " AND ") + " ORDER BY " + order
+	if pageSize > 0 {
+		if page < 1 {
+			page = 1
+		}
+		query += " LIMIT ? OFFSET ?"
+		args = append(args, pageSize+1, (page-1)*pageSize)
+	}
+	rows, err := s.DB.Query(query, args...)
 	if err != nil {
-		return []Item{}
+		return nil, err
 	}
 	defer rows.Close()
 	return scanItems(rows)
+}
+
+// Export includes all matching rows, independent of the current page.
+func (s *Service) Export(f Filters, format string) ([]byte, error) {
+	items, err := s.ListFiltered(f, 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	headings := []string{"Stock ID", "Item Name", "Supplier", "Sup.UOM", "Type", "Status", "UOM", "Cost", "Selling", "Stock", "ROP", "Behaviour", "Excluded"}
+	rows := [][]string{headings}
+	for _, it := range items {
+		rows = append(rows, []string{it.StockID, it.ItemName, it.SupplierName, it.SupplierUOM, it.ProductType, it.ProductStatus, it.UOM,
+			strconv.FormatFloat(it.Cost, 'f', 2, 64), strconv.FormatFloat(it.SellingPrice, 'f', 2, 64), strconv.FormatFloat(it.CurrentStock, 'f', -1, 64), strconv.FormatFloat(it.ROP, 'f', -1, 64), it.ItemBehaviour, it.Exclude})
+	}
+	if format == "csv" {
+		var buf bytes.Buffer
+		writer := csv.NewWriter(&buf)
+		if err := writer.WriteAll(rows); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+	if format != "xlsx" {
+		return nil, fmt.Errorf("format must be csv or xlsx")
+	}
+	book := excelize.NewFile()
+	defer book.Close()
+	for index, row := range rows {
+		values := make([]interface{}, len(row))
+		for col, val := range row {
+			values[col] = val
+		}
+		if index > 0 {
+			for _, col := range []int{7, 8, 9, 10} {
+				values[col], _ = strconv.ParseFloat(row[col], 64)
+			}
+		}
+		if err := book.SetSheetRow("Sheet1", fmt.Sprintf("A%d", index+1), &values); err != nil {
+			return nil, err
+		}
+	}
+	buf, err := book.WriteToBuffer()
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // UpdateAnchors applies anchor field edits. GAS logic: Service/Asset → ROP=0.
@@ -128,11 +184,21 @@ func (s *Service) UpdateAnchors(stockID string, updates map[string]interface{}) 
 	args = append(args, time.Now().Format("2006-01-02T15:04:05"))
 	args = append(args, stockID)
 
-	_, err := s.DB.Exec(
+	res, err := s.DB.Exec(
 		"UPDATE items SET "+strings.Join(sets, ", ")+" WHERE stock_id = ?",
 		args...,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // BasicList returns ID + Name for dropdowns. Excludes Unavailable items.
@@ -153,14 +219,16 @@ func (s *Service) BasicList() []map[string]string {
 	return out
 }
 
-func scanItems(rows *sql.Rows) []Item {
+func scanItems(rows *sql.Rows) ([]Item, error) {
 	out := []Item{}
 	for rows.Next() {
 		var it Item
 		var cost, current, rop, selling sql.NullFloat64
 		var stockID, name, uom, ptype, cat, updated, pack, exclude, status, velOv, supplier, beh, supUom sql.NullString
-		rows.Scan(&stockID, &name, &cost, &uom, &ptype, &cat, &current, &rop,
-			&selling, &updated, &pack, &exclude, &status, &velOv, &supplier, &beh, &supUom)
+		if err := rows.Scan(&stockID, &name, &cost, &uom, &ptype, &cat, &current, &rop,
+			&selling, &updated, &pack, &exclude, &status, &velOv, &supplier, &beh, &supUom); err != nil {
+			return nil, err
+		}
 
 		it = Item{
 			StockID: str(stockID), ItemName: str(name),
@@ -175,14 +243,28 @@ func scanItems(rows *sql.Rows) []Item {
 		}
 		out = append(out, it)
 	}
-	return out
+	return out, rows.Err()
 }
 
-func str(s sql.NullString) string { if s.Valid { return s.String }; return "" }
-func f64(f sql.NullFloat64) float64 { if f.Valid { return f.Float64 }; return 0 }
+func str(s sql.NullString) string {
+	if s.Valid {
+		return s.String
+	}
+	return ""
+}
+func f64(f sql.NullFloat64) float64 {
+	if f.Valid {
+		return f.Float64
+	}
+	return 0
+}
 func round(f float64) float64 { return math.Round(f*100) / 100 }
 func stringOrEmpty(v interface{}) string {
-	if v == nil { return "" }
-	if s, ok := v.(string); ok { return s }
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
 	return ""
 }

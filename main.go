@@ -267,6 +267,29 @@ func main() {
 	}))
 
 	// ── Inventory API ──
+	inventoryFilters := func(r *http.Request) inventory.Filters {
+		q := r.URL.Query()
+		return inventory.Filters{Search: q.Get("search"), StockID: q.Get("stock_id"), Name: q.Get("name"), Supplier: q.Get("supplier"), Category: q.Get("category"), LowStock: q.Get("low_stock") == "1", Active: q.Get("active") == "1"}
+	}
+	mux.HandleFunc("GET /api/inventory/export", protected(func(w http.ResponseWriter, r *http.Request) {
+		format := r.URL.Query().Get("format")
+		if format != "csv" && format != "xlsx" {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "format must be csv or xlsx"})
+			return
+		}
+		data, err := invSvc.Export(inventoryFilters(r), format)
+		if err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": "Inventory export failed"})
+			return
+		}
+		contentType := "text/csv; charset=utf-8"
+		if format == "xlsx" {
+			contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", `attachment; filename="items.`+format+`"`)
+		w.Write(data)
+	}))
 	mux.HandleFunc("GET /api/inventory", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		page, _ := strconv.Atoi(q.Get("page"))
@@ -277,24 +300,39 @@ func main() {
 		if size < 1 {
 			size = 50
 		}
-		items := invSvc.List(q.Get("search"), page, size)
+		items, err := invSvc.ListFiltered(inventoryFilters(r), page, size)
+		if err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": "Inventory load failed"})
+			return
+		}
+		w.Header().Set("X-Has-More", strconv.FormatBool(len(items) > size))
+		if len(items) > size {
+			items = items[:size]
+		}
 		writeJSON(w, http.StatusOK, items)
 	}))
 
-	mux.HandleFunc("POST /api/inventory/", protected(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/inventory/", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		stockID := strings.TrimPrefix(r.URL.Path, "/api/inventory/")
 		if stockID == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "stock_id required"})
 			return
 		}
 		var updates map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&updates)
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil || len(updates) == 0 {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "invalid inventory update"})
+			return
+		}
 		if err := invSvc.UpdateAnchors(stockID, updates); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+			status := http.StatusInternalServerError
+			if err == sql.ErrNoRows {
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
-	}))
+	})))
 
 	mux.HandleFunc("GET /api/inventory/basic", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, invSvc.BasicList())
@@ -494,14 +532,43 @@ func main() {
 			Status string `json:"status"`
 			Field  string `json:"field"`
 		}
-		json.NewDecoder(r.Body).Decode(&body)
-		col := body.Field
-		if col == "" {
-			col = "status"
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "invalid request body"})
+			return
 		}
-		poSvc.UpdateStatus(r.PathValue("poId"), body.Status, col)
+		if body.Field == "" {
+			body.Field = "status"
+		}
+		body.Status = strings.TrimSpace(body.Status)
+		allowed := []string{"Pending Approval", "Approved", "Pending Payment", "Paid", "Partial", "Void", "VOID"}
+		if body.Field == "ship" {
+			allowed = []string{"Pending", "Shipped", "Partial", "Delivered", "Received"}
+		} else if body.Field != "status" {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "field must be status or ship"})
+			return
+		}
+		valid := false
+		for _, status := range allowed {
+			if body.Status == status {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "invalid status"})
+			return
+		}
+		if err := poSvc.UpdateStatus(r.PathValue("poId"), body.Status, body.Field); err != nil {
+			status := http.StatusInternalServerError
+			if err == sql.ErrNoRows {
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, map[string]interface{}{"success": false, "error": "PO status update failed"})
+			return
+		}
 		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
+
 	mux.HandleFunc("POST /api/pos/{poId}/invoice-date", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			InvoiceDate string `json:"invoice_date"`
@@ -822,11 +889,19 @@ func main() {
 		// Item detail
 		var id, name, cat, ptype, supplier, uom, status, updated, beh sql.NullString
 		var cost, selling, current, rop sql.NullFloat64
-		var velOv sql.NullString
-		db.QueryRow(`SELECT stock_id, item_name, category, product_type, supplier_name, uom,
-			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override
+		var velOv, pack, exclude sql.NullString
+		err := db.QueryRow(`SELECT stock_id, item_name, category, product_type, supplier_name, uom,
+			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override, pack_size, exclude
 			FROM items WHERE stock_id = ?`, stockID).Scan(&id, &name, &cat, &ptype, &supplier, &uom,
-			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv)
+			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv, &pack, &exclude)
+		if err != nil {
+			status := http.StatusInternalServerError
+			if err == sql.ErrNoRows {
+				status = http.StatusNotFound
+			}
+			writeJSON(w, status, map[string]interface{}{"success": false, "error": "Item detail could not be loaded"})
+			return
+		}
 
 		// Supplier UOM mapping
 		var supUom sql.NullString
@@ -875,8 +950,8 @@ func main() {
 			"product_status": strv(status), "last_updated": strv(updated),
 			"item_behaviour": strv(beh), "cost": f64v(cost), "selling_price": f64v(selling),
 			"current_stock": f64v(current), "rop": f64v(rop), "velocity_override": strv(velOv),
-			"supplier_uom": strv(supUom),
-			"movements":    movements, "po_history": poHistory,
+			"supplier_uom": strv(supUom), "pack_size": strv(pack), "exclude": strv(exclude),
+			"movements": movements, "po_history": poHistory,
 		})
 	}))
 	mux.HandleFunc("GET /api/reports/restock", protected(func(w http.ResponseWriter, r *http.Request) {
@@ -964,8 +1039,21 @@ func main() {
 	}))
 	mux.HandleFunc("POST /api/scorecard", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body scorecard.Entry
-		json.NewDecoder(r.Body).Decode(&body)
-		scoreSvc.Save(body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "invalid request body"})
+			return
+		}
+		if body.POID == "" || body.SupplierName == "" || body.Accuracy < 1 || body.Accuracy > 5 || body.Speed < 1 || body.Speed > 5 || body.Quality < 1 || body.Quality > 5 {
+			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "PO, supplier and ratings from 1 to 5 are required"})
+			return
+		}
+		body.Timestamp = time.Now().Format(time.RFC3339)
+		body.RatedBy = r.Header.Get("X-User-Email")
+		body.WeightedScore = (body.Accuracy + body.Speed + body.Quality) / 3
+		if err := scoreSvc.Save(body); err != nil {
+			writeJSON(w, 500, map[string]interface{}{"success": false, "error": "Score save failed"})
+			return
+		}
 		writeJSON(w, 200, map[string]interface{}{"success": true})
 	})))
 
@@ -1028,7 +1116,7 @@ func main() {
 		}
 		writeJSON(w, 200, analyticsSvc.Compute(fy, fm, ty, tm))
 	}))
-	mux.HandleFunc("POST /api/analytics/freeze", protected(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/analytics/freeze", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		y, _ := strconv.Atoi(q.Get("year"))
 		mo, _ := strconv.Atoi(q.Get("month"))
@@ -1042,7 +1130,7 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, vals)
-	}))
+	})))
 	mux.HandleFunc("GET /api/analytics/export", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		fy, _ := strconv.Atoi(q.Get("from_year"))
