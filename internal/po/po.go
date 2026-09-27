@@ -261,8 +261,18 @@ func (s *Service) UpdateStatus(poID, newStatus, field string) error {
 	if field == "ship" {
 		col = "ship_status"
 	}
-	_, err := s.DB.Exec("UPDATE purchase_orders SET "+col+" = ? WHERE po_id = ?", newStatus, poID)
-	return err
+	res, err := s.DB.Exec("UPDATE purchase_orders SET "+col+" = ? WHERE po_id = ?", newStatus, poID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // Void marks a PO as VOID.

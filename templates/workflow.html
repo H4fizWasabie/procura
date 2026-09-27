@@ -20,18 +20,22 @@
         <span id="wf-count" style="font-weight:700;color:var(--accent)">0 selected</span>
         <button onclick="batchAction()" id="wf-action-btn">Approve Selected</button>
     </div>
+<div id="wf-results" role="status" style="white-space:pre-wrap;margin-top:12px"></div>
 </div>
 <div id="toast" class="toast" style="display:none"></div>
 
 <script>
 let wfMode = 'APPROVAL', wfData = [], selected = new Set();
-async function loadWf(force) {
+async function loadWf(preserveSelection = false) {
     const res = await fetch('/api/pos?status='+(wfMode==='APPROVAL'?'Pending+Approval':'Approved'));
     const pos = await res.json();
     wfData = (pos||[]).filter(p => wfMode==='APPROVAL' ? p.status==='Pending Approval' : p.status==='Approved');
-    selected.clear(); renderWf();
+    if (!res.ok) throw new Error("Could not load workflow orders");
+    if (!preserveSelection) selected.clear();
+    renderWf();
 }
 function switchWf(mode, btn) {
+    if (document.getElementById('wf-action-btn').disabled) return;
     wfMode = mode;
     document.querySelectorAll('#wf-table-area .tab-btn').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
@@ -39,6 +43,7 @@ function switchWf(mode, btn) {
     loadWf();
 }
 function renderWf() {
+    document.getElementById('wf-count').textContent = selected.size + ' selected';
     const q = (document.getElementById('wf-search')?.value||'').toLowerCase();
     const filtered = q ? wfData.filter(p => (p.po_id||'').toLowerCase().includes(q) || (p.supplier||'').toLowerCase().includes(q)) : wfData;
     const tbody = document.getElementById('wf-body');
@@ -62,15 +67,37 @@ function toggleAll(cb) {
     });
 }
 async function batchAction() {
-    if (!selected.size) { toast('Select POs first', false); return; }
+    const button = document.getElementById('wf-action-btn');
+    if (button.disabled) return;
+    if (!selected.size) return toast('Select POs first', false);
     const endpoint = wfMode === 'APPROVAL' ? '/api/workflow/approve' : '/api/workflow/payment';
+    button.disabled = true;
     let count = 0;
-    for (const poId of selected) {
-        const res = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({po_id: poId})});
-        const d = await res.json(); if (d.success) count++;
+    const failures = [], succeeded = [];
+    try {
+        for (const poId of [...selected]) {
+            try {
+                const res = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({po_id: poId})});
+                const d = await res.json();
+                if (!res.ok || !d.success) throw new Error(d.error || 'Request rejected');
+                selected.delete(poId);
+                succeeded.push(poId);
+                count++;
+            } catch (err) {
+                failures.push(poId + ': ' + err.message);
+            }
+        }
+        const results = document.getElementById('wf-results');
+        results.textContent = 'Succeeded: '+(succeeded.join(', ')||'none')+(failures.length ? '\nFailed: '+failures.join('\n') : '');
+        let message = count+' succeeded; '+failures.length+' failed', refreshed = true;
+        try { await loadWf(true); } catch (err) { refreshed = false; results.textContent += '\nCould not refresh the list; reload before retrying.'; }
+        toast(message, failures.length === 0 && refreshed);
+    } finally {
+        document.getElementById('wf-count').textContent = selected.size + ' selected';
+        button.disabled = false;
     }
-    toast(`Processed ${count} POs`, true); loadWf();
 }
+
 function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 loadWf();

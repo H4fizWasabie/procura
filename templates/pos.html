@@ -61,7 +61,7 @@
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
                 <select id="po-edit-status" style="width:150px" onchange="updatePoField('status')">
                     <option value="">Status</option><option>Pending Approval</option><option>Approved</option>
-                    <option>Pending Payment</option><option>Paid</option><option>Void</option>
+                    <option>Pending Payment</option><option>Paid</option><option>Partial</option><option>Void</option>
                 </select>
                 <select id="po-edit-ship" style="width:130px" onchange="updatePoField('ship')">
                     <option value="">Ship Status</option><option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option>
@@ -356,23 +356,24 @@ function closePoDetail() { document.getElementById('po-detail').style.display = 
 
 async function updatePoField(field) {
     if (!selectedPoId) return;
-    let body={};
-    if (field==='status') { body = {status: document.getElementById('po-edit-status').value};
-        await fetch('/api/workflow/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po_id:selectedPoId})}).catch(()=>{});
-        await fetch('/api/pos/'+encodeURIComponent(selectedPoId)+'/status',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(body)});
-    } else if (field==='ship') {
-        body = {status: document.getElementById('po-edit-ship').value};
-        await fetch('/api/pos/'+encodeURIComponent(selectedPoId)+'/status',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({field:'ship',status:body.status})});
-    } else if (field==='invdate') {
+    let body, endpoint;
+    if (field === 'invdate') {
         body = {invoice_date: fromDMY(document.getElementById('po-edit-invdate').value)};
-        const res = await fetch('/api/pos/'+encodeURIComponent(selectedPoId)+'/invoice-date',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(body)});
-        const d = await res.json();
-        if (!res.ok || !d.success) return toast('Error: '+(d.error||'Could not update invoice date'), false);
+        endpoint = 'invoice-date';
+    } else {
+        body = {field: field === 'ship' ? 'ship' : 'status', status: document.getElementById(field === 'ship' ? 'po-edit-ship' : 'po-edit-status').value};
+        endpoint = 'status';
     }
-    toast('Updated', true); loadPos();
+    try {
+        const res = await fetch('/api/pos/'+encodeURIComponent(selectedPoId)+'/'+endpoint, {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        const d = await res.json();
+        if (!res.ok || !d.success) return toast('Error: '+(d.error||'Could not update order'), false);
+        toast('Updated', true);
+        await loadPos();
+    } catch (err) {
+        toast('Could not confirm the update. Reload the order before retrying.', false);
+    }
 }
 
 function editSelectedPo() {

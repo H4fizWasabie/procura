@@ -143,7 +143,7 @@ async function searchPoItems() {
     div.innerHTML = `<p style="margin-bottom:8px">Found ${selectedPOItems.length} items. Select items below and click "Run Item History Report":</p>
         <div style="max-height:200px;overflow-y:auto;margin-bottom:8px">` +
         selectedPOItems.map((it,i) => `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px">
-            <input type="checkbox" checked onchange="updateSelectedItems()" data-idx="${i}"> ${esc(it.stock_id)} — ${esc(it.item_name)}</label>`).join('') + '</div>';
+            <input type="checkbox" checked data-idx="${i}"> ${esc(it.stock_id)} — ${esc(it.item_name)}</label>`).join('') + '</div>';
     document.getElementById('ih-run-btn').style.display = 'inline-block';
 }
 

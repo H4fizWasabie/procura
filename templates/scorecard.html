@@ -43,11 +43,11 @@ let pendingList = [];
 async function loadSummary() {
     const [listRes, posRes, sumRes] = await Promise.all([
         fetch('/api/scorecard'),
-        fetch('/api/pos?status=Paid&status=Partial'),
+        fetch('/api/pos'),
         fetch('/api/scorecard/summary')
     ]);
     const list = await listRes.json();
-    const pos = await posRes.json();
+    const pos = (await posRes.json() || []).filter(p => p.status === 'Paid' || p.status === 'Partial');
     const summary = await sumRes.json();
 
     const scoredIds = new Set((list||[]).map(s => s.po_id));
@@ -67,7 +67,7 @@ async function loadSummary() {
     const sdiv = document.getElementById('sc-summary');
     if (summary && summary.length) {
         sdiv.innerHTML = '<table><thead><tr><th>Supplier</th><th>Entries</th><th>Avg</th></tr></thead><tbody>' +
-            summary.map(s => `<tr><td>${esc(s.supplier_name)}</td><td>${s.count}</td>
+            summary.map(s => `<tr><td>${esc(s.name)}</td><td>${s.rating_count}</td>
                 <td><span class="badge ${s.avg>=4.5?'badge-green':s.avg<3?'badge-red':'badge-amber'}">${s.avg.toFixed(1)}</span></td></tr>`).join('') + '</tbody></table>';
     } else {
         sdiv.innerHTML = '<p>No scores recorded yet.</p>';
@@ -88,17 +88,22 @@ function closeRate() { document.getElementById('rate-modal').classList.remove('o
 async function submitScore() {
     const body = {
         po_id: document.getElementById('rm-po-id').value,
-        supplier: document.getElementById('rm-supplier').textContent,
+        supplier_name: document.getElementById('rm-supplier').textContent,
         bill_no: document.getElementById('rm-bill').textContent,
         accuracy: parseInt(document.getElementById('rm-acc').value),
         speed: parseInt(document.getElementById('rm-spd').value),
         quality: parseInt(document.getElementById('rm-qual').value),
-        comment: document.getElementById('rm-comment').value,
+        comments: document.getElementById('rm-comment').value,
     };
-    const res = await fetch('/api/scorecard', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    const d = await res.json();
-    toast(d.success?'Score saved':'Error', d.success);
-    if (d.success) { closeRate(); loadSummary(); }
+    try {
+        const res = await fetch('/api/scorecard', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        const d = await res.json();
+        if (!res.ok || !d.success) return toast('Error: '+(d.error||'Score was not saved'), false);
+        toast('Score saved', true);
+        closeRate(); loadSummary();
+    } catch (err) {
+        toast('Could not confirm the score save. Reload before retrying.', false);
+    }
 }
 function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}

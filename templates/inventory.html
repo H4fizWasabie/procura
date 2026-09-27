@@ -96,7 +96,18 @@
 </div>
 
 <script>
-let page=1, pageSize=2000, selectedStockId='';
+let page=1, pageSize=2000, selectedStockId='', inventoryRequest=0;
+function isExcluded(value) { return ['1','true','yes','exclude'].includes(String(value||'').trim().toLowerCase()); }
+function inventoryFilters() {
+    const params = new URLSearchParams();
+    for (const [key,id] of [['stock_id','f-stock-id'],['name','f-name'],['supplier','f-supplier'],['category','f-category']]) {
+        const value = document.getElementById(id).value.trim();
+        if (value) params.set(key,value);
+    }
+    if (document.getElementById('f-low-stock').checked) params.set('low_stock','1');
+    if (document.getElementById('f-active').checked) params.set('active','1');
+    return params;
+}
 
 async function init() {
     const res = await fetch('/api/inventory/filter-options');
@@ -109,23 +120,16 @@ async function init() {
 }
 
 async function loadPage(p) {
-    page = Math.max(1,p);
-    const params = new URLSearchParams({page:page, pageSize:pageSize});
-    const search = [document.getElementById('f-stock-id').value.trim(),
-                    document.getElementById('f-name').value.trim()].filter(Boolean).join(' ');
-    if (search) params.set('search', search);
+    const request = ++inventoryRequest;
+    const nextPage = Math.max(1,p);
+    const params = inventoryFilters();
+    params.set('page',nextPage); params.set('pageSize',pageSize);
+    try {
     const res = await fetch('/api/inventory?' + params);
-    let items = await res.json();
-    // Client-side filtering for supplier, category, low-stock, active
-    const sup = document.getElementById('f-supplier').value;
-    const cat = document.getElementById('f-category').value;
-    const low = document.getElementById('f-low-stock').checked;
-    const active = document.getElementById('f-active').checked;
-    if (sup) items = items.filter(i => (i.supplier_name||'') === sup);
-    if (cat) items = items.filter(i => (i.category||'') === cat);
-    if (low) items = items.filter(i => (i.current_stock||0) <= (i.rop||0) && (i.rop||0) > 0);
-    if (active) items = items.filter(i => !i.exclude && (i.item_behaviour||'').toLowerCase() !== 'exclude');
-
+    const items = await res.json();
+    if (request !== inventoryRequest) return;
+    if (!res.ok) throw new Error(items.error || 'Could not load inventory');
+    page = nextPage;
     document.getElementById('items-body').innerHTML = items.map(i => `
         <tr style="cursor:pointer" onclick="showDetail('${esc(i.stock_id)}')">
             <td style="font-family:monospace;font-weight:600">${esc(i.stock_id)}</td>
@@ -136,12 +140,13 @@ async function loadPage(p) {
             <td class="text-right">${i.current_stock!=null?i.current_stock:'-'}</td>
             <td class="text-right">${i.rop!=null?i.rop:'-'}</td>
             <td>${esc(i.item_behaviour)||'Standard'}</td>
-            <td>${i.exclude?'Yes':'-'}</td>
+            <td>${isExcluded(i.exclude)?'Yes':'-'}</td>
             <td><button class="btn-sm" onclick="event.stopPropagation();showDetail('${esc(i.stock_id)}')">Edit</button></td>
         </tr>`).join('');
     document.getElementById('page-info').textContent = `Page ${page}`;
     document.getElementById('prev-btn').disabled = page <= 1;
-    document.getElementById('next-btn').disabled = items.length < pageSize;
+    document.getElementById('next-btn').disabled = res.headers.get('X-Has-More') !== 'true';
+    } catch (err) { if (request === inventoryRequest) toast(err.message, false); }
 }
 
 function resetFilters() {
@@ -157,6 +162,7 @@ async function showDetail(stockId) {
     selectedStockId = stockId;
     const res = await fetch('/api/inventory/detail?stock_id=' + encodeURIComponent(stockId));
     const d = await res.json();
+    if (!res.ok) return toast(d.error || 'Could not load item details',false);
     document.getElementById('detail-panel').style.display = 'block';
     document.getElementById('detail-title').textContent = d.stock_id + ' — ' + d.item_name;
     document.getElementById('detail-summary').innerHTML = `
@@ -172,7 +178,7 @@ async function showDetail(stockId) {
     document.getElementById('ae-behaviour').value = d.item_behaviour||'';
     document.getElementById('ae-velocity').value = d.velocity_override||'';
     document.getElementById('ae-pack').value = d.pack_size||'';
-    document.getElementById('ae-exclude').checked = !!d.exclude;
+    document.getElementById('ae-exclude').checked = isExcluded(d.exclude);
     document.getElementById('ae-reason').value = '';
     document.getElementById('ae-cost').value = d.cost||0;
     document.getElementById('ae-selling').value = d.selling_price||0;
@@ -208,11 +214,14 @@ async function saveAnchors() {
         uom: document.getElementById('ae-uom').value,
         rop: (beh==='Service'||beh==='Asset') ? 0 : (parseFloat(document.getElementById('ae-rop').value)||0),
     };
-    const res = await fetch('/api/inventory/'+encodeURIComponent(selectedStockId), {
-        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
-    const d = await res.json();
-    toast(d.success?'Saved':'Error: '+d.error, d.success);
-    if (d.success) { loadPage(page); showDetail(selectedStockId); }
+    try {
+        const res = await fetch('/api/inventory/'+encodeURIComponent(selectedStockId), {
+            method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
+        const d = await res.json();
+        if (!res.ok || !d.success) return toast('Error: '+(d.error||'Could not save item'),false);
+        toast('Saved',true);
+        loadPage(page); showDetail(selectedStockId);
+    } catch (err) { toast('Could not confirm the save. Reload the item before retrying.',false); }
 }
 
 async function importStock(input) {
@@ -230,15 +239,15 @@ async function importStock(input) {
     input.value = '';
 }
 
-function exportItems(fmt) {
-    const rows = document.querySelectorAll('#items-body tr');
-    let csv = 'Stock ID,Item Name,Supplier,Sup.UOM,Type,Status,UOM,Cost,Selling,Stock,ROP,Behaviour,Excluded\n';
-    rows.forEach(r => {
-        const cells = r.querySelectorAll('td');
-        csv += Array.from(cells).slice(0,13).map(c => '"'+c.textContent.replace(/"/g,'""')+'"').join(',')+'\n';
-    });
-    const blob = new Blob([csv],{type:'text/csv'});
-    const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='items.csv'; a.click();
+async function exportItems(fmt) {
+    const params = inventoryFilters(); params.set('format',fmt);
+    try {
+        const res = await fetch('/api/inventory/export?' + params);
+        if (!res.ok) throw new Error('Export failed. Please retry.');
+        const url = URL.createObjectURL(await res.blob());
+        const a = document.createElement('a'); a.href=url; a.download='items.'+fmt; a.click();
+        setTimeout(() => URL.revokeObjectURL(url),1000);
+    } catch (err) { toast(err.message,false); }
 }
 
 function toast(m,ok){const t=document.getElementById('toast');t.textContent=m;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
