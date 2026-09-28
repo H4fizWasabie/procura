@@ -203,3 +203,6 @@
 - [po] replace destructive order replacement with an upsert that preserves payment totals, balance, workflow status and RFQ linkage during edits — prevents existing metadata from being lost when saving the redesigned form.
 - [ui] restore the Unlinked Lines template dispatch and handle empty results — the retained linking route now renders its existing controls correctly.
 - [ui] add authenticated direction A checks for every operational route, PO editing/readbacks, Planning→RFQ, desktop/mobile navigation and role/demo isolation — makes the approved redesign verifiable on disposable sample data.
+
+## 2026-09-28
+- [po] make PO history rows selectable and expose per-order Preview and Print / PDF actions in the list — restores easy order selection and access to document output.
