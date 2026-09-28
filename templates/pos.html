@@ -134,6 +134,9 @@
 .btn-secondary:hover{background:var(--border)}
 .po-list-table{max-height:62vh}
 .po-list-table th{position:sticky;top:0;z-index:1}
+.po-list-table tbody tr[data-open-po]{cursor:pointer}
+.po-list-table tbody tr[data-open-po]:hover{background:var(--surface-raised)}
+.po-list-actions{white-space:nowrap}
 .po-item-picker{position:relative;flex:1;min-width:200px}
 .po-item-picker>input{width:100%}
 .po-item-suggestions{position:absolute;top:calc(100% + 4px);left:0;width:min(760px,calc(100vw - 48px));max-height:320px;overflow-y:auto;z-index:30;background:var(--surface-raised);border:1px solid var(--border);border-radius:7px;box-shadow:0 12px 24px rgba(0,0,0,.28)}
@@ -389,8 +392,8 @@ async function loadPos() {
 function renderPoList() {
     const invoiceNumber = document.getElementById('show-invoice-number').checked;
     const invoiceDate = document.getElementById('show-invoice-date').checked;
-    document.getElementById('po-head').innerHTML = '<tr><th>PO ID</th><th>Supplier</th><th>Order date</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th>Approval / payment</th><th>Shipping</th>'+(invoiceNumber?'<th>Invoice number</th>':'')+(invoiceDate?'<th>Invoice date</th>':'')+'</tr>';
-    document.getElementById('po-body').innerHTML = (allPos||[]).map(p => `<tr class="${selectedPoId === p.po_id ? 'selected' : ''}">
+    document.getElementById('po-head').innerHTML = '<tr><th>PO ID</th><th>Supplier</th><th>Order date</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th>Approval / payment</th><th>Shipping</th>'+(invoiceNumber?'<th>Invoice number</th>':'')+(invoiceDate?'<th>Invoice date</th>':'')+'<th>Actions</th></tr>';
+    document.getElementById('po-body').innerHTML = (allPos||[]).map(p => `<tr class="${selectedPoId === p.po_id ? 'selected' : ''}" data-open-po="${esc(p.po_id)}" tabindex="0" aria-label="Open purchase order ${esc(p.po_id)}">
         <td><button data-po-id="${esc(p.po_id)}">${esc(p.po_id)}</button></td>
         <td>${esc(p.supplier)||'-'}</td><td>${toDMY(p.date)||'-'}</td>
         <td class="text-right money">RM ${(p.total||0).toFixed(2)}</td>
@@ -398,8 +401,24 @@ function renderPoList() {
         <td class="text-right money">RM ${(p.balance||0).toFixed(2)}</td>
         <td><span class="badge ${(p.status||'').toLowerCase().includes('paid')?'badge-green':(p.status||'').toLowerCase().includes('pending')?'badge-amber':'badge-blue'}">${esc(p.status)||'-'}</span></td>
         <td>${esc(p.ship_status)||'-'}</td>${invoiceNumber?`<td>${esc(p.bill_no)||'-'}</td>`:''}${invoiceDate?`<td>${toDMY(p.invoice_date)||'-'}</td>`:''}
-    </tr>`).join('') || `<tr><td colspan="${8+Number(invoiceNumber)+Number(invoiceDate)}" class="empty">No orders match these filters. Reset filters to see all orders.</td></tr>`;
-    document.querySelectorAll('#po-body [data-po-id]').forEach(button => button.addEventListener('click', () => selectPo(button.dataset.poId)));
+        <td class="po-list-actions"><button type="button" class="btn-secondary btn-sm" data-po-preview="${esc(p.po_id)}">Preview</button> <button type="button" class="btn-secondary btn-sm" data-po-pdf="${esc(p.po_id)}">Print / PDF</button></td>
+    </tr>`).join('') || `<tr><td colspan="${9+Number(invoiceNumber)+Number(invoiceDate)}" class="empty">No orders match these filters. Reset filters to see all orders.</td></tr>`;
+    document.querySelectorAll('#po-body [data-open-po]').forEach(row => {
+        row.addEventListener('click', () => selectPo(row.dataset.openPo));
+        row.addEventListener('keydown', event => {
+            if (event.target !== row || (event.key !== 'Enter' && event.key !== ' ')) return;
+            event.preventDefault();
+            selectPo(row.dataset.openPo);
+        });
+    });
+    document.querySelectorAll('#po-body [data-po-preview]').forEach(button => button.addEventListener('click', event => {
+        event.stopPropagation();
+        previewPO(button.dataset.poPreview);
+    }));
+    document.querySelectorAll('#po-body [data-po-pdf]').forEach(button => button.addEventListener('click', event => {
+        event.stopPropagation();
+        downloadPO(button.dataset.poPdf);
+    }));
     document.getElementById('po-count').textContent = `${allPos.length} orders`;
     storePoList();
 }
@@ -607,8 +626,8 @@ function exportPoCSV() {
 
 function toast(m,ok){const t=document.getElementById('toast');t.textContent=m;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
 function esc(s){if(s==null)return'';const d=document.createElement('div');d.textContent=String(s);return d.innerHTML.replaceAll('\"','&quot;').replaceAll("'",'&#39;')}
-function previewPO(){if(!selectedPoId)return;window.open('/pos/'+encodeURIComponent(selectedPoId)+'/preview','_blank')}
-function downloadPO(){if(!selectedPoId)return;window.location='/pos/'+encodeURIComponent(selectedPoId)+'/pdf'}
+function previewPO(poId=selectedPoId){if(!poId)return;window.open('/pos/'+encodeURIComponent(poId)+'/preview','_blank')}
+function downloadPO(poId=selectedPoId){if(!poId)return;window.location='/pos/'+encodeURIComponent(poId)+'/pdf'}
 initPo();
 </script>
 {{end}}
