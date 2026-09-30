@@ -127,7 +127,7 @@ func (s *Service) List(search, supplier, status, shipStatus string, unpaidOnly b
 	}
 	defer rows.Close()
 
-	var out []PO
+	out := []PO{}
 	for rows.Next() {
 		var p PO
 		var rawJSON sql.NullString
