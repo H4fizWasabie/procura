@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-09-30
+- [po] Return empty filtered results as an array and safely handle null list responses — avoid a refresh error after saving a PO status
+
 ## 2026-09-27
 - [movement] fit the movement table to the remaining viewport and keep its headings sticky while rows scroll — leaves ROP actions and period/search controls in view
 - [po] Keep history controls visible while the order list scrolls, with sticky column headings — retain access to filters and actions on long lists

@@ -384,7 +384,7 @@ async function loadPos() {
         const res = await fetch('/api/pos?'+params);
         const orders = await res.json();
         if (request !== poRequest) return;
-        if (!res.ok || !Array.isArray(orders)) throw new Error(orders.error || 'Could not load orders');
+        if (!res.ok || !Array.isArray(orders)) throw new Error(orders?.error || 'Could not load orders');
         allPos = orders;
         renderPoList();
     } catch (err) { if (request === poRequest) toast(err.message, false); }
