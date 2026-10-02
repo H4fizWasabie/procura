@@ -1,10 +1,13 @@
 package core
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -203,5 +206,41 @@ func TestPurchasePolicyMigrationBackfillsOnce(t *testing.T) {
 	var marker string
 	if err := db.QueryRow("SELECT value FROM settings WHERE key='migration.purchase_policy.v1'").Scan(&marker); err != nil || marker != "5" {
 		t.Fatalf("migration marker = %q, %v; want count 5", marker, err)
+	}
+}
+
+func TestOpenFailsWhenPurchasePolicyMigrationCannotAddColumn(t *testing.T) {
+	dir := t.TempDir()
+	fixturePath := filepath.Join(t.TempDir(), "fixture.sqlite")
+	fixture, err := sql.Open("sqlite", fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.Exec("CREATE VIEW items AS SELECT NULL AS stock_id, NULL AS exclude"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.Close(); err != nil {
+		t.Fatal(err)
+	}
+	fixtureBytes, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "procura.sqlite"), fixtureBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(oldOutput)
+	if db, err := Open(dir); err == nil {
+		db.Close()
+		t.Fatal("Open succeeded without items.purchase_policy")
+	} else if !strings.Contains(err.Error(), "items.purchase_policy is missing") {
+		t.Fatalf("Open error = %v, want missing purchase_policy", err)
+	}
+	if !strings.Contains(logs.String(), "migration 6 failed:") {
+		t.Fatalf("migration failure was not logged: %s", logs.String())
 	}
 }

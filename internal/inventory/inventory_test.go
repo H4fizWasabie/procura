@@ -117,7 +117,7 @@ func TestUnclassifiedInventoryFilter(t *testing.T) {
 		('B','Unclassified',NULL),('C','On demand','on_demand')`); err != nil {
 		t.Fatal(err)
 	}
-	items, err := (&Service{DB: db}).ListFiltered(Filters{Unclassified: true}, 1, 0)
+	items, err := (&Service{DB: db}).ListFiltered(Filters{Active: true, Unclassified: true}, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,7 +89,7 @@ func (s *Service) ListFiltered(f Filters, page, pageSize int) ([]Item, error) {
 	if f.LowStock {
 		where = append(where, "COALESCE(i.current_stock,0) <= COALESCE(i.rop,0) AND COALESCE(i.rop,0) > 0")
 	}
-	if f.Active {
+	if f.Active && !f.Unclassified {
 		where = append(where, "UPPER(TRIM(COALESCE(i.exclude,''))) NOT IN ('1','TRUE','YES','EXCLUDE') AND LOWER(TRIM(COALESCE(i.item_behaviour,''))) != 'exclude'")
 	}
 	if f.Unclassified {

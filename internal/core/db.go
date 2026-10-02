@@ -2,10 +2,12 @@ package core
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -265,8 +267,19 @@ func Open(dataDir string) (*sql.DB, error) {
 			return nil, err
 		}
 	}
-	for _, m := range migrations {
-		_ = m(db) // duplicate-column and migration errors are ignored on startup
+	for i, m := range migrations {
+		if err := m(db); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			log.Printf("core: migration %d failed: %v", i+1, err)
+		}
+	}
+	var hasPurchasePolicy bool
+	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM pragma_table_info('items') WHERE name='purchase_policy')").Scan(&hasPurchasePolicy); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("check items.purchase_policy: %w", err)
+	}
+	if !hasPurchasePolicy {
+		db.Close()
+		return nil, fmt.Errorf("migration incomplete: items.purchase_policy is missing")
 	}
 	if err := rebuildDirectOrdersPK(db); err != nil {
 		return nil, err

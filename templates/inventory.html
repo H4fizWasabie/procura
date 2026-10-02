@@ -109,8 +109,9 @@ function inventoryFilters() {
         if (value) params.set(key,value);
     }
     if (document.getElementById('f-low-stock').checked) params.set('low_stock','1');
-    if (document.getElementById('f-active').checked) params.set('active','1');
-    if (document.getElementById('f-purchase-policy').value === 'unclassified') params.set('unclassified','1');
+    const unclassified = document.getElementById('f-purchase-policy').value === 'unclassified';
+    if (document.getElementById('f-active').checked && !unclassified) params.set('active','1');
+    if (unclassified) params.set('unclassified','1');
     return params;
 }
 
