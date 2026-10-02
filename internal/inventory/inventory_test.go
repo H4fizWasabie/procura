@@ -209,7 +209,7 @@ func TestUpdateAnchorsStoredNonStockBehaviourForcesROPZero(t *testing.T) {
 func TestUpdateAnchorsRejectsUnknownFieldsWithEditableList(t *testing.T) {
 	db := inventoryDB(t)
 	err := (&Service{DB: db}).UpdateAnchors("A", "editor@example.test", "correction", map[string]interface{}{
-		"product_status": "Unavailable",
+		"mystery": "unknown",
 	})
 	if !errors.Is(err, ErrInvalidUpdate) {
 		t.Fatalf("unknown field error = %v, want ErrInvalidUpdate", err)
@@ -224,6 +224,132 @@ func TestUpdateAnchorsRejectsUnknownFieldsWithEditableList(t *testing.T) {
 func TestAuditValueFormatsLargeFloatsWithoutExponent(t *testing.T) {
 	if got := auditValue(float64(1_000_000)); got != "1000000" {
 		t.Fatalf("auditValue(1e6) = %q, want 1000000", got)
+	}
+}
+
+func TestOwnedFieldsResyncAndConfirmUOMAreAudited(t *testing.T) {
+	db := inventoryDB(t)
+	if _, err := db.Exec(`UPDATE items SET product_status='not-available',product_type='Curated',
+		hospital_product_status='Available',hospital_product_type='ReportType',uom_confirmation_pending=1 WHERE stock_id='A'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO items(stock_id,product_type) VALUES('TYPE','ReportType')`); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{DB: db}
+	for _, tc := range []struct {
+		role, reason string
+		update       map[string]interface{}
+		wantErr      bool
+	}{
+		{"ASSISTANT", "reviewed", map[string]interface{}{"confirm_uom": true}, true},
+		{"EDITOR", "", map[string]interface{}{"confirm_uom": true}, true},
+		{"EDITOR", "reviewed", map[string]interface{}{"confirm_uom": true, "resync_product_status": true, "resync_product_type": true}, false},
+	} {
+		err := s.UpdateAnchorsAs("A", "editor@example.test", tc.role, tc.reason, tc.update)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("role %s update %v: %v", tc.role, tc.update, err)
+		}
+	}
+	var status, typ, last string
+	var pending, audits int
+	if err := db.QueryRow(`SELECT product_status,product_type,uom_confirmation_pending,last_updated FROM items WHERE stock_id='A'`).Scan(&status, &typ, &pending, &last); err != nil {
+		t.Fatal(err)
+	}
+	if status != "Available" || typ != "ReportType" || pending != 0 || last != "2026-01-02T03:04:05" {
+		t.Fatalf("confirmed item: %q %q %d %q", status, typ, pending, last)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM item_anchor_audit WHERE stock_id='A' AND changed_by='editor@example.test' AND reason='reviewed'`).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 3 {
+		t.Fatalf("audit rows=%d, want 3", audits)
+	}
+	if err := s.UpdateAnchorsAs("A", "editor@example.test", "EDITOR", "again", map[string]interface{}{"confirm_uom": true}); !errors.Is(err, ErrInvalidUpdate) {
+		t.Fatalf("repeat confirmation: %v", err)
+	}
+}
+
+func TestProductStatusAndTypeValidation(t *testing.T) {
+	db := inventoryDB(t)
+	s := &Service{DB: db}
+	for _, tc := range []struct {
+		role    string
+		update  map[string]interface{}
+		wantErr bool
+	}{
+		{"EDITOR", map[string]interface{}{"product_status": "Unavailable"}, true},
+		{"EDITOR", map[string]interface{}{"product_status": "Available"}, false},
+		{"EDITOR", map[string]interface{}{"product_type": "NewType"}, true},
+		{"ADMIN", map[string]interface{}{"product_type": "NewType"}, false},
+	} {
+		err := s.UpdateAnchorsAs("A", "user@example.test", tc.role, "review", tc.update)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("%s %v: %v", tc.role, tc.update, err)
+		}
+	}
+}
+
+func TestHospitalTypeResyncTrustsImportButManualEditsValidate(t *testing.T) {
+	for _, tc := range []struct {
+		name, role      string
+		resync, wantErr bool
+	}{
+		{"editor_resync", "EDITOR", true, false},
+		{"editor_manual", "EDITOR", false, true},
+		{"admin_manual", "ADMIN", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := inventoryDB(t)
+			if _, err := db.Exec(`UPDATE items SET product_type='Curated',hospital_product_type='New hospital type' WHERE stock_id='A'`); err != nil {
+				t.Fatal(err)
+			}
+			updates := map[string]interface{}{"product_type": "New hospital type"}
+			if tc.resync {
+				updates = map[string]interface{}{"resync_product_type": true}
+			}
+			err := (&Service{DB: db}).UpdateAnchorsAs("A", "user@example.test", tc.role, "reviewed", updates)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("update: %v", err)
+			}
+			var typ string
+			var audits int
+			if err := db.QueryRow(`SELECT product_type FROM items WHERE stock_id='A'`).Scan(&typ); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow(`SELECT COUNT(*) FROM item_anchor_audit WHERE field_name='product_type' AND reason='reviewed'`).Scan(&audits); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantErr {
+				if typ != "Curated" || audits != 0 {
+					t.Fatalf("rejected edit changed type=%q audits=%d", typ, audits)
+				}
+			} else if typ != "New hospital type" || audits != 1 {
+				t.Fatalf("type=%q audits=%d", typ, audits)
+			}
+		})
+	}
+}
+
+func TestConfirmUOMRoleRestrictionDoesNotBlockOtherEdits(t *testing.T) {
+	db := inventoryDB(t)
+	s := &Service{DB: db}
+	if err := s.UpdateAnchorsAs("A", "assistant@example.test", "ASSISTANT", "reviewed", map[string]interface{}{"product_status": "Available"}); err != nil {
+		t.Fatalf("ordinary edit: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE items SET uom_confirmation_pending=1 WHERE stock_id='A'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateAnchorsAs("A", "assistant@example.test", "ASSISTANT", "reviewed", map[string]interface{}{"confirm_uom": true, "product_status": "not-available"}); !errors.Is(err, ErrInvalidUpdate) {
+		t.Fatalf("assistant confirmation: %v", err)
+	}
+	var status string
+	var pending int
+	if err := db.QueryRow(`SELECT product_status,uom_confirmation_pending FROM items WHERE stock_id='A'`).Scan(&status, &pending); err != nil {
+		t.Fatal(err)
+	}
+	if status != "Available" || pending != 1 {
+		t.Fatalf("unauthorized confirmation changed status=%q pending=%d", status, pending)
 	}
 }
 

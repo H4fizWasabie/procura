@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-10-02
+- [import] Preserve item columns absent from a workbook and compare UOM only when supplied — partial sheets cannot erase prices or catalogue fields or create false UOM flags
+- [inventory] Trust hospital product-type re-sync and limit the EDITOR/ADMIN check to Confirm UOM — manual type validation remains enforced without blocking other item edits
+- [po/rfq] Reject newly added pending-UOM items on re-save and return 400 only for that guard — existing lines remain editable and database failures still return 500
 - [inventory] Let Unclassified results bypass the Active filter and fail startup visibly when the purchase policy migration is incomplete — keeps the classification queue usable and surfaces schema errors.
 - [core] Apply SQLite's busy timeout through the supported pragma DSN option — wait for transient database locks without changing journal or foreign-key behavior
 - [inventory] Add an audited purchase policy with a guarded one-time legacy backfill and an Unclassified filter — keep purchase intent separate from planning exclusion
@@ -217,3 +220,6 @@
 ## 2026-10-02
 - [inventory] Validate item edits, audit changed fields atomically with user and reason, and keep edits from changing upload timestamps — preserves a reliable last-seen stock import marker.
 - [inventory] Enforce Service/Asset ROP rules for stored behaviour, reject unknown edit fields, and format audit floats without exponent notation — keeps direct API edits consistent and explicit.
+- [import] Share item upsert across both uploads, preserve Procura-owned status/type, refresh hospital shadows, and flag UOM changes — keeps daily reports from undoing purchasing decisions.
+- [inventory] Add audited status/type edits, re-sync, and explicit UOM confirmation; surface pending and stale imports in validation — makes ownership and review visible.
+- [po/rfq/planning] Block pending-UOM PO and RFQ creation and warn after recording direct orders — prevents new unit mistakes without losing existing order records.

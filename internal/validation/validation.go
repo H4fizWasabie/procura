@@ -18,9 +18,34 @@ type Service struct{ DB *sql.DB }
 // Run returns all validation issues.
 func (s *Service) Run(nonzeroOnly bool) []Issue {
 	var issues []Issue
+	rows, _ := s.DB.Query(`SELECT stock_id, COALESCE(item_name,''), COALESCE(uom,'')
+		FROM items WHERE uom_confirmation_pending=1 ORDER BY stock_id`)
+	if rows != nil {
+		for rows.Next() {
+			var id, name, uom string
+			if rows.Scan(&id, &name, &uom) == nil {
+				issues = append(issues, Issue{Type: "UOM_CONFIRMATION", StockID: id, Name: name,
+					Detail: "Imported UOM changed to " + uom + "; use Confirm UOM in the item editor before PO or RFQ creation"})
+			}
+		}
+		rows.Close()
+	}
+	rows, _ = s.DB.Query(`SELECT stock_id, COALESCE(item_name,'') FROM items
+		WHERE (last_updated IS NULL OR last_updated < (SELECT MAX(last_updated) FROM items))
+		AND (SELECT MAX(last_updated) FROM items) IS NOT NULL ORDER BY stock_id`)
+	if rows != nil {
+		for rows.Next() {
+			var id, name string
+			if rows.Scan(&id, &name) == nil {
+				issues = append(issues, Issue{Type: "MISSING_LATEST_IMPORT", StockID: id, Name: name,
+					Detail: "Item was missing from the latest stock report"})
+			}
+		}
+		rows.Close()
+	}
 
 	// 1. Items with no stock_movements
-	rows, _ := s.DB.Query(`
+	rows, _ = s.DB.Query(`
 		SELECT i.stock_id, COALESCE(i.item_name,'')
 		FROM items i
 		LEFT JOIN (SELECT DISTINCT stock_id FROM stock_movements) sm ON sm.stock_id = i.stock_id

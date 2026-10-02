@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"procura/internal/core"
 	"strings"
 	"time"
 )
@@ -51,6 +52,28 @@ func (s *Service) GenerateID() string {
 
 // Save creates or updates an RFQ.
 func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
+	existingItems := map[string]bool{}
+	var raw sql.NullString
+	err := s.DB.QueryRow(`SELECT raw_rfq_json FROM rfq_logs WHERE rfq_id=?`, rfq.RFQID).Scan(&raw)
+	if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
+	if raw.Valid && raw.String != "" {
+		var items []map[string]interface{}
+		if err := json.Unmarshal([]byte(raw.String), &items); err != nil {
+			return "", err
+		}
+		for _, item := range items {
+			existingItems[strv2(item["id"])] = true
+		}
+	}
+	for _, item := range rfq.Items {
+		if !existingItems[item.StockID] {
+			if err := core.CheckPendingUOM(s.DB, item.StockID); err != nil {
+				return "", err
+			}
+		}
+	}
 	if rfq.RFQID == "" {
 		rfq.RFQID = s.GenerateID()
 	}
@@ -67,7 +90,7 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 	}
 	rawJSON, _ := json.Marshal(compact)
 
-	_, err := s.DB.Exec(`
+	_, err = s.DB.Exec(`
 		INSERT OR REPLACE INTO rfq_logs (rfq_id, date, supplier, items_count, created_by, raw_rfq_json)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, rfq.RFQID, rfq.Date, rfq.Supplier, rfq.Count, createdBy, string(rawJSON))
@@ -145,13 +168,31 @@ func (s *Service) Delete(rfqID string) error {
 }
 
 // helpers
-func strv(s sql.NullString) string { if s.Valid { return s.String }; return "" }
-func strv2(v interface{}) string { if v == nil { return "" }; if s, ok := v.(string); ok { return s }; return "" }
+func strv(s sql.NullString) string {
+	if s.Valid {
+		return s.String
+	}
+	return ""
+}
+func strv2(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
 func f64v2(v interface{}) float64 {
-	if v == nil { return 0 }
+	if v == nil {
+		return 0
+	}
 	switch n := v.(type) {
-	case float64: return n
-	case json.Number: f, _ := n.Float64(); return f
+	case float64:
+		return n
+	case json.Number:
+		f, _ := n.Float64()
+		return f
 	}
 	return 0
 }

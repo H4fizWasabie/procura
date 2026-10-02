@@ -19,6 +19,7 @@ import (
 var anchorFields = []string{
 	"exclude", "velocity_override", "item_behaviour",
 	"cost", "uom", "selling_price", "rop", "pack_size", "purchase_policy",
+	"product_status", "product_type",
 }
 
 var ErrInvalidUpdate = errors.New("invalid inventory update")
@@ -220,6 +221,18 @@ var anchorValidation = map[string]func(interface{}) (interface{}, error){
 		}
 		return nil, fmt.Errorf("allowed values: routine, on_demand, do_not_reorder, or NULL (unclassified)")
 	},
+	"product_status": func(v interface{}) (interface{}, error) {
+		if s, ok := v.(string); ok && (s == "Available" || s == "not-available") {
+			return s, nil
+		}
+		return nil, fmt.Errorf("allowed values: Available, not-available")
+	},
+	"product_type": func(v interface{}) (interface{}, error) {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s), nil
+		}
+		return nil, fmt.Errorf("must be non-empty text")
+	},
 }
 
 func validateNonNegative(v interface{}) (interface{}, error) {
@@ -264,12 +277,23 @@ func nonNegativeNumber(v interface{}) (float64, error) {
 
 // UpdateAnchors validates, updates and audits all changed fields atomically.
 func (s *Service) UpdateAnchors(stockID, changedBy, reason string, updates map[string]interface{}) error {
+	return s.UpdateAnchorsAs(stockID, changedBy, "EDITOR", reason, updates)
+}
+
+// UpdateAnchorsAs applies editor changes and explicit re-sync/confirmation actions.
+func (s *Service) UpdateAnchorsAs(stockID, changedBy, role, reason string, updates map[string]interface{}) error {
 	reason = strings.TrimSpace(reason)
 	changedBy = strings.TrimSpace(changedBy)
 	if reason == "" || changedBy == "" {
 		return fmt.Errorf("%w: changed_by and reason are required", ErrInvalidUpdate)
 	}
 	for field := range updates {
+		if field == "confirm_uom" || field == "resync_product_status" || field == "resync_product_type" {
+			if updates[field] != true {
+				return fmt.Errorf("%w: %s must be true", ErrInvalidUpdate, field)
+			}
+			continue
+		}
 		if _, ok := anchorValidation[field]; !ok {
 			return fmt.Errorf("%w: unknown field %q; editable fields: %s (reason is also allowed)", ErrInvalidUpdate, field, strings.Join(anchorFields, ", "))
 		}
@@ -291,6 +315,47 @@ func (s *Service) UpdateAnchors(stockID, changedBy, reason string, updates map[s
 		return err
 	}
 	defer tx.Rollback()
+	if updates["confirm_uom"] == true && role != "EDITOR" && role != "ADMIN" {
+		return fmt.Errorf("%w: EDITOR or ADMIN required", ErrInvalidUpdate)
+	}
+	var shadowStatus, shadowType sql.NullString
+	var pending int
+	if err := tx.QueryRow(`SELECT hospital_product_status, hospital_product_type, uom_confirmation_pending
+		FROM items WHERE stock_id=?`, stockID).Scan(&shadowStatus, &shadowType, &pending); err != nil {
+		return err
+	}
+	if updates["resync_product_status"] == true {
+		if !shadowStatus.Valid {
+			return fmt.Errorf("%w: no hospital product_status to re-sync", ErrInvalidUpdate)
+		}
+		value, err := anchorValidation["product_status"](shadowStatus.String)
+		if err != nil {
+			return fmt.Errorf("%w: hospital product_status %v", ErrInvalidUpdate, err)
+		}
+		validated["product_status"] = value
+	}
+	if updates["resync_product_type"] == true {
+		if !shadowType.Valid {
+			return fmt.Errorf("%w: no hospital product_type to re-sync", ErrInvalidUpdate)
+		}
+		value, err := anchorValidation["product_type"](shadowType.String)
+		if err != nil {
+			return fmt.Errorf("%w: hospital product_type %v", ErrInvalidUpdate, err)
+		}
+		validated["product_type"] = value
+	}
+	if next, ok := validated["product_type"].(string); ok && role != "ADMIN" && updates["resync_product_type"] != true {
+		var exists bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM items WHERE product_type = ?)`, next).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("%w: product_type must match an existing value; ADMIN may add a new one", ErrInvalidUpdate)
+		}
+	}
+	if updates["confirm_uom"] == true && pending == 0 {
+		return fmt.Errorf("%w: UOM has no pending change", ErrInvalidUpdate)
+	}
 
 	var itemName sql.NullString
 	values := make([]interface{}, len(anchorFields))
@@ -325,6 +390,12 @@ func (s *Service) UpdateAnchors(stockID, changedBy, reason string, updates map[s
 		sets = append(sets, field+" = ?")
 		args = append(args, value)
 		changed = append(changed, field)
+	}
+	if updates["confirm_uom"] == true {
+		sets = append(sets, "uom_confirmation_pending = 0")
+		changed = append(changed, "uom_confirmation_pending")
+		oldValues["uom_confirmation_pending"] = pending
+		validated["uom_confirmation_pending"] = 0
 	}
 	if len(changed) == 0 {
 		return tx.Commit()

@@ -56,6 +56,8 @@
             <span style="cursor:pointer;color:var(--muted);font-size:20px" onclick="closeDetail()">&times;</span>
         </div>
         <div class="grid-3" style="margin-bottom:16px" id="detail-summary"></div>
+		<div id="uom-warning" class="card" role="alert" style="display:none;margin-bottom:12px;color:var(--amber)">Imported UOM changed. PO and RFQ creation are paused for this item until you confirm the unit. {{if or (eq (index .User "role") "EDITOR") (eq (index .User "role") "ADMIN")}}<button type="button" onclick="confirmUOM()">Confirm UOM</button>{{end}}</div>
+		<div id="hospital-differences" class="card" style="display:none;margin-bottom:12px"></div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
             <!-- Anchor Editor -->
@@ -79,6 +81,8 @@
                 <div class="form-group"><label>Cost (RM)</label><input type="number" step="0.01" id="ae-cost"></div>
                 <div class="form-group"><label>Selling Price (RM)</label><input type="number" step="0.01" id="ae-selling"></div>
                 <div class="form-group"><label>UOM</label><input id="ae-uom"></div>
+				<div class="form-group"><label>Product Status</label><select id="ae-status"><option value="Available">Available</option><option value="not-available">not-available</option></select></div>
+				<div class="form-group"><label>Product Type</label><input id="ae-type" list="product-types"></div><datalist id="product-types"></datalist>
                 <div class="form-group"><label>ROP</label><input type="number" step="1" id="ae-rop"></div>
             </div>
         </div>
@@ -193,6 +197,18 @@ async function showDetail(stockId) {
     document.getElementById('ae-selling').value = d.selling_price||0;
     document.getElementById('ae-uom').value = d.uom||'';
     document.getElementById('ae-rop').value = d.rop||0;
+	const warning = document.getElementById('uom-warning');
+	warning.style.display = d.uom_confirmation_pending ? 'block' : 'none';
+	const differences = [];
+	if (d.hospital_product_status !== null && d.hospital_product_status !== d.product_status) differences.push(`Status: Procura ${esc(d.product_status)} · report ${esc(d.hospital_product_status)} <button type="button" onclick="resyncField('product_status')">Re-sync status</button>`);
+	if (d.hospital_product_type !== null && d.hospital_product_type !== d.product_type) differences.push(`Type: Procura ${esc(d.product_type)} · report ${esc(d.hospital_product_type)} <button type="button" onclick="resyncField('product_type')">Re-sync type</button>`);
+	const diffPanel = document.getElementById('hospital-differences');
+	diffPanel.style.display = differences.length ? 'block' : 'none';
+	diffPanel.innerHTML = differences.join('<br>');
+	document.getElementById('ae-status').value = d.product_status || 'Available';
+	document.getElementById('ae-type').value = d.product_type || '';
+	const typeOptions = await fetch('/api/inventory/product-types').then(r => r.json());
+	document.getElementById('product-types').innerHTML = typeOptions.map(type => `<option value="${esc(type)}"></option>`).join('');
 
     // Movements
     document.getElementById('movement-body').innerHTML = (d.movements||[]).map(m => `
@@ -228,6 +244,8 @@ async function saveAnchors() {
     const selling = Number(document.getElementById('ae-selling').value)||0;
     if (selling !== Number(selectedItem.selling_price||0)) updates.selling_price = selling;
     if (document.getElementById('ae-uom').value !== (selectedItem.uom||'')) updates.uom = document.getElementById('ae-uom').value;
+	if (document.getElementById('ae-status').value !== (selectedItem.product_status||'')) updates.product_status = document.getElementById('ae-status').value;
+	if (document.getElementById('ae-type').value !== (selectedItem.product_type||'')) updates.product_type = document.getElementById('ae-type').value;
     const rop = (beh==='Service'||beh==='Asset') ? 0 : (Number(document.getElementById('ae-rop').value)||0);
     if (rop !== Number(selectedItem.rop||0)) updates.rop = rop;
     try {
@@ -239,6 +257,19 @@ async function saveAnchors() {
         loadPage(page); showDetail(selectedStockId);
     } catch (err) { toast('Could not confirm the save. Reload the item before retrying.',false); }
 }
+
+async function itemAction(action) {
+	const reason = document.getElementById('ae-reason').value.trim();
+	if (!reason) return toast('Please enter a reason for this action', false);
+	const res = await fetch('/api/inventory/'+encodeURIComponent(selectedStockId), {
+		method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({[action]:true, reason})
+	});
+	const data = await res.json();
+	if (!res.ok) return toast(data.error || 'Action failed', false);
+	toast('Saved', true); showDetail(selectedStockId);
+}
+function confirmUOM() { itemAction('confirm_uom'); }
+function resyncField(field) { itemAction('resync_'+field); }
 
 async function importStock(input) {
     const file = input.files[0]; if(!file) return;

@@ -326,7 +326,7 @@ func main() {
 		}
 		reason, _ := updates["reason"].(string)
 		delete(updates, "reason")
-		if err := invSvc.UpdateAnchors(stockID, r.Header.Get("X-User-Email"), reason, updates); err != nil {
+		if err := invSvc.UpdateAnchorsAs(stockID, r.Header.Get("X-User-Email"), r.Header.Get("X-User-Role"), reason, updates); err != nil {
 			status := http.StatusInternalServerError
 			if errors.Is(err, inventory.ErrInvalidUpdate) {
 				status = http.StatusBadRequest
@@ -341,6 +341,22 @@ func main() {
 
 	mux.HandleFunc("GET /api/inventory/basic", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, invSvc.BasicList())
+	}))
+	mux.HandleFunc("GET /api/inventory/product-types", protected(func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db.Query(`SELECT DISTINCT product_type FROM items WHERE TRIM(COALESCE(product_type,'')) != '' ORDER BY product_type`)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+		types := []string{}
+		for rows.Next() {
+			var typ string
+			if rows.Scan(&typ) == nil {
+				types = append(types, typ)
+			}
+		}
+		writeJSON(w, 200, types)
 	}))
 
 	// Stock Balance History Report import (daily workflow — fixed columns like Python items_screen)
@@ -430,12 +446,23 @@ func main() {
 			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "no items"})
 			return
 		}
+		var warnings []string
+		for _, item := range body.Items {
+			name, checkErr := core.PendingUOM(db, item.StockID)
+			if checkErr != nil {
+				writeJSON(w, 500, map[string]interface{}{"success": false, "error": checkErr.Error()})
+				return
+			}
+			if name != "" {
+				warnings = append(warnings, fmt.Sprintf("%s (%s): UOM change pending; use Confirm UOM in the item editor", name, item.StockID))
+			}
+		}
 		orderID, err := planSvc.MarkOrdered(body.Items, body.Supplier, body.Notes, r.Header.Get("X-User-Email"))
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "orderId": orderID})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "orderId": orderID, "warnings": warnings})
 	})))
 
 	mux.HandleFunc("POST /api/planning/order/{action}", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
@@ -487,7 +514,7 @@ func main() {
 		}
 		id, err := poSvc.Save(body)
 		if err != nil {
-			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+			writeOrderSaveError(w, err)
 			return
 		}
 		// A covering PO supersedes ACTIVE direct orders for its stock_ids (#6).
@@ -684,7 +711,7 @@ func main() {
 		json.NewDecoder(r.Body).Decode(&body)
 		id, err := rfqSvc.Save(body, r.Header.Get("X-User-Email"))
 		if err != nil {
-			writeJSON(w, 500, map[string]interface{}{"success": false, "error": err.Error()})
+			writeOrderSaveError(w, err)
 			return
 		}
 		writeJSON(w, 200, map[string]interface{}{"success": true, "rfq_id": id})
@@ -901,11 +928,14 @@ func main() {
 		// Item detail
 		var id, name, cat, ptype, supplier, uom, status, updated, beh sql.NullString
 		var cost, selling, current, rop sql.NullFloat64
-		var velOv, pack, exclude, policy sql.NullString
+		var velOv, pack, exclude, policy, hospitalStatus, hospitalType sql.NullString
+		var uomPending int
 		err := db.QueryRow(`SELECT stock_id, item_name, category, product_type, supplier_name, uom,
-			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override, pack_size, exclude, purchase_policy
+			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override, pack_size, exclude, purchase_policy,
+			hospital_product_status, hospital_product_type, uom_confirmation_pending
 			FROM items WHERE stock_id = ?`, stockID).Scan(&id, &name, &cat, &ptype, &supplier, &uom,
-			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv, &pack, &exclude, &policy)
+			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv, &pack, &exclude, &policy,
+			&hospitalStatus, &hospitalType, &uomPending)
 		if err != nil {
 			status := http.StatusInternalServerError
 			if err == sql.ErrNoRows {
@@ -960,7 +990,9 @@ func main() {
 			"stock_id": strv(id), "item_name": strv(name), "category": strv(cat),
 			"product_type": strv(ptype), "supplier_name": strv(supplier), "uom": strv(uom),
 			"product_status": strv(status), "last_updated": strv(updated),
-			"item_behaviour": strv(beh), "cost": f64v(cost), "selling_price": f64v(selling),
+			"hospital_product_status": nullableStringValue(hospitalStatus), "hospital_product_type": nullableStringValue(hospitalType),
+			"uom_confirmation_pending": uomPending == 1,
+			"item_behaviour":           strv(beh), "cost": f64v(cost), "selling_price": f64v(selling),
 			"current_stock": f64v(current), "rop": f64v(rop), "velocity_override": strv(velOv),
 			"supplier_uom": strv(supUom), "pack_size": strv(pack), "exclude": strv(exclude), "purchase_policy": nullableStringValue(policy),
 			"movements": movements, "po_history": poHistory,
@@ -1249,6 +1281,14 @@ func userFromReq(r *http.Request) map[string]string {
 		"role":  r.Header.Get("X-User-Role"),
 		"name":  r.Header.Get("X-User-Name"),
 	}
+}
+
+func writeOrderSaveError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	if errors.Is(err, core.ErrPendingUOM) {
+		status = http.StatusBadRequest
+	}
+	writeJSON(w, status, map[string]interface{}{"success": false, "error": err.Error()})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
