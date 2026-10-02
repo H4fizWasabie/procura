@@ -186,6 +186,21 @@ func (s *Service) Save(p PO) (string, error) {
 
 // SaveAs records availability overrides with the authenticated actor.
 func (s *Service) SaveAs(p PO, user string) (string, error) {
+	return s.save(p, user, false)
+}
+
+// CreateAssistant ignores supplied IDs/status and cannot overwrite an existing PO.
+func (s *Service) CreateAssistant(p PO) (string, error) {
+	if p.AcknowledgedStockIDs != nil {
+		return "", planning.ErrAssistantAcknowledgement
+	}
+	p.POID = ""
+	p.Status, p.ShipStatus = "Pending Approval", "Pending"
+	p.Paid, p.Balance, p.InvoiceDate = 0, 0, ""
+	return s.save(p, "", true)
+}
+
+func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 	if err := ValidateRequired(p); err != nil {
 		return "", err
 	}
@@ -215,7 +230,7 @@ func (s *Service) SaveAs(p PO, user string) (string, error) {
 	}
 	var overrides []string
 	for _, item := range p.Items {
-		if !existingItems[item.StockID] {
+		if !existingItems[item.StockID] && !createOnly {
 			if err := core.CheckPendingUOM(s.DB, item.StockID); err != nil {
 				return "", err
 			}
@@ -230,7 +245,7 @@ func (s *Service) SaveAs(p PO, user string) (string, error) {
 		}
 	}
 	isNew := p.POID == ""
-	if isNew {
+	if isNew && !createOnly {
 		p.POID = s.GenerateID()
 	}
 
@@ -259,19 +274,37 @@ func (s *Service) SaveAs(p PO, user string) (string, error) {
 		return "", err
 	}
 	defer tx.Rollback()
+	if createOnly {
+		p.POID, err = core.NextDocumentID(tx, "purchase_orders", "po_id", "PO - "+time.Now().Format("012006")+" - ", 3)
+		if err != nil {
+			return "", err
+		}
+		for _, item := range p.Items {
+			if err := core.CheckPendingUOM(tx, item.StockID); err != nil {
+				return "", err
+			}
+			if err := planning.CheckAssistantPurchase(tx, item.StockID); err != nil {
+				return "", err
+			}
+		}
+	}
 
-	_, err = tx.Exec(`
+	query := `
 		INSERT INTO purchase_orders
 			(po_id, date, supplier, bill_no, total, status, ship_status, department, terms, invoice_date, raw_po_json)
 		VALUES (?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), 'Pending Approval'), COALESCE(NULLIF(?, ''), 'Pending'),
-		        ?, ?, ?, ?)
-		ON CONFLICT(po_id) DO UPDATE SET
+		        ?, ?, ?, ?)`
+	args := []interface{}{p.POID, p.Date, p.Supplier, p.BillNo, p.Total, p.Status, p.ShipStatus,
+		p.Department, p.Terms, p.InvoiceDate, string(itemsJSON)}
+	if !createOnly {
+		query += ` ON CONFLICT(po_id) DO UPDATE SET
 			date=excluded.date, supplier=excluded.supplier, bill_no=excluded.bill_no,
 			total=excluded.total, status=COALESCE(NULLIF(?, ''), purchase_orders.status),
 			ship_status=excluded.ship_status, department=excluded.department,
-			terms=excluded.terms, invoice_date=excluded.invoice_date, raw_po_json=excluded.raw_po_json
-	`, p.POID, p.Date, p.Supplier, p.BillNo, p.Total, p.Status, p.ShipStatus,
-		p.Department, p.Terms, p.InvoiceDate, string(itemsJSON), p.Status)
+			terms=excluded.terms, invoice_date=excluded.invoice_date, raw_po_json=excluded.raw_po_json`
+		args = append(args, p.Status)
+	}
+	_, err = tx.Exec(query, args...)
 	if err != nil {
 		return "", err
 	}

@@ -8,8 +8,13 @@ import (
 
 var ErrPendingUOM = errors.New("pending UOM change")
 
+// RowQuerier lets guards use either the pool or a document's transaction.
+type RowQuerier interface {
+	QueryRow(string, ...interface{}) *sql.Row
+}
+
 // PendingUOM names an item whose imported unit needs explicit confirmation.
-func PendingUOM(db *sql.DB, stockID string) (string, error) {
+func PendingUOM(db RowQuerier, stockID string) (string, error) {
 	if stockID == "" {
 		return "", nil
 	}
@@ -22,7 +27,7 @@ func PendingUOM(db *sql.DB, stockID string) (string, error) {
 	return name, err
 }
 
-func CheckPendingUOM(db *sql.DB, stockID string) error {
+func CheckPendingUOM(db RowQuerier, stockID string) error {
 	name, err := PendingUOM(db, stockID)
 	if err != nil {
 		return err
