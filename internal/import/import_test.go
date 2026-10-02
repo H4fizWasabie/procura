@@ -150,6 +150,16 @@ func TestImportStockUpsertsCatalogueAndStock(t *testing.T) {
 	if counts["added"] != 1 || counts["updated"] != 1 || counts["errors"] != 0 {
 		t.Fatalf("counts = %#v", counts)
 	}
+	var addedUpdated, existingUpdated string
+	if err := db.QueryRow("SELECT last_updated FROM items WHERE stock_id='M26079R'").Scan(&addedUpdated); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT last_updated FROM items WHERE stock_id='OLD'").Scan(&existingUpdated); err != nil {
+		t.Fatal(err)
+	}
+	if addedUpdated == "" || addedUpdated != existingUpdated {
+		t.Fatalf("upload timestamps = %q and %q, want one shared non-empty timestamp", addedUpdated, existingUpdated)
+	}
 
 	var name, supplier string
 	var stock, cost, price, rop, velocity float64

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -323,9 +324,13 @@ func main() {
 			writeJSON(w, 400, map[string]interface{}{"success": false, "error": "invalid inventory update"})
 			return
 		}
-		if err := invSvc.UpdateAnchors(stockID, updates); err != nil {
+		reason, _ := updates["reason"].(string)
+		delete(updates, "reason")
+		if err := invSvc.UpdateAnchors(stockID, r.Header.Get("X-User-Email"), reason, updates); err != nil {
 			status := http.StatusInternalServerError
-			if err == sql.ErrNoRows {
+			if errors.Is(err, inventory.ErrInvalidUpdate) {
+				status = http.StatusBadRequest
+			} else if err == sql.ErrNoRows {
 				status = http.StatusNotFound
 			}
 			writeJSON(w, status, map[string]interface{}{"success": false, "error": err.Error()})

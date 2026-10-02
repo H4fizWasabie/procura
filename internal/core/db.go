@@ -123,7 +123,8 @@ var schema = []string{
 		field_name TEXT,
 		old_value TEXT,
 		new_value TEXT,
-		reason TEXT
+		reason TEXT,
+		changed_by TEXT
 	)`,
 	`CREATE TABLE IF NOT EXISTS rfq_logs (
 		rfq_id TEXT PRIMARY KEY,
@@ -237,6 +238,7 @@ var migrations = []string{
 	"ALTER TABLE items ADD COLUMN initial_stock_target REAL",
 	"ALTER TABLE direct_orders ADD COLUMN superseded_by_po TEXT",
 	"ALTER TABLE items ADD COLUMN velocity REAL",
+	"ALTER TABLE item_anchor_audit ADD COLUMN changed_by TEXT",
 }
 
 func Open(dataDir string) (*sql.DB, error) {

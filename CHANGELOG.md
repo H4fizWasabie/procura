@@ -212,3 +212,6 @@
 
 ## 2026-09-28
 - [po] make PO history rows selectable and expose per-order Preview and Print / PDF actions in the list — restores easy order selection and access to document output.
+## 2026-10-02
+- [inventory] Validate item edits, audit changed fields atomically with user and reason, and keep edits from changing upload timestamps — preserves a reliable last-seen stock import marker.
+- [inventory] Enforce Service/Asset ROP rules for stored behaviour, reject unknown edit fields, and format audit floats without exponent notation — keeps direct API edits consistent and explicit.
