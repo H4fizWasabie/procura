@@ -242,7 +242,7 @@ var migrations = []string{
 func Open(dataDir string) (*sql.DB, error) {
 	os.MkdirAll(dataDir, 0755)
 	path := filepath.Join(dataDir, "procura.sqlite")
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on")
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
