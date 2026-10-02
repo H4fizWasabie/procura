@@ -18,29 +18,30 @@ import (
 // Anchor fields that can be edited (matches GAS apiSaveInventoryItem).
 var anchorFields = []string{
 	"exclude", "velocity_override", "item_behaviour",
-	"cost", "uom", "selling_price", "rop", "pack_size",
+	"cost", "uom", "selling_price", "rop", "pack_size", "purchase_policy",
 }
 
 var ErrInvalidUpdate = errors.New("invalid inventory update")
 
 type Item struct {
-	StockID       string  `json:"stock_id"`
-	ItemName      string  `json:"item_name"`
-	Cost          float64 `json:"cost"`
-	UOM           string  `json:"uom"`
-	ProductType   string  `json:"product_type"`
-	Category      string  `json:"category"`
-	CurrentStock  float64 `json:"current_stock"`
-	ROP           float64 `json:"rop"`
-	SellingPrice  float64 `json:"selling_price"`
-	LastUpdated   string  `json:"last_updated"`
-	PackSize      string  `json:"pack_size"`
-	Exclude       string  `json:"exclude"`
-	ProductStatus string  `json:"product_status"`
-	VelocityOv    string  `json:"velocity_override"`
-	SupplierName  string  `json:"supplier_name"`
-	ItemBehaviour string  `json:"item_behaviour"`
-	SupplierUOM   string  `json:"supplier_uom,omitempty"`
+	StockID        string  `json:"stock_id"`
+	ItemName       string  `json:"item_name"`
+	Cost           float64 `json:"cost"`
+	UOM            string  `json:"uom"`
+	ProductType    string  `json:"product_type"`
+	Category       string  `json:"category"`
+	CurrentStock   float64 `json:"current_stock"`
+	ROP            float64 `json:"rop"`
+	SellingPrice   float64 `json:"selling_price"`
+	LastUpdated    string  `json:"last_updated"`
+	PackSize       string  `json:"pack_size"`
+	Exclude        string  `json:"exclude"`
+	ProductStatus  string  `json:"product_status"`
+	VelocityOv     string  `json:"velocity_override"`
+	SupplierName   string  `json:"supplier_name"`
+	ItemBehaviour  string  `json:"item_behaviour"`
+	PurchasePolicy *string `json:"purchase_policy"`
+	SupplierUOM    string  `json:"supplier_uom,omitempty"`
 }
 
 type Service struct {
@@ -50,7 +51,7 @@ type Service struct {
 // Filters apply to the full inventory before pagination or export.
 type Filters struct {
 	Search, StockID, Name, Supplier, Category string
-	LowStock, Active                          bool
+	LowStock, Active, Unclassified            bool
 }
 
 func (s *Service) List(search string, page, pageSize int) []Item {
@@ -91,13 +92,16 @@ func (s *Service) ListFiltered(f Filters, page, pageSize int) ([]Item, error) {
 	if f.Active {
 		where = append(where, "UPPER(TRIM(COALESCE(i.exclude,''))) NOT IN ('1','TRUE','YES','EXCLUDE') AND LOWER(TRIM(COALESCE(i.item_behaviour,''))) != 'exclude'")
 	}
+	if f.Unclassified {
+		where = append(where, "i.purchase_policy IS NULL")
+	}
 	order := "i.stock_id DESC"
 	if f.Search != "" || f.StockID != "" || f.Name != "" {
 		order = "i.item_name, i.stock_id"
 	}
 	query := `SELECT i.stock_id, i.item_name, i.cost, i.uom, i.product_type, i.category,
  i.current_stock, i.rop, i.selling_price, i.last_updated, i.pack_size,
- i.exclude, i.product_status, i.velocity_override, i.supplier_name, i.item_behaviour,
+	 i.exclude, i.product_status, i.velocity_override, i.supplier_name, i.item_behaviour, i.purchase_policy,
  COALESCE((SELECT m.supplier_uom FROM supplier_item_mappings m
  WHERE m.stock_id = i.stock_id AND m.supplier_name = i.supplier_name ORDER BY m.id LIMIT 1), '')
  FROM items i WHERE ` + strings.Join(where, " AND ") + " ORDER BY " + order
@@ -200,6 +204,21 @@ var anchorValidation = map[string]func(interface{}) (interface{}, error){
 			return nil, fmt.Errorf("must be text (empty is allowed)")
 		}
 		return strings.TrimSpace(s), nil
+	},
+	"purchase_policy": func(v interface{}) (interface{}, error) {
+		if v == nil {
+			return nil, nil
+		}
+		s, ok := v.(string)
+		if ok {
+			s = strings.TrimSpace(s)
+		}
+		for _, allowed := range []string{"routine", "on_demand", "do_not_reorder"} {
+			if ok && s == allowed {
+				return s, nil
+			}
+		}
+		return nil, fmt.Errorf("allowed values: routine, on_demand, do_not_reorder, or NULL (unclassified)")
 	},
 }
 
@@ -374,9 +393,9 @@ func scanItems(rows *sql.Rows) ([]Item, error) {
 	for rows.Next() {
 		var it Item
 		var cost, current, rop, selling sql.NullFloat64
-		var stockID, name, uom, ptype, cat, updated, pack, exclude, status, velOv, supplier, beh, supUom sql.NullString
+		var stockID, name, uom, ptype, cat, updated, pack, exclude, status, velOv, supplier, beh, supUom, policy sql.NullString
 		if err := rows.Scan(&stockID, &name, &cost, &uom, &ptype, &cat, &current, &rop,
-			&selling, &updated, &pack, &exclude, &status, &velOv, &supplier, &beh, &supUom); err != nil {
+			&selling, &updated, &pack, &exclude, &status, &velOv, &supplier, &beh, &policy, &supUom); err != nil {
 			return nil, err
 		}
 
@@ -389,11 +408,19 @@ func scanItems(rows *sql.Rows) ([]Item, error) {
 			PackSize: str(pack), Exclude: str(exclude),
 			ProductStatus: str(status), VelocityOv: str(velOv),
 			SupplierName: str(supplier), ItemBehaviour: str(beh),
-			SupplierUOM: str(supUom),
+			PurchasePolicy: nullableString(policy),
+			SupplierUOM:    str(supUom),
 		}
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+func nullableString(s sql.NullString) *string {
+	if !s.Valid {
+		return nil
+	}
+	return &s.String
 }
 
 func str(s sql.NullString) string {

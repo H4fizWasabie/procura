@@ -33,6 +33,44 @@ func poSheetFile(t *testing.T, dataRows [][]interface{}) *bytes.Buffer {
 	return &buf
 }
 
+func itemSheetFile(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	f := excelize.NewFile()
+	if err := f.SetSheetName("Sheet1", "DB_Items"); err != nil {
+		t.Fatal(err)
+	}
+	header := []interface{}{"stock_id", "item_name", "cost", "uom", "current_stock"}
+	row := []interface{}{"WB-NEW", "Workbook item", 2, "ea", 4}
+	if err := f.SetSheetRow("DB_Items", "A1", &header); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow("DB_Items", "A2", &row); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	return &buf
+}
+
+func TestWorkbookAndStockImportsDefaultNewItemsToRoutine(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if _, err := (&Service{DB: db, ImportsDir: t.TempDir()}).Import(itemSheetFile(t), "items.xlsx"); err != nil {
+		t.Fatal(err)
+	}
+	var policy string
+	if err := db.QueryRow("SELECT purchase_policy FROM items WHERE stock_id='WB-NEW'").Scan(&policy); err != nil || policy != "routine" {
+		t.Fatalf("workbook import purchase_policy = %q, %v; want routine", policy, err)
+	}
+}
+
 func TestImportPOMalformedJSONReportedNotEmpty(t *testing.T) {
 	db, err := core.Open(t.TempDir())
 	if err != nil {
@@ -168,6 +206,10 @@ func TestImportStockUpsertsCatalogueAndStock(t *testing.T) {
 	}
 	if name != "RENADYL" || supplier != "GLADRON CHEMICALS SDN BHD" || stock != 325 || cost != 5.6 || price != 8 {
 		t.Fatalf("new item = %q %q %.0f %.2f %.2f", name, supplier, stock, cost, price)
+	}
+	var policy string
+	if err := db.QueryRow("SELECT purchase_policy FROM items WHERE stock_id='M26079R'").Scan(&policy); err != nil || policy != "routine" {
+		t.Fatalf("stock import purchase_policy = %q, %v; want routine", policy, err)
 	}
 	if rop != 0 || velocity != 0 {
 		t.Fatalf("new planning fields changed: rop=%v velocity=%v", rop, velocity)

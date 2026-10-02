@@ -2,6 +2,7 @@
 
 ## 2026-10-02
 - [core] Apply SQLite's busy timeout through the supported pragma DSN option — wait for transient database locks without changing journal or foreign-key behavior
+- [inventory] Add an audited purchase policy with a guarded one-time legacy backfill and an Unclassified filter — keep purchase intent separate from planning exclusion
 
 ## 2026-09-30
 - [po] Return empty filtered results as an array and safely handle null list responses — avoid a refresh error after saving a PO status

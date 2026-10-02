@@ -2,6 +2,7 @@ package core
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -131,5 +132,76 @@ func TestOpenAddsChangedByToLegacyItemAnchorAudit(t *testing.T) {
 	}
 	if reason != "fixture" || changedBy.Valid {
 		t.Fatalf("migrated audit row = reason %q, changed_by %#v", reason, changedBy)
+	}
+}
+
+func TestPurchasePolicyMigrationBackfillsOnce(t *testing.T) {
+	fixturePath := filepath.Join(t.TempDir(), "fixture.sqlite")
+	fixture, err := sql.Open("sqlite", fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.Exec("CREATE TABLE items (stock_id TEXT PRIMARY KEY, exclude)"); err != nil {
+		t.Fatal(err)
+	}
+	for i, value := range []interface{}{1, "1", "TRUE", " YES ", "EXCLUDE", 0, "FALSE", nil, 2} {
+		if _, err := fixture.Exec("INSERT INTO items(stock_id,exclude) VALUES(?,?)", fmt.Sprintf("I%d", i), value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fixture.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	fixtureBytes, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "procura.sqlite"), fixtureBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"", "", "", "", "", "routine", "routine", "routine", "routine"}
+	for i, expected := range want {
+		var policy sql.NullString
+		if err := db.QueryRow("SELECT purchase_policy FROM items WHERE stock_id=?", fmt.Sprintf("I%d", i)).Scan(&policy); err != nil {
+			t.Fatal(err)
+		}
+		if expected == "" && policy.Valid || expected != "" && (!policy.Valid || policy.String != expected) {
+			t.Errorf("I%d policy = %#v, want %q", i, policy, expected)
+		}
+	}
+	if _, err := db.Exec("INSERT INTO items(stock_id,purchase_policy) VALUES('INVALID','other')"); err == nil {
+		t.Fatal("purchase_policy CHECK accepted invalid value")
+	}
+	if _, err := db.Exec("INSERT INTO items(stock_id) VALUES('NEW')"); err != nil {
+		t.Fatal(err)
+	}
+	var policy string
+	if err := db.QueryRow("SELECT purchase_policy FROM items WHERE stock_id='NEW'").Scan(&policy); err != nil || policy != "routine" {
+		t.Fatalf("new item purchase_policy = %q, %v; want routine", policy, err)
+	}
+	if _, err := db.Exec("UPDATE items SET purchase_policy='do_not_reorder' WHERE stock_id='I0'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.QueryRow("SELECT purchase_policy FROM items WHERE stock_id='I0'").Scan(&policy); err != nil || policy != "do_not_reorder" {
+		t.Fatalf("restart changed policy to %q, %v", policy, err)
+	}
+	var marker string
+	if err := db.QueryRow("SELECT value FROM settings WHERE key='migration.purchase_policy.v1'").Scan(&marker); err != nil || marker != "5" {
+		t.Fatalf("migration marker = %q, %v; want count 5", marker, err)
 	}
 }
