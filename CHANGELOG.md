@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-10-02
+- [extension] Add assistant write tools (preview/create PO and RFQ, single and batch item edits) that call Procura's HTTP API as the restricted ASSISTANT account, with preview-then-reply confirmation, read-back verification and no retry of unclear saves; search now returns purchase policy, behaviour and exclude — Theoses drafts and classifies while approvals stay human
 - [po/rfq] Require exact inventory IDs for every assistant-created line inside the create transaction — blank, unknown and mis-cased IDs cannot bypass purchase or UOM guards
 - [validation/dashboard] Apply routine eligibility to the zero-stock reorder signal while retaining all-item data-quality checks, and break alert health ties by stock ID — prevent seasonal items leaking into signals and stabilize the top ten
 - [movement] Recalculate ROP using stockability only after all planning views adopt shared eligibility — exclusion, purchase policy and availability toggles no longer erase the reorder point

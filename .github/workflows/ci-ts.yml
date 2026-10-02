@@ -23,3 +23,5 @@ jobs:
         run: npm install --no-fund --no-audit
       - name: tsc --noEmit
         run: npx tsc -p tsconfig.ci.json
+      - name: extension tests
+        run: npm test
