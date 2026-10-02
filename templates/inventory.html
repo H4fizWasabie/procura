@@ -16,6 +16,7 @@
     <input type="text" id="f-name" placeholder="Item Name" style="width:180px" oninput="loadPage(1)">
     <select id="f-supplier" style="width:160px" onchange="loadPage(1)"><option value="">All Suppliers</option></select>
     <select id="f-category" style="width:140px" onchange="loadPage(1)"><option value="">All Categories</option></select>
+    <select id="f-purchase-policy" style="width:145px" onchange="loadPage(1)"><option value="">All purchase policies</option><option value="unclassified">Unclassified</option></select>
     <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)">
         <input type="checkbox" id="f-low-stock" onchange="loadPage(1)"> Low stock only
     </label>
@@ -63,6 +64,9 @@
                 <div class="form-group"><label>Item Behaviour</label><select id="ae-behaviour">
                     <option>Standard / Pack</option><option>In-House Use</option><option>Service</option><option>Unavailable</option><option>Asset</option>
                 </select></div>
+                <div class="form-group"><label>Purchase Policy</label><select id="ae-purchase-policy">
+                    <option value="">Unclassified</option><option value="routine">Routine</option><option value="on_demand">On demand</option><option value="do_not_reorder">Do not reorder</option>
+                </select></div>
                 <div class="form-group"><label>Velocity Override</label><input id="ae-velocity" placeholder="Blank or 0 to use movement-derived ROP"></div>
                 <div class="form-group"><label>Pack Size</label><input id="ae-pack"></div>
                 <div class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="ae-exclude"><label>Exclude from Planning &amp; ROP</label></div>
@@ -105,7 +109,9 @@ function inventoryFilters() {
         if (value) params.set(key,value);
     }
     if (document.getElementById('f-low-stock').checked) params.set('low_stock','1');
-    if (document.getElementById('f-active').checked) params.set('active','1');
+    const unclassified = document.getElementById('f-purchase-policy').value === 'unclassified';
+    if (document.getElementById('f-active').checked && !unclassified) params.set('active','1');
+    if (unclassified) params.set('unclassified','1');
     return params;
 }
 
@@ -153,6 +159,7 @@ function resetFilters() {
     ['f-stock-id','f-name'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('f-supplier').value = '';
     document.getElementById('f-category').value = '';
+    document.getElementById('f-purchase-policy').value = '';
     document.getElementById('f-low-stock').checked = false;
     document.getElementById('f-active').checked = true;
     loadPage(1);
@@ -177,6 +184,7 @@ async function showDetail(stockId) {
 
     // Anchor editor
     document.getElementById('ae-behaviour').value = d.item_behaviour||'Standard / Pack';
+    document.getElementById('ae-purchase-policy').value = d.purchase_policy||'';
     document.getElementById('ae-velocity').value = d.velocity_override||'';
     document.getElementById('ae-pack').value = d.pack_size||'';
     document.getElementById('ae-exclude').checked = isExcluded(d.exclude);
@@ -207,9 +215,11 @@ async function saveAnchors() {
     const reason = document.getElementById('ae-reason').value.trim();
     if (!reason) return toast('Please enter a reason for this edit',false);
     const beh = document.getElementById('ae-behaviour').value;
+    const purchasePolicy = document.getElementById('ae-purchase-policy').value;
     const velocity = document.getElementById('ae-velocity').value.trim() || '0';
     const updates = {};
     if (beh !== (selectedItem.item_behaviour||'Standard / Pack')) updates.item_behaviour = beh;
+    if (purchasePolicy !== (selectedItem.purchase_policy||'')) updates.purchase_policy = purchasePolicy || null;
     if (Number(velocity) !== Number(selectedItem.velocity_override||0)) updates.velocity_override = velocity;
     if (document.getElementById('ae-pack').value !== (selectedItem.pack_size||'')) updates.pack_size = document.getElementById('ae-pack').value;
     if (document.getElementById('ae-exclude').checked !== isExcluded(selectedItem.exclude)) updates.exclude = document.getElementById('ae-exclude').checked ? '1' : '0';

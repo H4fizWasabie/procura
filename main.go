@@ -270,7 +270,7 @@ func main() {
 	// ── Inventory API ──
 	inventoryFilters := func(r *http.Request) inventory.Filters {
 		q := r.URL.Query()
-		return inventory.Filters{Search: q.Get("search"), StockID: q.Get("stock_id"), Name: q.Get("name"), Supplier: q.Get("supplier"), Category: q.Get("category"), LowStock: q.Get("low_stock") == "1", Active: q.Get("active") == "1"}
+		return inventory.Filters{Search: q.Get("search"), StockID: q.Get("stock_id"), Name: q.Get("name"), Supplier: q.Get("supplier"), Category: q.Get("category"), LowStock: q.Get("low_stock") == "1", Active: q.Get("active") == "1", Unclassified: q.Get("unclassified") == "1"}
 	}
 	mux.HandleFunc("GET /api/inventory/export", protected(func(w http.ResponseWriter, r *http.Request) {
 		format := r.URL.Query().Get("format")
@@ -901,11 +901,11 @@ func main() {
 		// Item detail
 		var id, name, cat, ptype, supplier, uom, status, updated, beh sql.NullString
 		var cost, selling, current, rop sql.NullFloat64
-		var velOv, pack, exclude sql.NullString
+		var velOv, pack, exclude, policy sql.NullString
 		err := db.QueryRow(`SELECT stock_id, item_name, category, product_type, supplier_name, uom,
-			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override, pack_size, exclude
+			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override, pack_size, exclude, purchase_policy
 			FROM items WHERE stock_id = ?`, stockID).Scan(&id, &name, &cat, &ptype, &supplier, &uom,
-			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv, &pack, &exclude)
+			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv, &pack, &exclude, &policy)
 		if err != nil {
 			status := http.StatusInternalServerError
 			if err == sql.ErrNoRows {
@@ -962,7 +962,7 @@ func main() {
 			"product_status": strv(status), "last_updated": strv(updated),
 			"item_behaviour": strv(beh), "cost": f64v(cost), "selling_price": f64v(selling),
 			"current_stock": f64v(current), "rop": f64v(rop), "velocity_override": strv(velOv),
-			"supplier_uom": strv(supUom), "pack_size": strv(pack), "exclude": strv(exclude),
+			"supplier_uom": strv(supUom), "pack_size": strv(pack), "exclude": strv(exclude), "purchase_policy": nullableStringValue(policy),
 			"movements": movements, "po_history": poHistory,
 		})
 	}))
@@ -1262,6 +1262,13 @@ func strv(s sql.NullString) string {
 		return s.String
 	}
 	return ""
+}
+
+func nullableStringValue(s sql.NullString) interface{} {
+	if s.Valid {
+		return s.String
+	}
+	return nil
 }
 func f64v(f sql.NullFloat64) float64 {
 	if f.Valid {

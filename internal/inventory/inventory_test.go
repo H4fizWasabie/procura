@@ -40,6 +40,8 @@ func TestUpdateAnchorsValidationAndSingleFieldAudit(t *testing.T) {
 		{"selling_price", 0.0, -2.0, "greater than or equal to 0"},
 		{"uom", " box ", "  ", "non-empty text"},
 		{"pack_size", "", 3.0, "empty is allowed"},
+		{"purchase_policy", "on_demand", "unknown", "routine, on_demand, do_not_reorder"},
+		{"purchase_policy", "do_not_reorder", "unknown", "routine, on_demand, do_not_reorder"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.field, func(t *testing.T) {
@@ -72,6 +74,55 @@ func TestUpdateAnchorsValidationAndSingleFieldAudit(t *testing.T) {
 				t.Fatalf("last_updated = %q, was changed by item edit", lastUpdated)
 			}
 		})
+	}
+}
+
+func TestPurchasePolicyAllowedValues(t *testing.T) {
+	for _, value := range []interface{}{"routine", "on_demand", "do_not_reorder", nil} {
+		if _, err := anchorValidation["purchase_policy"](value); err != nil {
+			t.Errorf("purchase_policy %v: %v", value, err)
+		}
+	}
+}
+
+func TestPurchasePolicyMayBeClearedAndAudited(t *testing.T) {
+	db := inventoryDB(t)
+	service := &Service{DB: db}
+	if err := service.UpdateAnchors("A", "editor@example.test", "needs classification", map[string]interface{}{"purchase_policy": nil}); err != nil {
+		t.Fatal(err)
+	}
+	var policy sql.NullString
+	if err := db.QueryRow("SELECT purchase_policy FROM items WHERE stock_id='A'").Scan(&policy); err != nil {
+		t.Fatal(err)
+	}
+	if policy.Valid {
+		t.Fatalf("purchase_policy = %q, want NULL", policy.String)
+	}
+	var field, oldValue, newValue, reason, changedBy string
+	if err := db.QueryRow(`SELECT field_name,old_value,new_value,reason,changed_by FROM item_anchor_audit
+		WHERE stock_id='A' AND field_name='purchase_policy'`).Scan(&field, &oldValue, &newValue, &reason, &changedBy); err != nil {
+		t.Fatal(err)
+	}
+	if field != "purchase_policy" || oldValue != "routine" || newValue != "" || reason != "needs classification" || changedBy != "editor@example.test" {
+		t.Fatalf("audit = %q %q -> %q, %q, %q", field, oldValue, newValue, reason, changedBy)
+	}
+}
+
+func TestUnclassifiedInventoryFilter(t *testing.T) {
+	db := inventoryDB(t)
+	if _, err := db.Exec(`CREATE TABLE supplier_item_mappings (id INTEGER, stock_id TEXT, supplier_name TEXT, supplier_uom TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO items(stock_id,item_name,purchase_policy) VALUES
+		('B','Unclassified',NULL),('C','On demand','on_demand')`); err != nil {
+		t.Fatal(err)
+	}
+	items, err := (&Service{DB: db}).ListFiltered(Filters{Active: true, Unclassified: true}, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].StockID != "B" || items[0].PurchasePolicy != nil {
+		t.Fatalf("unclassified items = %#v, want only B with NULL policy", items)
 	}
 }
 

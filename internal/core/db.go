@@ -2,9 +2,12 @@ package core
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -233,12 +236,22 @@ var schema = []string{
 
 // migrations are additive ALTERs applied on every start; duplicate-column
 // errors mean already applied and are ignored.
-var migrations = []string{
-	"ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0",
-	"ALTER TABLE items ADD COLUMN initial_stock_target REAL",
-	"ALTER TABLE direct_orders ADD COLUMN superseded_by_po TEXT",
-	"ALTER TABLE items ADD COLUMN velocity REAL",
-	"ALTER TABLE item_anchor_audit ADD COLUMN changed_by TEXT",
+type migration func(*sql.DB) error
+
+func execMigration(statement string) migration {
+	return func(db *sql.DB) error {
+		_, err := db.Exec(statement)
+		return err
+	}
+}
+
+var migrations = []migration{
+	execMigration("ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0"),
+	execMigration("ALTER TABLE items ADD COLUMN initial_stock_target REAL"),
+	execMigration("ALTER TABLE direct_orders ADD COLUMN superseded_by_po TEXT"),
+	execMigration("ALTER TABLE items ADD COLUMN velocity REAL"),
+	execMigration("ALTER TABLE item_anchor_audit ADD COLUMN changed_by TEXT"),
+	migratePurchasePolicy,
 }
 
 func Open(dataDir string) (*sql.DB, error) {
@@ -254,14 +267,68 @@ func Open(dataDir string) (*sql.DB, error) {
 			return nil, err
 		}
 	}
-	for _, m := range migrations {
-		db.Exec(m) // ignore errors: duplicate column = already applied
+	for i, m := range migrations {
+		if err := m(db); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			log.Printf("core: migration %d failed: %v", i+1, err)
+		}
+	}
+	var hasPurchasePolicy bool
+	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM pragma_table_info('items') WHERE name='purchase_policy')").Scan(&hasPurchasePolicy); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("check items.purchase_policy: %w", err)
+	}
+	if !hasPurchasePolicy {
+		db.Close()
+		return nil, fmt.Errorf("migration incomplete: items.purchase_policy is missing")
 	}
 	if err := rebuildDirectOrdersPK(db); err != nil {
 		return nil, err
 	}
 	log.Printf("core: database ready at %s", path)
 	return db, nil
+}
+
+// migratePurchasePolicy adds the policy column and backfills legacy excluded
+// items atomically. The settings marker prevents repeating the backfill.
+func migratePurchasePolicy(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var marker string
+	err = tx.QueryRow("SELECT value FROM settings WHERE key = 'migration.purchase_policy.v1'").Scan(&marker)
+	if err == nil {
+		count, _ := strconv.Atoi(marker)
+		log.Printf("core: purchase policy backfill previously classified %d excluded items as unclassified", count)
+		return tx.Commit()
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM items
+		WHERE UPPER(TRIM(CAST(COALESCE(exclude, '') AS TEXT))) IN ('1','TRUE','YES','EXCLUDE')`).Scan(&count); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE items ADD COLUMN purchase_policy TEXT DEFAULT 'routine'
+		CHECK (purchase_policy IN ('routine','on_demand','do_not_reorder'))`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE items SET purchase_policy = NULL
+		WHERE UPPER(TRIM(CAST(COALESCE(exclude, '') AS TEXT))) IN ('1','TRUE','YES','EXCLUDE')`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES('migration.purchase_policy.v1',?)", strconv.Itoa(count)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("core: purchase policy backfill classified %d excluded items as unclassified", count)
+	return nil
 }
 
 // rebuildDirectOrdersPK replaces the legacy single-column order_id PRIMARY
