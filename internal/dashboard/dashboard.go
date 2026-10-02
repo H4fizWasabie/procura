@@ -7,13 +7,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"procura/internal/planning"
 )
 
 // MOV_CONFIG constants (GAS: GS_Dashboard.js uses these)
 const (
-	supplierLeadDays  = 14
-	paymentDelayDays  = 30
-	safetyBufferDays  = 14
+	supplierLeadDays = 14
+	paymentDelayDays = 30
+	safetyBufferDays = 14
 )
 
 type Stats struct {
@@ -32,14 +34,14 @@ type Stats struct {
 }
 
 type ROPAlert struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	Current  float64 `json:"current"`
-	ROP      float64 `json:"rop"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Current   float64 `json:"current"`
+	ROP       float64 `json:"rop"`
 	SafetyQty float64 `json:"safetyStockQty"`
-	Gap      float64 `json:"gap"`
-	Cost     float64 `json:"cost"`
-	Health   float64 `json:"health"`
+	Gap       float64 `json:"gap"`
+	Cost      float64 `json:"cost"`
+	Health    float64 `json:"health"`
 }
 
 type Service struct {
@@ -87,7 +89,7 @@ func (s *Service) Compute() Stats {
 	// ── B. INVENTORY SCAN ──
 	rows, err = s.DB.Query(`
 		SELECT stock_id, item_name, current_stock, rop, cost, exclude,
-		       velocity_override, item_behaviour
+		       velocity_override, item_behaviour, product_status, product_type, category, purchase_policy
 		FROM items
 	`)
 	if err != nil {
@@ -97,29 +99,25 @@ func (s *Service) Compute() Stats {
 
 	var alerts []ROPAlert
 	for rows.Next() {
-		var id, name, excludeStr, velOvStr, behaviour sql.NullString
+		var id, name, excludeStr, velOvStr, behaviour, status, productType, category, policy sql.NullString
 		var current, rop, cost sql.NullFloat64
-		rows.Scan(&id, &name, &current, &rop, &cost, &excludeStr, &velOvStr, &behaviour)
+		rows.Scan(&id, &name, &current, &rop, &cost, &excludeStr, &velOvStr, &behaviour, &status, &productType, &category, &policy)
 
 		if !id.Valid || !name.Valid {
 			continue
 		}
 		st.Inventory.TotalItems++
 
-		// Exclude filter
-		excl := strings.ToUpper(strings.TrimSpace(excludeStr.String))
-		if excl == "TRUE" || excl == "YES" || excl == "EXCLUDE" || excl == "1" {
-			continue
-		}
-
-		// Behaviour filter: only Standard/Pack, In-House Use, or empty
-		beh := strings.TrimSpace(behaviour.String)
-		if beh != "" && beh != "Standard / Pack" && beh != "In-House Use" {
+		// RoutineEligible alerts; TotalItems above still counts all inventory.
+		if !planning.RoutineEligible(policy.String, excludeStr.String, behaviour.String, status.String, productType.String, category.String) {
 			continue
 		}
 
 		curr := orZeroF(current)
 		dbROP := orZeroF(rop)
+		if !planning.BelowROP(curr, dbROP) {
+			continue
+		}
 		velOv := orZeroF(velOvStr)
 
 		effectiveROP := dbROP

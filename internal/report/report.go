@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"math"
 	"sort"
+
+	"procura/internal/planning"
 )
 
 type MetricRow struct {
@@ -33,17 +35,20 @@ type Service struct {
 // RestockReport returns items below ROP, sorted by cost impact.
 func (s *Service) RestockReport(page, pageSize int) Paginated {
 	rows, _ := s.DB.Query(`
-		SELECT stock_id, item_name, product_type, category, current_stock, rop, cost
-		FROM items WHERE rop > 0 AND current_stock < rop AND (exclude IS NULL OR exclude = 0)
+		SELECT stock_id, item_name, product_type, category, current_stock, rop, cost,
+		       purchase_policy, exclude, item_behaviour, product_status
+		FROM items
 	`)
 	if rows == nil { return emptyPage(page, pageSize) }
 	defer rows.Close()
 
 	var data []MetricRow
 	for rows.Next() {
-		var id, name, ptype, cat sql.NullString
+		var id, name, ptype, cat, policy, exclude, behaviour, status sql.NullString
 		var cur, rop, cost sql.NullFloat64
-		rows.Scan(&id, &name, &ptype, &cat, &cur, &rop, &cost)
+		rows.Scan(&id, &name, &ptype, &cat, &cur, &rop, &cost, &policy, &exclude, &behaviour, &status)
+		// Restock uses RoutineEligible; historical/financial reports use all items.
+		if !planning.RoutineEligible(policy.String, exclude.String, behaviour.String, status.String, ptype.String, cat.String) || !planning.BelowROP(f64v(cur), f64v(rop)) { continue }
 		gap := f64v(rop) - f64v(cur)
 		if gap <= 0 { continue }
 		c := f64v(cost)

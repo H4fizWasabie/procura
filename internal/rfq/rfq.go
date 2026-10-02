@@ -5,16 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"procura/internal/core"
+	"procura/internal/planning"
 	"strings"
 	"time"
 )
 
 type RFQ struct {
-	RFQID    string `json:"rfq_id"`
-	Date     string `json:"date"`
-	Supplier string `json:"supplier"`
-	Count    int    `json:"items_count"`
-	Items    []Item `json:"items"`
+	RFQID                string   `json:"rfq_id"`
+	Date                 string   `json:"date"`
+	Supplier             string   `json:"supplier"`
+	Count                int      `json:"items_count"`
+	Items                []Item   `json:"items"`
+	AcknowledgedStockIDs []string `json:"acknowledged_stock_ids,omitempty"`
 }
 
 type Item struct {
@@ -67,11 +69,20 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 			existingItems[strv2(item["id"])] = true
 		}
 	}
+	var overrides []string
 	for _, item := range rfq.Items {
 		if !existingItems[item.StockID] {
 			if err := core.CheckPendingUOM(s.DB, item.StockID); err != nil {
 				return "", err
 			}
+			override, err := planning.CheckPurchase(s.DB, item.StockID, rfq.AcknowledgedStockIDs)
+			if err != nil {
+				return "", err
+			}
+			if override {
+				overrides = append(overrides, item.StockID)
+			}
+			existingItems[item.StockID] = true
 		}
 	}
 	if rfq.RFQID == "" {
@@ -90,11 +101,22 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 	}
 	rawJSON, _ := json.Marshal(compact)
 
-	_, err = s.DB.Exec(`
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`
 		INSERT OR REPLACE INTO rfq_logs (rfq_id, date, supplier, items_count, created_by, raw_rfq_json)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, rfq.RFQID, rfq.Date, rfq.Supplier, rfq.Count, createdBy, string(rawJSON))
-	return rfq.RFQID, err
+	if err != nil {
+		return "", err
+	}
+	if err := planning.LogAvailabilityOverrides(tx, createdBy, "rfq", rfq.RFQID, overrides); err != nil {
+		return "", err
+	}
+	return rfq.RFQID, tx.Commit()
 }
 
 // History returns all RFQs ordered by date desc.

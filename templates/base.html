@@ -74,6 +74,21 @@
     </main>
     </div></div>
 <script>
+// Retry only an explicitly acknowledged availability warning; other save errors stop.
+async function saveWithAvailabilityOverride(url, body) {
+    const acknowledged = new Set(body.acknowledged_stock_ids || []);
+    for (;;) {
+        const response = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        const data = await response.json();
+        const pending = Array.isArray(data.unavailable_stock_ids) ? data.unavailable_stock_ids.filter(id => !acknowledged.has(id)) : [];
+        if (response.status === 400 && pending.length && confirm(data.error + '\nProceed with these not-available items? This override will be logged.')) {
+            pending.forEach(id => acknowledged.add(id));
+            body.acknowledged_stock_ids = Array.from(acknowledged);
+            continue;
+        }
+        return {response, data};
+    }
+}
 // Give wide operational tables their own scroll surface on every page.
 document.querySelectorAll('main table').forEach(table => {
     if (table.closest('.table-scroll')) return;

@@ -606,8 +606,7 @@ async function savePo() {
     if (button.disabled) return;
     button.disabled = true;
     try {
-    const res = await fetch('/api/pos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const d = await res.json();
+    const {response:res, data:d} = await saveWithAvailabilityOverride('/api/pos', body);
     if(res.ok && d.success){ toast('PO '+d.po_id+' saved!',true); document.getElementById('npo-id').value=d.po_id; poFormBaseline = poFormSnapshot(); updatePoEditState(); await loadPos(); selectedPoId=d.po_id; selectedPo=allPos.find(p => p.po_id === d.po_id)||null; }
     else toast('Error: '+d.error,false);
     } catch { toast('Could not confirm the save. Reload the order before retrying.',false); }

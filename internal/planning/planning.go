@@ -105,7 +105,7 @@ func (s *Service) Plan() ([]Item, error) {
 	rows, err := s.DB.Query(`
 		SELECT stock_id, item_name, category, product_type, supplier_name, uom,
 		       current_stock, rop, cost, exclude, item_behaviour, product_status,
-		       velocity_override, initial_stock_target, COALESCE(velocity,0)
+		       velocity_override, initial_stock_target, COALESCE(velocity,0), purchase_policy
 		FROM items
 	`)
 	if err != nil {
@@ -115,30 +115,30 @@ func (s *Service) Plan() ([]Item, error) {
 
 	var items []Item
 	for rows.Next() {
-		var id, name, cat, ptype, supplier, uom, excl, beh, status, velOv sql.NullString
+		var id, name, cat, ptype, supplier, uom, excl, beh, status, velOv, policy sql.NullString
 		var current, rop, cost, initTarget, velCol sql.NullFloat64
 		rows.Scan(&id, &name, &cat, &ptype, &supplier, &uom,
-			&current, &rop, &cost, &excl, &beh, &status, &velOv, &initTarget, &velCol)
+			&current, &rop, &cost, &excl, &beh, &status, &velOv, &initTarget, &velCol, &policy)
 
 		if !id.Valid || !name.Valid {
 			continue
 		}
 		sid := id.String
 
-		if excluded(excl.String, beh.String, status.String, ptype.String, cat.String) {
+		if !RoutineEligible(policy.String, excl.String, beh.String, status.String, ptype.String, cat.String) {
 			continue
 		}
 
 		curr := orZero(current)
 		dbROP := orZero(rop)
+		if !BelowROP(curr, dbROP) {
+			continue
+		}
 		inc := incoming[sid]
 		onOrder := len(inc) > 0
 		health := 100.0
 		if dbROP > 0 {
 			health = math.Round(curr/dbROP*1000) / 10
-		}
-		if health >= 100 {
-			continue
 		}
 
 		it := Item{
