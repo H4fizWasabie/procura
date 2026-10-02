@@ -2,6 +2,7 @@ package core
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -87,5 +88,48 @@ func TestOpenSQLitePragmas(t *testing.T) {
 	}
 	if foreignKeys != 0 {
 		t.Errorf("foreign_keys = %d, want 0", foreignKeys)
+	}
+}
+
+func TestOpenAddsChangedByToLegacyItemAnchorAudit(t *testing.T) {
+	fixturePath := filepath.Join(t.TempDir(), "legacy-fixture.sqlite")
+	legacy, err := sql.Open("sqlite", fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE item_anchor_audit (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, stock_id TEXT,
+		item_name TEXT, field_name TEXT, old_value TEXT, new_value TEXT, reason TEXT
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`INSERT INTO item_anchor_audit (timestamp,stock_id,field_name,reason)
+		VALUES ('2026-01-02T03:04:05','A','cost','fixture')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	fixture, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "procura.sqlite"), fixture, 0600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var reason string
+	var changedBy sql.NullString
+	if err := db.QueryRow("SELECT reason,changed_by FROM item_anchor_audit WHERE stock_id='A'").Scan(&reason, &changedBy); err != nil {
+		t.Fatal(err)
+	}
+	if reason != "fixture" || changedBy.Valid {
+		t.Fatalf("migrated audit row = reason %q, changed_by %#v", reason, changedBy)
 	}
 }

@@ -61,12 +61,12 @@
             <div>
                 <h4 style="margin-bottom:8px">Anchor Editor</h4>
                 <div class="form-group"><label>Item Behaviour</label><select id="ae-behaviour">
-                    <option value="">Standard / Pack</option><option>In-House Use</option><option>Service</option><option>Asset</option>
+                    <option>Standard / Pack</option><option>In-House Use</option><option>Service</option><option>Unavailable</option><option>Asset</option>
                 </select></div>
                 <div class="form-group"><label>Velocity Override</label><input id="ae-velocity" placeholder="Blank or 0 to use movement-derived ROP"></div>
                 <div class="form-group"><label>Pack Size</label><input id="ae-pack"></div>
                 <div class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="ae-exclude"><label>Exclude from Planning &amp; ROP</label></div>
-                <div class="form-group"><label>Reason</label><input id="ae-reason" placeholder="Optional reason for audit"></div>
+                <div class="form-group"><label>Reason</label><input id="ae-reason" required placeholder="Required reason for audit"></div>
                 <button onclick="saveAnchors()">Save Anchor Fields</button>
             </div>
             <!-- Edit Modal-like fields -->
@@ -96,7 +96,7 @@
 </div>
 
 <script>
-let page=1, pageSize=2000, selectedStockId='', inventoryRequest=0;
+let page=1, pageSize=2000, selectedStockId='', selectedItem=null, inventoryRequest=0;
 function isExcluded(value) { return ['1','true','yes','exclude'].includes(String(value||'').trim().toLowerCase()); }
 function inventoryFilters() {
     const params = new URLSearchParams();
@@ -163,6 +163,7 @@ async function showDetail(stockId) {
     const res = await fetch('/api/inventory/detail?stock_id=' + encodeURIComponent(stockId));
     const d = await res.json();
     if (!res.ok) return toast(d.error || 'Could not load item details',false);
+    selectedItem = d;
     document.getElementById('detail-panel').style.display = 'block';
     document.getElementById('detail-title').textContent = d.stock_id + ' — ' + d.item_name;
     document.getElementById('detail-summary').innerHTML = `
@@ -175,7 +176,7 @@ async function showDetail(stockId) {
         <div class="card"><div class="stat-label">Supplier UOM</div><div class="stat" style="font-size:14px">${esc(d.supplier_uom)||'-'}</div></div>`;
 
     // Anchor editor
-    document.getElementById('ae-behaviour').value = d.item_behaviour||'';
+    document.getElementById('ae-behaviour').value = d.item_behaviour||'Standard / Pack';
     document.getElementById('ae-velocity').value = d.velocity_override||'';
     document.getElementById('ae-pack').value = d.pack_size||'';
     document.getElementById('ae-exclude').checked = isExcluded(d.exclude);
@@ -199,24 +200,29 @@ async function showDetail(stockId) {
     document.getElementById('detail-panel').scrollIntoView({behavior:'smooth'});
 }
 
-function closeDetail() { document.getElementById('detail-panel').style.display = 'none'; selectedStockId = ''; }
+function closeDetail() { document.getElementById('detail-panel').style.display = 'none'; selectedStockId = ''; selectedItem = null; }
 
 async function saveAnchors() {
     if (!selectedStockId) return;
+    const reason = document.getElementById('ae-reason').value.trim();
+    if (!reason) return toast('Please enter a reason for this edit',false);
     const beh = document.getElementById('ae-behaviour').value;
-    const updates = {
-        item_behaviour: beh,
-        velocity_override: document.getElementById('ae-velocity').value,
-        pack_size: document.getElementById('ae-pack').value,
-        exclude: document.getElementById('ae-exclude').checked ? '1' : '',
-        cost: parseFloat(document.getElementById('ae-cost').value)||0,
-        selling_price: parseFloat(document.getElementById('ae-selling').value)||0,
-        uom: document.getElementById('ae-uom').value,
-        rop: (beh==='Service'||beh==='Asset') ? 0 : (parseFloat(document.getElementById('ae-rop').value)||0),
-    };
+    const velocity = document.getElementById('ae-velocity').value.trim() || '0';
+    const updates = {};
+    if (beh !== (selectedItem.item_behaviour||'Standard / Pack')) updates.item_behaviour = beh;
+    if (Number(velocity) !== Number(selectedItem.velocity_override||0)) updates.velocity_override = velocity;
+    if (document.getElementById('ae-pack').value !== (selectedItem.pack_size||'')) updates.pack_size = document.getElementById('ae-pack').value;
+    if (document.getElementById('ae-exclude').checked !== isExcluded(selectedItem.exclude)) updates.exclude = document.getElementById('ae-exclude').checked ? '1' : '0';
+    const cost = Number(document.getElementById('ae-cost').value)||0;
+    if (cost !== Number(selectedItem.cost||0)) updates.cost = cost;
+    const selling = Number(document.getElementById('ae-selling').value)||0;
+    if (selling !== Number(selectedItem.selling_price||0)) updates.selling_price = selling;
+    if (document.getElementById('ae-uom').value !== (selectedItem.uom||'')) updates.uom = document.getElementById('ae-uom').value;
+    const rop = (beh==='Service'||beh==='Asset') ? 0 : (Number(document.getElementById('ae-rop').value)||0);
+    if (rop !== Number(selectedItem.rop||0)) updates.rop = rop;
     try {
         const res = await fetch('/api/inventory/'+encodeURIComponent(selectedStockId), {
-            method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
+            method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...updates, reason})});
         const d = await res.json();
         if (!res.ok || !d.success) return toast('Error: '+(d.error||'Could not save item'),false);
         toast('Saved',true);

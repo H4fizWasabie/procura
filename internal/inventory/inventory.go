@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/csv"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -18,6 +20,8 @@ var anchorFields = []string{
 	"exclude", "velocity_override", "item_behaviour",
 	"cost", "uom", "selling_price", "rop", "pack_size",
 }
+
+var ErrInvalidUpdate = errors.New("invalid inventory update")
 
 type Item struct {
 	StockID       string  `json:"stock_id"`
@@ -158,47 +162,178 @@ func (s *Service) Export(f Filters, format string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// UpdateAnchors applies anchor field edits. GAS logic: Service/Asset → ROP=0.
-func (s *Service) UpdateAnchors(stockID string, updates map[string]interface{}) error {
-	// Service/Asset validation: force ROP to 0
-	if beh, ok := updates["item_behaviour"]; ok {
-		b := strings.ToLower(stringOrEmpty(beh))
-		if b == "service" || b == "asset" {
-			updates["rop"] = 0
+var anchorValidation = map[string]func(interface{}) (interface{}, error){
+	"item_behaviour": func(v interface{}) (interface{}, error) {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("allowed values: Standard / Pack, In-House Use, Service, Unavailable, Asset")
 		}
-	}
+		s = strings.TrimSpace(s)
+		for _, allowed := range []string{"Standard / Pack", "In-House Use", "Service", "Unavailable", "Asset"} {
+			if s == allowed {
+				return s, nil
+			}
+		}
+		return nil, fmt.Errorf("allowed values: Standard / Pack, In-House Use, Service, Unavailable, Asset")
+	},
+	"exclude": func(v interface{}) (interface{}, error) {
+		n, err := nonNegativeNumber(v)
+		if err != nil || (n != 0 && n != 1) {
+			return nil, fmt.Errorf("allowed values: 0 or 1")
+		}
+		return int(n), nil
+	},
+	"rop":               validateNonNegative,
+	"velocity_override": validateNonNegative,
+	"cost":              validateNonNegative,
+	"selling_price":     validateNonNegative,
+	"uom": func(v interface{}) (interface{}, error) {
+		s, ok := v.(string)
+		if !ok || strings.TrimSpace(s) == "" {
+			return nil, fmt.Errorf("must be non-empty text")
+		}
+		return strings.TrimSpace(s), nil
+	},
+	"pack_size": func(v interface{}) (interface{}, error) {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("must be text (empty is allowed)")
+		}
+		return strings.TrimSpace(s), nil
+	},
+}
 
-	sets := []string{}
-	args := []interface{}{}
+func validateNonNegative(v interface{}) (interface{}, error) {
+	n, err := nonNegativeNumber(v)
+	if err != nil {
+		return nil, fmt.Errorf("must be a number greater than or equal to 0")
+	}
+	return n, nil
+}
+
+func nonNegativeNumber(v interface{}) (float64, error) {
+	var n float64
+	switch value := v.(type) {
+	case float64:
+		n = value
+	case float32:
+		n = float64(value)
+	case int:
+		n = float64(value)
+	case int64:
+		n = float64(value)
+	case json.Number:
+		parsed, err := value.Float64()
+		if err != nil {
+			return 0, err
+		}
+		n = parsed
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil {
+			return 0, err
+		}
+		n = parsed
+	default:
+		return 0, fmt.Errorf("not a number")
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 {
+		return 0, fmt.Errorf("out of range")
+	}
+	return n, nil
+}
+
+// UpdateAnchors validates, updates and audits all changed fields atomically.
+func (s *Service) UpdateAnchors(stockID, changedBy, reason string, updates map[string]interface{}) error {
+	reason = strings.TrimSpace(reason)
+	changedBy = strings.TrimSpace(changedBy)
+	if reason == "" || changedBy == "" {
+		return fmt.Errorf("%w: changed_by and reason are required", ErrInvalidUpdate)
+	}
+	validated := make(map[string]interface{}, len(updates))
 	for _, field := range anchorFields {
-		if v, ok := updates[field]; ok {
-			sets = append(sets, field+" = ?")
-			args = append(args, v)
+		if value, ok := updates[field]; ok {
+			rule := anchorValidation[field]
+			value, err := rule(value)
+			if err != nil {
+				return fmt.Errorf("%w: %s %v", ErrInvalidUpdate, field, err)
+			}
+			validated[field] = value
 		}
 	}
-	if len(sets) == 0 {
-		return nil
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var itemName sql.NullString
+	values := make([]interface{}, len(anchorFields))
+	query := "SELECT item_name, " + strings.Join(anchorFields, ", ") + " FROM items WHERE stock_id = ?"
+	scanArgs := make([]interface{}, 0, len(anchorFields)+1)
+	scanArgs = append(scanArgs, &itemName)
+	for i := range values {
+		scanArgs = append(scanArgs, &values[i])
+	}
+	if err := tx.QueryRow(query, stockID).Scan(scanArgs...); err != nil {
+		return err
+	}
+	oldValues := make(map[string]interface{}, len(anchorFields))
+	for i, field := range anchorFields {
+		oldValues[field] = values[i]
+	}
+	if behaviour, ok := validated["item_behaviour"].(string); ok && (behaviour == "Service" || behaviour == "Asset") {
+		validated["rop"] = float64(0)
 	}
 
-	sets = append(sets, "last_updated = ?")
-	args = append(args, time.Now().Format("2006-01-02T15:04:05"))
+	sets, args := make([]string, 0, len(validated)), make([]interface{}, 0, len(validated)+1)
+	changed := make([]string, 0, len(validated))
+	for _, field := range anchorFields {
+		value, ok := validated[field]
+		if !ok || anchorValuesEqual(oldValues[field], value) {
+			continue
+		}
+		sets = append(sets, field+" = ?")
+		args = append(args, value)
+		changed = append(changed, field)
+	}
+	if len(changed) == 0 {
+		return tx.Commit()
+	}
 	args = append(args, stockID)
+	if _, err := tx.Exec("UPDATE items SET "+strings.Join(sets, ", ")+" WHERE stock_id = ?", args...); err != nil {
+		return err
+	}
+	now := time.Now().Format("2006-01-02T15:04:05")
+	for _, field := range changed {
+		if _, err := tx.Exec(`INSERT INTO item_anchor_audit
+			(timestamp, stock_id, item_name, field_name, old_value, new_value, reason, changed_by)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, now, stockID, itemName, field,
+			auditValue(oldValues[field]), auditValue(validated[field]), reason, changedBy); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
 
-	res, err := s.DB.Exec(
-		"UPDATE items SET "+strings.Join(sets, ", ")+" WHERE stock_id = ?",
-		args...,
-	)
-	if err != nil {
-		return err
+func auditValue(v interface{}) string {
+	if v == nil {
+		return ""
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
+	return fmt.Sprint(v)
+}
+
+func anchorValuesEqual(old, next interface{}) bool {
+	if old == nil {
+		return next == nil
 	}
-	if n == 0 {
-		return sql.ErrNoRows
+	if n, err := nonNegativeNumber(old); err == nil {
+		if nextN, err := nonNegativeNumber(next); err == nil {
+			return n == nextN
+		}
 	}
-	return nil
+	return fmt.Sprint(old) == fmt.Sprint(next)
 }
 
 // BasicList returns ID + Name for dropdowns. Excludes Unavailable items.
@@ -259,12 +394,3 @@ func f64(f sql.NullFloat64) float64 {
 	return 0
 }
 func round(f float64) float64 { return math.Round(f*100) / 100 }
-func stringOrEmpty(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
-}
