@@ -217,35 +217,6 @@ func (s *Service) Plan() ([]Item, error) {
 	return items, nil
 }
 
-// Plannable reports whether an item participates in reorder planning.
-// Shared by planning and movement.RecalcROP so both modules agree on what
-// is plannable (#14).
-func Plannable(excl, beh, status, ptype, category string) bool {
-	return !excluded(excl, beh, status, ptype, category)
-}
-
-// excluded applies the static filters: manual exclude flag, non-plannable
-// behaviours, unavailable status, surgical items.
-func excluded(excl, beh, status, ptype, category string) bool {
-	e := strings.ToUpper(strings.TrimSpace(excl))
-	if e == "TRUE" || e == "YES" || e == "EXCLUDE" || e == "1" {
-		return true
-	}
-	b := strings.ToLower(strings.TrimSpace(beh))
-	if b == "asset" || b == "service" || b == "exclude" {
-		return true
-	}
-	if b != "" && b != "standard / pack" && b != "in-house use" {
-		return true
-	}
-	if strings.ToLower(strings.TrimSpace(status)) == "unavailable" {
-		return true
-	}
-	pt := strings.ToLower(ptype)
-	ct := strings.ToLower(category)
-	return strings.Contains(pt, "surgical") || strings.Contains(ct, "surgical")
-}
-
 // incomingPipeline returns per-stock-id recent, unresolved incoming links:
 // open PO lines (not Received/Delivered/VOID), ACTIVE direct orders, and RFQs not yet
 // superseded by a recent linked PO. Older links remain in history but no
