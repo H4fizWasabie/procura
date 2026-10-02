@@ -81,12 +81,8 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 				if sid == "" {
 					continue
 				}
-				itemName := strVal(r["item_name"])
-				currentStock := floatVal(r["current"])
 				ts := now.Format("2006-01-02T15:04:05.000000000")
 
-				r["item_name"] = itemName
-				r["current"] = strconv.FormatFloat(currentStock, 'f', -1, 64)
 				if err := s.upsertItem(r, ts); err != nil {
 					importErrors = append(importErrors, fmt.Sprintf("item %s: %v", sid, err))
 					continue
@@ -480,19 +476,33 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 
 // upsertItem is the single ownership boundary for both hospital import routes.
 func (s *Service) upsertItem(fields map[string]string, timestamp string) error {
+	// mapRow includes every source header, even when its cell is empty.
+	// Missing headers must leave existing values (including shadows) untouched.
+	updates := []string{"last_updated=excluded.last_updated"}
+	for _, field := range []struct{ source, column string }{
+		{"item_name", "item_name"}, {"cost", "cost"}, {"selling_price", "selling_price"},
+		{"uom", "uom"}, {"category", "category"}, {"supplier", "supplier_name"},
+		{"current", "current_stock"}, {"product_status", "hospital_product_status"},
+		{"product_type", "hospital_product_type"},
+	} {
+		if _, present := fields[field.source]; !present {
+			continue
+		}
+		if field.source == "uom" {
+			updates = append(updates, "uom_confirmation_pending=CASE WHEN COALESCE(items.uom,'') != COALESCE(excluded.uom,'') THEN 1 ELSE items.uom_confirmation_pending END")
+		}
+		if field.source == "item_name" {
+			updates = append(updates, "item_name=CASE WHEN excluded.item_name='' THEN items.item_name ELSE excluded.item_name END")
+		} else {
+			updates = append(updates, field.column+"=excluded."+field.column)
+		}
+	}
 	_, err := s.DB.Exec(`INSERT INTO items
 		(stock_id,item_name,cost,selling_price,uom,product_type,category,supplier_name,product_status,
 		 current_stock,last_updated,pack_size,exclude,velocity_override,item_behaviour,
 		 hospital_product_status,hospital_product_type)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(stock_id) DO UPDATE SET
-		 item_name=CASE WHEN excluded.item_name='' THEN items.item_name ELSE excluded.item_name END,
-		 cost=excluded.cost, selling_price=excluded.selling_price,
-		 uom_confirmation_pending=CASE WHEN COALESCE(items.uom,'') != COALESCE(excluded.uom,'') THEN 1 ELSE items.uom_confirmation_pending END,
-		 uom=excluded.uom, category=excluded.category, supplier_name=excluded.supplier_name,
-		 current_stock=excluded.current_stock, last_updated=excluded.last_updated,
-		 hospital_product_status=excluded.hospital_product_status,
-		 hospital_product_type=excluded.hospital_product_type`,
+		ON CONFLICT(stock_id) DO UPDATE SET `+strings.Join(updates, ", "),
 		strVal(fields["stock_id"]), strVal(fields["item_name"]), floatVal(fields["cost"]),
 		floatVal(fields["selling_price"]), strVal(fields["uom"]), strVal(fields["product_type"]),
 		strVal(fields["category"]), strVal(fields["supplier"]), strVal(fields["product_status"]),

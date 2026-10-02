@@ -2,6 +2,7 @@ package ximport
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -68,6 +69,61 @@ func TestWorkbookAndStockImportsDefaultNewItemsToRoutine(t *testing.T) {
 	var policy string
 	if err := db.QueryRow("SELECT purchase_policy FROM items WHERE stock_id='WB-NEW'").Scan(&policy); err != nil || policy != "routine" {
 		t.Fatalf("workbook import purchase_policy = %q, %v; want routine", policy, err)
+	}
+}
+
+func TestMinimalWorkbookPreservesAbsentItemColumns(t *testing.T) {
+	for _, withEmptyUOM := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty_uom_column_%t", withEmptyUOM), func(t *testing.T) {
+			db, err := core.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if _, err := db.Exec(`INSERT INTO items
+				(stock_id,item_name,current_stock,cost,selling_price,uom,category,supplier_name,
+				 hospital_product_status,hospital_product_type)
+				VALUES('A','Original item',2,17.5,33,'box','Fixture category','Fixture supplier','Available','Supply')`); err != nil {
+				t.Fatal(err)
+			}
+			f := excelize.NewFile()
+			defer f.Close()
+			headers := []interface{}{"SKU", "Product Name", "Actual Stock"}
+			row := []interface{}{"A", "Updated item", 9}
+			if withEmptyUOM {
+				headers = append(headers, "UOM")
+				row = append(row, "")
+			}
+			if err := f.SetSheetRow("Sheet1", "A1", &headers); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.SetSheetRow("Sheet1", "A2", &row); err != nil {
+				t.Fatal(err)
+			}
+			var buf bytes.Buffer
+			if err := f.Write(&buf); err != nil {
+				t.Fatal(err)
+			}
+			result, err := (&Service{DB: db, ImportsDir: t.TempDir()}).Import(&buf, "minimal-fixture.xlsx")
+			if err != nil || len(result.Errors) != 0 {
+				t.Fatalf("import: %+v, %v", result, err)
+			}
+			var name, uom, category, supplier, status, typ string
+			var cost, price, stock float64
+			var pending int
+			if err := db.QueryRow(`SELECT item_name,cost,selling_price,uom,category,supplier_name,
+				current_stock,uom_confirmation_pending,hospital_product_status,hospital_product_type
+				FROM items WHERE stock_id='A'`).Scan(&name, &cost, &price, &uom, &category, &supplier, &stock, &pending, &status, &typ); err != nil {
+				t.Fatal(err)
+			}
+			wantUOM, wantPending := "box", 0
+			if withEmptyUOM {
+				wantUOM, wantPending = "", 1
+			}
+			if name != "Updated item" || stock != 9 || cost != 17.5 || price != 33 || uom != wantUOM || pending != wantPending || category != "Fixture category" || supplier != "Fixture supplier" || status != "Available" || typ != "Supply" {
+				t.Fatalf("partial import: name=%q stock=%v cost=%v price=%v uom=%q pending=%d category=%q supplier=%q shadows=%q/%q", name, stock, cost, price, uom, pending, category, supplier, status, typ)
+			}
+		})
 	}
 }
 

@@ -2,8 +2,11 @@ package core
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 )
+
+var ErrPendingUOM = errors.New("pending UOM change")
 
 // PendingUOM names an item whose imported unit needs explicit confirmation.
 func PendingUOM(db *sql.DB, stockID string) (string, error) {
@@ -25,7 +28,7 @@ func CheckPendingUOM(db *sql.DB, stockID string) error {
 		return err
 	}
 	if name != "" {
-		return fmt.Errorf("%s (%s) has a pending UOM change; use Confirm UOM in the item editor", name, stockID)
+		return fmt.Errorf("%s (%s) has a %w; use Confirm UOM in the item editor", name, stockID, ErrPendingUOM)
 	}
 	return nil
 }

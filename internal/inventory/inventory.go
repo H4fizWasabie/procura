@@ -315,7 +315,7 @@ func (s *Service) UpdateAnchorsAs(stockID, changedBy, role, reason string, updat
 		return err
 	}
 	defer tx.Rollback()
-	if role != "EDITOR" && role != "ADMIN" {
+	if updates["confirm_uom"] == true && role != "EDITOR" && role != "ADMIN" {
 		return fmt.Errorf("%w: EDITOR or ADMIN required", ErrInvalidUpdate)
 	}
 	var shadowStatus, shadowType sql.NullString
@@ -344,7 +344,7 @@ func (s *Service) UpdateAnchorsAs(stockID, changedBy, role, reason string, updat
 		}
 		validated["product_type"] = value
 	}
-	if next, ok := validated["product_type"].(string); ok && role != "ADMIN" {
+	if next, ok := validated["product_type"].(string); ok && role != "ADMIN" && updates["resync_product_type"] != true {
 		var exists bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM items WHERE product_type = ?)`, next).Scan(&exists); err != nil {
 			return err

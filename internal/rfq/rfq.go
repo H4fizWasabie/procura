@@ -52,12 +52,23 @@ func (s *Service) GenerateID() string {
 
 // Save creates or updates an RFQ.
 func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
-	var exists bool
-	if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM rfq_logs WHERE rfq_id=?)`, rfq.RFQID).Scan(&exists); err != nil {
+	existingItems := map[string]bool{}
+	var raw sql.NullString
+	err := s.DB.QueryRow(`SELECT raw_rfq_json FROM rfq_logs WHERE rfq_id=?`, rfq.RFQID).Scan(&raw)
+	if err != nil && err != sql.ErrNoRows {
 		return "", err
 	}
-	if !exists {
-		for _, item := range rfq.Items {
+	if raw.Valid && raw.String != "" {
+		var items []map[string]interface{}
+		if err := json.Unmarshal([]byte(raw.String), &items); err != nil {
+			return "", err
+		}
+		for _, item := range items {
+			existingItems[strv2(item["id"])] = true
+		}
+	}
+	for _, item := range rfq.Items {
+		if !existingItems[item.StockID] {
 			if err := core.CheckPendingUOM(s.DB, item.StockID); err != nil {
 				return "", err
 			}
@@ -79,7 +90,7 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 	}
 	rawJSON, _ := json.Marshal(compact)
 
-	_, err := s.DB.Exec(`
+	_, err = s.DB.Exec(`
 		INSERT OR REPLACE INTO rfq_logs (rfq_id, date, supplier, items_count, created_by, raw_rfq_json)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, rfq.RFQID, rfq.Date, rfq.Supplier, rfq.Count, createdBy, string(rawJSON))

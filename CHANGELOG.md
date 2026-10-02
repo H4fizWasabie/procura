@@ -1,6 +1,9 @@
 # Changelog
 
 ## 2026-10-02
+- [import] Preserve item columns absent from a workbook and compare UOM only when supplied — partial sheets cannot erase prices or catalogue fields or create false UOM flags
+- [inventory] Trust hospital product-type re-sync and limit the EDITOR/ADMIN check to Confirm UOM — manual type validation remains enforced without blocking other item edits
+- [po/rfq] Reject newly added pending-UOM items on re-save and return 400 only for that guard — existing lines remain editable and database failures still return 500
 - [inventory] Let Unclassified results bypass the Active filter and fail startup visibly when the purchase policy migration is incomplete — keeps the classification queue usable and surfaces schema errors.
 - [core] Apply SQLite's busy timeout through the supported pragma DSN option — wait for transient database locks without changing journal or foreign-key behavior
 - [inventory] Add an audited purchase policy with a guarded one-time legacy backfill and an Unclassified filter — keep purchase intent separate from planning exclusion

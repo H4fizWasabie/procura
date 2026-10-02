@@ -514,7 +514,7 @@ func main() {
 		}
 		id, err := poSvc.Save(body)
 		if err != nil {
-			writeJSON(w, 400, map[string]interface{}{"success": false, "error": err.Error()})
+			writeOrderSaveError(w, err)
 			return
 		}
 		// A covering PO supersedes ACTIVE direct orders for its stock_ids (#6).
@@ -711,7 +711,7 @@ func main() {
 		json.NewDecoder(r.Body).Decode(&body)
 		id, err := rfqSvc.Save(body, r.Header.Get("X-User-Email"))
 		if err != nil {
-			writeJSON(w, 400, map[string]interface{}{"success": false, "error": err.Error()})
+			writeOrderSaveError(w, err)
 			return
 		}
 		writeJSON(w, 200, map[string]interface{}{"success": true, "rfq_id": id})
@@ -1281,6 +1281,14 @@ func userFromReq(r *http.Request) map[string]string {
 		"role":  r.Header.Get("X-User-Role"),
 		"name":  r.Header.Get("X-User-Name"),
 	}
+}
+
+func writeOrderSaveError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	if errors.Is(err, core.ErrPendingUOM) {
+		status = http.StatusBadRequest
+	}
+	writeJSON(w, status, map[string]interface{}{"success": false, "error": err.Error()})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
