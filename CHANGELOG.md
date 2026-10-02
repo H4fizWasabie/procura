@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-02
+- [core] Apply SQLite's busy timeout through the supported pragma DSN option — wait for transient database locks without changing journal or foreign-key behavior
+
 ## 2026-09-30
 - [po] Return empty filtered results as an array and safely handle null list responses — avoid a refresh error after saving a PO status
 

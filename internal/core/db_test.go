@@ -57,3 +57,35 @@ func TestRebuildDirectOrdersPK(t *testing.T) {
 		t.Fatalf("second row for same order_id should now be allowed: %v", err)
 	}
 }
+
+func TestOpenSQLitePragmas(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var busyTimeout int
+	if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		t.Fatal(err)
+	}
+	if busyTimeout != 5000 {
+		t.Errorf("busy_timeout = %d, want 5000", busyTimeout)
+	}
+
+	var journalMode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatal(err)
+	}
+	if journalMode != "delete" {
+		t.Errorf("journal_mode = %q, want delete", journalMode)
+	}
+
+	var foreignKeys int
+	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeys != 0 {
+		t.Errorf("foreign_keys = %d, want 0", foreignKeys)
+	}
+}
