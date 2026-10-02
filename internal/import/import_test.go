@@ -221,3 +221,121 @@ func TestImportStockUpsertsCatalogueAndStock(t *testing.T) {
 		t.Fatalf("updated item = %q %.0f %.2f %.2f rop=%v velocity=%v", name, stock, cost, price, rop, velocity)
 	}
 }
+
+func syntheticStock(t *testing.T, status, typ, uom string) *bytes.Buffer {
+	t.Helper()
+	f := excelize.NewFile()
+	rows := [][]interface{}{
+		{"Product Name", "Product Type", "Product Status", "SKU Code", "UOM", "Actual Stock"},
+		{"New item", typ, status, "NEW", uom, "5"},
+		{"Existing item", typ, status, "OLD", uom, "8"},
+	}
+	for i, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		if err := f.SetSheetRow("Sheet1", cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	return &buf
+}
+
+func TestImportStockTwiceKeepsOwnedFieldsAndFlagsUOM(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO items(stock_id,item_name,product_status,product_type,uom)
+		VALUES('OLD','Existing item','not-available','Curated','ea')`); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{DB: db}
+	for _, upload := range []struct{ status, typ, uom string }{{"Available", "Supply", "ea"}, {"not-available", "Device", "box"}} {
+		if _, err := svc.ImportStock(syntheticStock(t, upload.status, upload.typ, upload.uom)); err != nil {
+			t.Fatal(err)
+		}
+		var status, typ, shadowStatus, shadowType, uom string
+		var pending int
+		for _, id := range []string{"NEW", "OLD"} {
+			if err := db.QueryRow(`SELECT product_status,product_type,hospital_product_status,hospital_product_type,uom,uom_confirmation_pending
+				FROM items WHERE stock_id=?`, id).Scan(&status, &typ, &shadowStatus, &shadowType, &uom, &pending); err != nil {
+				t.Fatal(err)
+			}
+			if shadowStatus != upload.status || shadowType != upload.typ || uom != upload.uom {
+				t.Fatalf("%s shadows/UOM = %q %q %q", id, shadowStatus, shadowType, uom)
+			}
+			if id == "OLD" && (status != "not-available" || typ != "Curated") {
+				t.Fatalf("existing owned fields overwritten: %q %q", status, typ)
+			}
+			if id == "NEW" && upload.uom == "ea" && (status != "Available" || typ != "Supply" || pending != 0) {
+				t.Fatalf("new item initial values: %q %q pending=%d", status, typ, pending)
+			}
+			if upload.uom == "box" && pending != 1 {
+				t.Fatalf("%s UOM change not flagged", id)
+			}
+		}
+	}
+	if _, err := db.Exec(`UPDATE items SET uom_confirmation_pending=0 WHERE stock_id='OLD'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ImportStock(syntheticStock(t, "Available", "Supply", "case")); err != nil {
+		t.Fatal(err)
+	}
+	var pending int
+	if err := db.QueryRow(`SELECT uom_confirmation_pending FROM items WHERE stock_id='OLD'`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("later UOM change pending=%d err=%v", pending, err)
+	}
+}
+
+func TestWorkbookImportUsesSameOwnershipPath(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO items(stock_id,item_name,product_status,product_type,uom)
+		VALUES('OLD','Existing','not-available','Curated','ea')`); err != nil {
+		t.Fatal(err)
+	}
+	f := excelize.NewFile()
+	if err := f.SetSheetName("Sheet1", "DB_Items"); err != nil {
+		t.Fatal(err)
+	}
+	rows := [][]interface{}{{"stock_id", "item_name", "product_status", "product_type", "uom", "current_stock"},
+		{"OLD", "Existing", "Available", "ReportType", "box", 3}, {"NEW", "New", "Available", "ReportType", "box", 4}}
+	for i, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		if err := f.SetSheetRow("DB_Items", cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if _, err := (&Service{DB: db, ImportsDir: t.TempDir()}).Import(&buf, "fixture.xlsx"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"OLD", "NEW"} {
+		var status, typ, shadowStatus, shadowType string
+		var pending int
+		if err := db.QueryRow(`SELECT product_status,product_type,hospital_product_status,hospital_product_type,uom_confirmation_pending FROM items WHERE stock_id=?`, id).Scan(&status, &typ, &shadowStatus, &shadowType, &pending); err != nil {
+			t.Fatal(err)
+		}
+		if shadowStatus != "Available" || shadowType != "ReportType" {
+			t.Fatalf("%s shadows = %q %q", id, shadowStatus, shadowType)
+		}
+		if id == "OLD" && (status != "not-available" || typ != "Curated" || pending != 1) {
+			t.Fatalf("existing = %q %q pending=%d", status, typ, pending)
+		}
+		if id == "NEW" && (status != "Available" || typ != "ReportType" || pending != 0) {
+			t.Fatalf("new = %q %q pending=%d", status, typ, pending)
+		}
+	}
+}

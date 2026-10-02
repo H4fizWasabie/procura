@@ -252,6 +252,9 @@ var migrations = []migration{
 	execMigration("ALTER TABLE items ADD COLUMN velocity REAL"),
 	execMigration("ALTER TABLE item_anchor_audit ADD COLUMN changed_by TEXT"),
 	migratePurchasePolicy,
+	execMigration("ALTER TABLE items ADD COLUMN hospital_product_status TEXT"),
+	execMigration("ALTER TABLE items ADD COLUMN hospital_product_type TEXT"),
+	execMigration("ALTER TABLE items ADD COLUMN uom_confirmation_pending INTEGER NOT NULL DEFAULT 0"),
 }
 
 func Open(dataDir string) (*sql.DB, error) {
@@ -280,6 +283,13 @@ func Open(dataDir string) (*sql.DB, error) {
 	if !hasPurchasePolicy {
 		db.Close()
 		return nil, fmt.Errorf("migration incomplete: items.purchase_policy is missing")
+	}
+	for _, column := range []string{"hospital_product_status", "hospital_product_type", "uom_confirmation_pending"} {
+		var present bool
+		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM pragma_table_info('items') WHERE name=?)", column).Scan(&present); err != nil || !present {
+			db.Close()
+			return nil, fmt.Errorf("migration incomplete: items.%s is missing: %v", column, err)
+		}
 	}
 	if err := rebuildDirectOrdersPK(db); err != nil {
 		return nil, err

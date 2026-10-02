@@ -217,3 +217,6 @@
 ## 2026-10-02
 - [inventory] Validate item edits, audit changed fields atomically with user and reason, and keep edits from changing upload timestamps — preserves a reliable last-seen stock import marker.
 - [inventory] Enforce Service/Asset ROP rules for stored behaviour, reject unknown edit fields, and format audit floats without exponent notation — keeps direct API edits consistent and explicit.
+- [import] Share item upsert across both uploads, preserve Procura-owned status/type, refresh hospital shadows, and flag UOM changes — keeps daily reports from undoing purchasing decisions.
+- [inventory] Add audited status/type edits, re-sync, and explicit UOM confirmation; surface pending and stale imports in validation — makes ownership and review visible.
+- [po/rfq/planning] Block pending-UOM PO and RFQ creation and warn after recording direct orders — prevents new unit mistakes without losing existing order records.

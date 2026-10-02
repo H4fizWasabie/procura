@@ -95,6 +95,45 @@ func TestOpenSQLitePragmas(t *testing.T) {
 	}
 }
 
+func TestImportOwnershipMigrationOnFixtureCopy(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "fixture.sqlite")
+	legacy, err := sql.Open("sqlite", fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(schema[2]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`INSERT INTO items(stock_id,item_name,product_status,product_type,uom) VALUES('F-1','Fixture','not-available','Curated','ea')`); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Close()
+	dir := t.TempDir()
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "procura.sqlite"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		db, err := Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var status, typ string
+		var shadowStatus, shadowType sql.NullString
+		var pending int
+		if err := db.QueryRow(`SELECT product_status,product_type,hospital_product_status,hospital_product_type,uom_confirmation_pending FROM items WHERE stock_id='F-1'`).Scan(&status, &typ, &shadowStatus, &shadowType, &pending); err != nil {
+			t.Fatal(err)
+		}
+		if status != "not-available" || typ != "Curated" || shadowStatus.Valid || shadowType.Valid || pending != 0 {
+			t.Fatalf("migration changed fixture item: %q %q %v %v %d", status, typ, shadowStatus, shadowType, pending)
+		}
+		db.Close()
+	}
+}
+
 func TestOpenAddsChangedByToLegacyItemAnchorAudit(t *testing.T) {
 	fixturePath := filepath.Join(t.TempDir(), "legacy-fixture.sqlite")
 	legacy, err := sql.Open("sqlite", fixturePath)

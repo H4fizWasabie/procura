@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"procura/internal/core"
 	"strings"
 	"time"
 )
@@ -51,6 +52,17 @@ func (s *Service) GenerateID() string {
 
 // Save creates or updates an RFQ.
 func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
+	var exists bool
+	if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM rfq_logs WHERE rfq_id=?)`, rfq.RFQID).Scan(&exists); err != nil {
+		return "", err
+	}
+	if !exists {
+		for _, item := range rfq.Items {
+			if err := core.CheckPendingUOM(s.DB, item.StockID); err != nil {
+				return "", err
+			}
+		}
+	}
 	if rfq.RFQID == "" {
 		rfq.RFQID = s.GenerateID()
 	}
@@ -145,13 +157,31 @@ func (s *Service) Delete(rfqID string) error {
 }
 
 // helpers
-func strv(s sql.NullString) string { if s.Valid { return s.String }; return "" }
-func strv2(v interface{}) string { if v == nil { return "" }; if s, ok := v.(string); ok { return s }; return "" }
+func strv(s sql.NullString) string {
+	if s.Valid {
+		return s.String
+	}
+	return ""
+}
+func strv2(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
 func f64v2(v interface{}) float64 {
-	if v == nil { return 0 }
+	if v == nil {
+		return 0
+	}
 	switch n := v.(type) {
-	case float64: return n
-	case json.Number: f, _ := n.Float64(); return f
+	case float64:
+		return n
+	case json.Number:
+		f, _ := n.Float64()
+		return f
 	}
 	return 0
 }

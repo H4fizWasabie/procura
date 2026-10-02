@@ -203,7 +203,7 @@ async function markOrdered() {
             body: JSON.stringify({items, supplier, notes: 'Ordered from planning'})
         });
         const d = await res.json();
-        toast(d.success ? 'Order ' + d.orderId + ' created (' + items.length + ' items)' : d.error, d.success);
+        toast(d.success ? 'Order ' + d.orderId + ' created (' + items.length + ' items)' + (d.warnings?.length ? '. Warning: ' + d.warnings.join('; ') : '') : d.error, d.success);
         if (d.success) load();
     } catch(e) { toast('Error: ' + e.message, false); }
 }
@@ -211,7 +211,7 @@ async function markOrdered() {
 function toast(msg, ok) {
     const t = document.getElementById('toast');
     t.textContent = msg; t.className = 'toast ' + (ok ? 'toast-ok' : 'toast-err');
-    t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3000);
+    t.style.display = 'block'; setTimeout(() => t.style.display = 'none', msg.includes('Warning:') ? 10000 : 3000);
 }
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 load();

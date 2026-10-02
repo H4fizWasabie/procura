@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,18 +83,13 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 				}
 				itemName := strVal(r["item_name"])
 				currentStock := floatVal(r["current"])
-				ts := now.Format("2006-01-02T15:04:05")
+				ts := now.Format("2006-01-02T15:04:05.000000000")
 
-				var exists int
-				s.DB.QueryRow("SELECT COUNT(*) FROM items WHERE stock_id = ?", sid).Scan(&exists)
-				if exists > 0 {
-					s.DB.Exec("UPDATE items SET item_name = CASE WHEN COALESCE(item_name,'') = '' THEN ? ELSE item_name END, current_stock = ?, last_updated = ? WHERE stock_id = ?",
-						itemName, currentStock, ts, sid)
-				} else {
-					s.DB.Exec(`INSERT INTO items (stock_id, item_name, cost, uom, product_type, category, current_stock, last_updated, pack_size, exclude, product_status, velocity_override, supplier_name, item_behaviour) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-						sid, itemName, floatVal(r["cost"]), strVal(r["uom"]), strVal(r["product_type"]), strVal(r["category"]),
-						currentStock, ts, strVal(r["pack_size"]), intVal(r["exclude"]), strVal(r["product_status"]),
-						strVal(r["velocity_override"]), strVal(r["supplier"]), strVal(r["item_behaviour"]))
+				r["item_name"] = itemName
+				r["current"] = strconv.FormatFloat(currentStock, 'f', -1, 64)
+				if err := s.upsertItem(r, ts); err != nil {
+					importErrors = append(importErrors, fmt.Sprintf("item %s: %v", sid, err))
+					continue
 				}
 				inserted++
 			}
@@ -435,7 +431,7 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 	}
 	headers := applyInventoryAliases(normHeaders(rows[0]))
 	updated, added, skippedEmpty, skippedDash, errors := 0, 0, 0, 0, 0
-	now := time.Now().Format("2006-01-02T15:04:05")
+	now := time.Now().Format("2006-01-02T15:04:05.000000000")
 	for _, row := range rows[1:] {
 		fields := mapRow(headers, row)
 		sku := strVal(fields["stock_id"])
@@ -460,19 +456,9 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 		}
 
 		var exists int
-		s.DB.QueryRow("SELECT COUNT(*) FROM items WHERE stock_id = ?", sku).Scan(&exists)
-		if exists > 0 {
-			_, err = s.DB.Exec(`UPDATE items SET item_name=?, cost=?, selling_price=?, uom=?,
-				product_type=?, category=?, supplier_name=?, product_status=?, current_stock=?, last_updated=?
-				WHERE stock_id=?`, strVal(fields["item_name"]), floatVal(fields["cost"]),
-				floatVal(fields["selling_price"]), strVal(fields["uom"]), strVal(fields["product_type"]),
-				strVal(fields["category"]), strVal(fields["supplier"]), strVal(fields["product_status"]), stock, now, sku)
-		} else {
-			_, err = s.DB.Exec(`INSERT INTO items
-				(stock_id,item_name,cost,selling_price,uom,product_type,category,supplier_name,product_status,current_stock,last_updated)
-				VALUES (?,?,?,?,?,?,?,?,?,?,?)`, sku, strVal(fields["item_name"]), floatVal(fields["cost"]),
-				floatVal(fields["selling_price"]), strVal(fields["uom"]), strVal(fields["product_type"]),
-				strVal(fields["category"]), strVal(fields["supplier"]), strVal(fields["product_status"]), stock, now)
+		if err = s.DB.QueryRow("SELECT COUNT(*) FROM items WHERE stock_id = ?", sku).Scan(&exists); err == nil {
+			fields["current"] = strconv.FormatFloat(stock, 'f', -1, 64)
+			err = s.upsertItem(fields, now)
 		}
 		if err != nil {
 			errors++
@@ -490,6 +476,30 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 		"skipped_dash":  skippedDash,
 		"errors":        errors,
 	}, nil
+}
+
+// upsertItem is the single ownership boundary for both hospital import routes.
+func (s *Service) upsertItem(fields map[string]string, timestamp string) error {
+	_, err := s.DB.Exec(`INSERT INTO items
+		(stock_id,item_name,cost,selling_price,uom,product_type,category,supplier_name,product_status,
+		 current_stock,last_updated,pack_size,exclude,velocity_override,item_behaviour,
+		 hospital_product_status,hospital_product_type)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(stock_id) DO UPDATE SET
+		 item_name=CASE WHEN excluded.item_name='' THEN items.item_name ELSE excluded.item_name END,
+		 cost=excluded.cost, selling_price=excluded.selling_price,
+		 uom_confirmation_pending=CASE WHEN COALESCE(items.uom,'') != COALESCE(excluded.uom,'') THEN 1 ELSE items.uom_confirmation_pending END,
+		 uom=excluded.uom, category=excluded.category, supplier_name=excluded.supplier_name,
+		 current_stock=excluded.current_stock, last_updated=excluded.last_updated,
+		 hospital_product_status=excluded.hospital_product_status,
+		 hospital_product_type=excluded.hospital_product_type`,
+		strVal(fields["stock_id"]), strVal(fields["item_name"]), floatVal(fields["cost"]),
+		floatVal(fields["selling_price"]), strVal(fields["uom"]), strVal(fields["product_type"]),
+		strVal(fields["category"]), strVal(fields["supplier"]), strVal(fields["product_status"]),
+		floatVal(fields["current"]), timestamp, strVal(fields["pack_size"]), intVal(fields["exclude"]),
+		strVal(fields["velocity_override"]), strVal(fields["item_behaviour"]),
+		strVal(fields["product_status"]), strVal(fields["product_type"]))
+	return err
 }
 
 func parseFloat(s string) (float64, error) {

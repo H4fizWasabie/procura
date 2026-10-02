@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"procura/internal/core"
 	"strings"
 	"time"
 )
@@ -180,6 +181,17 @@ func (s *Service) GenerateID() string {
 func (s *Service) Save(p PO) (string, error) {
 	if err := ValidateRequired(p); err != nil {
 		return "", err
+	}
+	var exists bool
+	if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM purchase_orders WHERE po_id=?)`, p.POID).Scan(&exists); err != nil {
+		return "", err
+	}
+	if !exists {
+		for _, item := range p.Items {
+			if err := core.CheckPendingUOM(s.DB, item.StockID); err != nil {
+				return "", err
+			}
+		}
 	}
 	isNew := p.POID == ""
 	if isNew {
