@@ -159,7 +159,12 @@ func (s *Service) Compute() Stats {
 		})
 	}
 
-	sort.Slice(alerts, func(i, j int) bool { return alerts[i].Health < alerts[j].Health })
+	sort.Slice(alerts, func(i, j int) bool {
+		if alerts[i].Health == alerts[j].Health {
+			return alerts[i].ID < alerts[j].ID
+		}
+		return alerts[i].Health < alerts[j].Health
+	})
 	if len(alerts) > 10 {
 		alerts = alerts[:10]
 	}

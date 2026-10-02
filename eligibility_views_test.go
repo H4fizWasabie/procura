@@ -13,6 +13,7 @@ import (
 	"procura/internal/core"
 	"procura/internal/dashboard"
 	"procura/internal/inventory"
+	"procura/internal/movement"
 	"procura/internal/planning"
 	"procura/internal/report"
 	"procura/internal/validation"
@@ -63,7 +64,7 @@ func eligibilityFixture(t *testing.T) *sql.DB {
 
 func captureEligibilityViews(t *testing.T, db *sql.DB) map[string][]string {
 	t.Helper()
-	views := map[string][]string{}
+	views := map[string][]string{"Validation ZERO_STOCK_WITH_ROP": {}}
 	plan, err := (&planning.Service{DB: db}).Plan()
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +117,7 @@ func TestEligibilityViewComparison(t *testing.T) {
 		"Planning":         {"EMPTY_BEHAVIOUR:REVIEW", "ROUTINE:REVIEW"},
 		"Dashboard alerts": routine, "Restock report": routine, "Inventory low stock": routine, "Analytics critical": routine,
 		"Inventory Active": active, "All inventory": all, "Order dropdown": all,
-		"Validation MISSING_MOVEMENT": all, "Validation ZERO_STOCK_WITH_ROP": {"ON_DEMAND", "ZERO_EXCLUDED"},
+		"Validation MISSING_MOVEMENT": all, "Validation ZERO_STOCK_WITH_ROP": {},
 	} {
 		if !reflect.DeepEqual(views[view], want) {
 			t.Errorf("%s=%v want %v", view, views[view], want)
@@ -132,6 +133,42 @@ func TestEligibilityViewComparison(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log(string(b))
+}
+
+func TestValidationZeroStockUsesRoutineEligibilityBeforeAndAfterRecalc(t *testing.T) {
+	db := eligibilityFixture(t)
+	if _, err := db.Exec(`UPDATE items SET current_stock=0,velocity_override=5`); err != nil {
+		t.Fatal(err)
+	}
+	for _, recalc := range []bool{false, true} {
+		if recalc {
+			(&movement.Service{DB: db}).RecalcROP()
+		}
+		views := captureEligibilityViews(t, db)
+		if !reflect.DeepEqual(views["Validation ZERO_STOCK_WITH_ROP"], []string{"AT_ROP", "EMPTY_BEHAVIOUR", "ROUTINE"}) {
+			t.Errorf("recalc=%t zero-stock signal=%v", recalc, views["Validation ZERO_STOCK_WITH_ROP"])
+		}
+		if len(views["Validation MISSING_MOVEMENT"]) != 15 {
+			t.Error("data-quality check lost excluded or unavailable items")
+		}
+	}
+}
+
+func TestDashboardTopTenBreaksHealthTiesByStockID(t *testing.T) {
+	db := eligibilityFixture(t)
+	if _, err := db.Exec(`UPDATE items SET current_stock=0,exclude=0,purchase_policy='routine',item_behaviour='',
+		product_status='Available',product_type='',category=''`); err != nil {
+		t.Fatal(err)
+	}
+	alerts := (&dashboard.Service{DB: db}).Compute().ROPAlerts
+	want := []string{"ASSET", "AT_ROP", "DO_NOT_REORDER", "EMPTY_BEHAVIOUR", "EXCLUDED", "LEGACY_EXCLUDE_BEHAVIOUR", "NOT_AVAILABLE", "ON_DEMAND", "ROUTINE", "SERVICE"}
+	ids := []string{}
+	for _, alert := range alerts {
+		ids = append(ids, alert.ID)
+	}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("top ten=%v want %v", ids, want)
+	}
 }
 
 func TestLowStockThresholdBeforeRoundingAndPagination(t *testing.T) {

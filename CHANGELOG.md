@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-10-02
+- [validation/dashboard] Apply routine eligibility to the zero-stock reorder signal while retaining all-item data-quality checks, and break alert health ties by stock ID — prevent seasonal items leaking into signals and stabilize the top ten
 - [movement] Recalculate ROP using stockability only after all planning views adopt shared eligibility — exclusion, purchase policy and availability toggles no longer erase the reorder point
 - [planning] Share routine eligibility and strict stored-ROP thresholds across planning views, retain all-item valuation/validation and browsing-only Active filtering — consistent recommendations without hiding historical linking choices
 - [po/rfq] Check purchase policy on new lines and require logged availability acknowledgement, while historical edits and direct orders remain recordable with visible warnings — separate routine suggestions from explicit purchase intent
