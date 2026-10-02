@@ -50,7 +50,6 @@ func (s *Service) Run(nonzeroOnly bool) []Issue {
 		FROM items i
 		LEFT JOIN (SELECT DISTINCT stock_id FROM stock_movements) sm ON sm.stock_id = i.stock_id
 		WHERE sm.stock_id IS NULL
-		  AND COALESCE(i.exclude,0) = 0
 		ORDER BY i.stock_id
 	`)
 	if rows != nil {
@@ -122,7 +121,7 @@ func (s *Service) Run(nonzeroOnly bool) []Issue {
 	rows, _ = s.DB.Query(`
 		SELECT stock_id, COALESCE(item_name,''), rop, current_stock
 		FROM items
-		WHERE rop > 0 AND current_stock = 0 AND COALESCE(exclude,0) = 0
+		WHERE rop > 0 AND current_stock = 0
 		ORDER BY stock_id
 		LIMIT 200
 	`)

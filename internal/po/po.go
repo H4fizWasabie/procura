@@ -5,24 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"procura/internal/core"
+	"procura/internal/planning"
 	"strings"
 	"time"
 )
 
 type PO struct {
-	POID        string  `json:"po_id"`
-	Date        string  `json:"date"`
-	Supplier    string  `json:"supplier"`
-	BillNo      string  `json:"bill_no"`
-	Total       float64 `json:"total"`
-	Paid        float64 `json:"paid"`
-	Balance     float64 `json:"balance"`
-	Status      string  `json:"status"`
-	ShipStatus  string  `json:"ship_status"`
-	Department  string  `json:"department"`
-	Terms       string  `json:"terms"`
-	InvoiceDate string  `json:"invoice_date"`
-	Items       []Item  `json:"items"`
+	POID                 string   `json:"po_id"`
+	Date                 string   `json:"date"`
+	Supplier             string   `json:"supplier"`
+	BillNo               string   `json:"bill_no"`
+	Total                float64  `json:"total"`
+	Paid                 float64  `json:"paid"`
+	Balance              float64  `json:"balance"`
+	Status               string   `json:"status"`
+	ShipStatus           string   `json:"ship_status"`
+	Department           string   `json:"department"`
+	Terms                string   `json:"terms"`
+	InvoiceDate          string   `json:"invoice_date"`
+	Items                []Item   `json:"items"`
+	AcknowledgedStockIDs []string `json:"acknowledged_stock_ids,omitempty"`
 }
 
 type Item struct {
@@ -179,6 +181,11 @@ func (s *Service) GenerateID() string {
 
 // Save creates or updates a PO with its items.
 func (s *Service) Save(p PO) (string, error) {
+	return s.SaveAs(p, "")
+}
+
+// SaveAs records availability overrides with the authenticated actor.
+func (s *Service) SaveAs(p PO, user string) (string, error) {
 	if err := ValidateRequired(p); err != nil {
 		return "", err
 	}
@@ -206,11 +213,20 @@ func (s *Service) Save(p PO) (string, error) {
 			return "", err
 		}
 	}
+	var overrides []string
 	for _, item := range p.Items {
 		if !existingItems[item.StockID] {
 			if err := core.CheckPendingUOM(s.DB, item.StockID); err != nil {
 				return "", err
 			}
+			override, err := planning.CheckPurchase(s.DB, item.StockID, p.AcknowledgedStockIDs)
+			if err != nil {
+				return "", err
+			}
+			if override {
+				overrides = append(overrides, item.StockID)
+			}
+			existingItems[item.StockID] = true
 		}
 	}
 	isNew := p.POID == ""
@@ -274,6 +290,9 @@ func (s *Service) Save(p PO) (string, error) {
 		}
 	}
 
+	if err := planning.LogAvailabilityOverrides(tx, user, "po", p.POID, overrides); err != nil {
+		return "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}

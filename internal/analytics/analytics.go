@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"procura/internal/planning"
 )
 
 var monthLabels = []string{"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"}
@@ -90,20 +92,20 @@ type itemAcc struct{name string; totalOut,revenue float64; monthly,ihMonthly,rev
 // snapshot of the items table: per-item metadata plus derived critical/asset figures
 func (s *Service) loadItems() (itemMap map[string]itemMeta, critical []CriticalItem, restockCost, inventoryAsset float64) {
 	itemMap = map[string]itemMeta{}
-	rows, _ := s.DB.Query("SELECT stock_id, item_name, cost, selling_price, current_stock, rop, product_type, category, item_behaviour FROM items")
+	rows, _ := s.DB.Query("SELECT stock_id, item_name, cost, selling_price, current_stock, rop, product_type, category, item_behaviour, purchase_policy, exclude, product_status FROM items")
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var id,name,pt,cat,beh sql.NullString; var cost,sell,cur,rop sql.NullFloat64
-			rows.Scan(&id,&name,&cost,&sell,&cur,&rop,&pt,&cat,&beh)
+			var id,name,pt,cat,beh,policy,exclude,status sql.NullString; var cost,sell,cur,rop sql.NullFloat64
+			rows.Scan(&id,&name,&cost,&sell,&cur,&rop,&pt,&cat,&beh,&policy,&exclude,&status)
 			if !id.Valid { continue }
 			im := itemMeta{name: strv(name), typ: strv(pt), cat: strv(cat), beh: strv(beh),
 				cost: f64v(cost), sell: f64v(sell), cur: f64v(cur), rop: f64v(rop)}
 			itemMap[strings.ToUpper(strings.TrimSpace(id.String))] = im
 			cv, cst := im.cur, im.cost
-			inventoryAsset += cv * cst
+			inventoryAsset += cv * cst // All items: valuation never uses eligibility.
 			r := im.rop
-			if r > 0 && cv < r {
+			if planning.RoutineEligible(policy.String, exclude.String, beh.String, status.String, pt.String, cat.String) && planning.BelowROP(cv, r) {
 				gap := r - cv
 				restockCost += gap * cst
 				critical = append(critical, CriticalItem{Name: strv(name), Gap: gap, Cost: gap*cst})

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xuri/excelize/v2"
+	"procura/internal/planning"
 )
 
 // Anchor fields that can be edited (matches GAS apiSaveInventoryItem).
@@ -87,12 +88,6 @@ func (s *Service) ListFiltered(f Filters, page, pageSize int) ([]Item, error) {
 			args = append(args, filter.value)
 		}
 	}
-	if f.LowStock {
-		where = append(where, "COALESCE(i.current_stock,0) <= COALESCE(i.rop,0) AND COALESCE(i.rop,0) > 0")
-	}
-	if f.Active && !f.Unclassified {
-		where = append(where, "UPPER(TRIM(COALESCE(i.exclude,''))) NOT IN ('1','TRUE','YES','EXCLUDE') AND LOWER(TRIM(COALESCE(i.item_behaviour,''))) != 'exclude'")
-	}
 	if f.Unclassified {
 		where = append(where, "i.purchase_policy IS NULL")
 	}
@@ -106,7 +101,8 @@ func (s *Service) ListFiltered(f Filters, page, pageSize int) ([]Item, error) {
  COALESCE((SELECT m.supplier_uom FROM supplier_item_mappings m
  WHERE m.stock_id = i.stock_id AND m.supplier_name = i.supplier_name ORDER BY m.id LIMIT 1), '')
  FROM items i WHERE ` + strings.Join(where, " AND ") + " ORDER BY " + order
-	if pageSize > 0 {
+	sharedFilter := f.LowStock || (f.Active && !f.Unclassified)
+	if pageSize > 0 && !sharedFilter {
 		if page < 1 {
 			page = 1
 		}
@@ -118,7 +114,37 @@ func (s *Service) ListFiltered(f Filters, page, pageSize int) ([]Item, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanItems(rows)
+	items, err := scanItems(rows)
+	if err != nil || !sharedFilter {
+		return items, err
+	}
+	// Shared Go rules run before pagination/export. Active is browsing only.
+	filtered := []Item{}
+	for _, item := range items {
+		if f.Active && !f.Unclassified && planning.Excluded(item.Exclude) {
+			continue
+		}
+		policy := ""
+		if item.PurchasePolicy != nil {
+			policy = *item.PurchasePolicy
+		}
+		if f.LowStock && (!planning.RoutineEligible(policy, item.Exclude, item.ItemBehaviour, item.ProductStatus, item.ProductType, item.Category) || !planning.BelowROP(item.CurrentStock, item.ROP)) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if pageSize > 0 {
+		if page < 1 {
+			page = 1
+		}
+		start := (page - 1) * pageSize
+		if start >= len(filtered) {
+			return []Item{}, nil
+		}
+		end := min(start+pageSize+1, len(filtered))
+		filtered = filtered[start:end]
+	}
+	return filtered, nil
 }
 
 // Export includes all matching rows, independent of the current page.
@@ -441,20 +467,27 @@ func anchorValuesEqual(old, next interface{}) bool {
 	return fmt.Sprint(old) == fmt.Sprint(next)
 }
 
-// BasicList returns ID + Name for dropdowns. Excludes Unavailable items.
-func (s *Service) BasicList() []map[string]string {
+// BasicList includes every item for both order pickers and historical linking.
+func (s *Service) BasicList() []map[string]interface{} {
 	rows, _ := s.DB.Query(`
-		SELECT stock_id, item_name, category, COALESCE(uom,''), COALESCE(supplier_name,'')
+		SELECT stock_id, COALESCE(item_name,''), COALESCE(category,''), COALESCE(uom,''), COALESCE(supplier_name,''),
+		       purchase_policy, COALESCE(product_status,'')
 		FROM items
-		WHERE COALESCE(product_status,'') != 'Unavailable'
 		ORDER BY item_name
 	`)
+	if rows == nil {
+		return []map[string]interface{}{}
+	}
 	defer rows.Close()
-	var out []map[string]string
+	out := []map[string]interface{}{}
 	for rows.Next() {
-		var id, name, cat, uom, sup string
-		rows.Scan(&id, &name, &cat, &uom, &sup)
-		out = append(out, map[string]string{"Stock ID": id, "Item Name": name, "Category": cat, "UOM": uom, "Supplier": sup})
+		var id, name, cat, uom, sup, status string
+		var policy sql.NullString
+		if err := rows.Scan(&id, &name, &cat, &uom, &sup, &policy, &status); err != nil {
+			continue
+		}
+		out = append(out, map[string]interface{}{"Stock ID": id, "Item Name": name, "Category": cat, "UOM": uom, "Supplier": sup,
+			"purchase_policy": nullableString(policy), "product_status": status, "purchasable": planning.Purchasable(policy.String), "not_available": planning.NotAvailable(status)})
 	}
 	return out
 }
@@ -474,7 +507,7 @@ func scanItems(rows *sql.Rows) ([]Item, error) {
 			StockID: str(stockID), ItemName: str(name),
 			Cost: f64(cost), UOM: str(uom),
 			ProductType: str(ptype), Category: str(cat),
-			CurrentStock: round(f64(current)), ROP: round(f64(rop)),
+			CurrentStock: f64(current), ROP: f64(rop),
 			SellingPrice: f64(selling), LastUpdated: str(updated),
 			PackSize: str(pack), Exclude: str(exclude),
 			ProductStatus: str(status), VelocityOv: str(velOv),
@@ -506,4 +539,3 @@ func f64(f sql.NullFloat64) float64 {
 	}
 	return 0
 }
-func round(f float64) float64 { return math.Round(f*100) / 100 }

@@ -448,6 +448,12 @@ func main() {
 		}
 		var warnings []string
 		for _, item := range body.Items {
+			itemWarnings, checkErr := planning.DirectOrderWarnings(db, item.StockID)
+			if checkErr != nil {
+				writeJSON(w, 500, map[string]interface{}{"success": false, "error": checkErr.Error()})
+				return
+			}
+			warnings = append(warnings, itemWarnings...)
 			name, checkErr := core.PendingUOM(db, item.StockID)
 			if checkErr != nil {
 				writeJSON(w, 500, map[string]interface{}{"success": false, "error": checkErr.Error()})
@@ -512,7 +518,7 @@ func main() {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
-		id, err := poSvc.Save(body)
+		id, err := poSvc.SaveAs(body, r.Header.Get("X-User-Email"))
 		if err != nil {
 			writeOrderSaveError(w, err)
 			return
@@ -1285,10 +1291,18 @@ func userFromReq(r *http.Request) map[string]string {
 
 func writeOrderSaveError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
+	body := map[string]interface{}{"success": false, "error": err.Error()}
 	if errors.Is(err, core.ErrPendingUOM) {
 		status = http.StatusBadRequest
 	}
-	writeJSON(w, status, map[string]interface{}{"success": false, "error": err.Error()})
+	var purchaseError *planning.PurchaseError
+	if errors.As(err, &purchaseError) {
+		status = http.StatusBadRequest
+		if purchaseError.AvailabilityOverride {
+			body["unavailable_stock_ids"] = []string{purchaseError.StockID}
+		}
+	}
+	writeJSON(w, status, body)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {

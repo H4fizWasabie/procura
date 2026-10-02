@@ -189,16 +189,22 @@ function onRfqItemSelect(input) {
     row.querySelector('.ri-stock').value = match['Stock ID'];
     row.querySelector('.ri-uom').value = match['UOM'] || 'UNIT';
     input.value = match['Item Name'];
+    updateRfqItemFlags(row);
+}
+function updateRfqItemFlags(row) {
+    const item = invItems.find(i => i['Stock ID'] === row.querySelector('.ri-stock').value);
+    row.querySelector('.ri-flags').textContent = item ? 'Policy: ' + (item.purchase_policy || 'unclassified') + (item.not_available ? ' · Not available — override required' : '') : '';
 }
 function addItem(it = {}) {
     const tbody = document.getElementById('c-items').querySelector('tbody');
     const row = document.createElement('tr');
-    row.innerHTML = `<td><input style="width:100px" class="ri-stock" value="${esc(it.stock_id||'')}"></td>
-        <td><input style="width:200px" class="ri-name" list="rfq-item-list" onchange="onRfqItemSelect(this)" placeholder="Search inventory..." value="${esc(it.item_name||'')}"></td>
+    row.innerHTML = `<td><input style="width:100px" class="ri-stock" onchange="updateRfqItemFlags(this.closest('tr'))" value="${esc(it.stock_id||'')}"></td>
+        <td><input style="width:200px" class="ri-name" list="rfq-item-list" onchange="onRfqItemSelect(this)" placeholder="Search inventory..." value="${esc(it.item_name||'')}"><small class="ri-flags" aria-live="polite"></small></td>
         <td><input type="number" step="0.01" value="${it.qty || 1}" style="width:70px" class="ri-qty"></td>
         <td><input style="width:60px" class="ri-uom" value="${esc(it.uom||'UNIT')}"></td>
         <td><button onclick="this.closest('tr').remove()" class="btn-sm btn-danger">&times;</button></td>`;
     tbody.appendChild(row);
+    updateRfqItemFlags(row);
 }
 async function saveRFQ() {
     if (supplierInput().value.trim() && !selectedSupplier) {
@@ -219,8 +225,7 @@ async function saveRFQ() {
         notes: document.getElementById('c-notes').value,
         items: items,
     };
-    const res = await fetch('/api/rfq', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    const d = await res.json();
+    const {data:d} = await saveWithAvailabilityOverride('/api/rfq', body);
     toast(d.success?'Saved: '+d.rfq_id:d.error, d.success);
     if (d.success) { closeCreate(); load(); }
 }
