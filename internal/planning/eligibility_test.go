@@ -2,6 +2,22 @@ package planning
 
 import "testing"
 
+func TestStockabilityIsNotRoutineEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		behaviour, productType, category string
+		want                             bool
+	}{
+		{"", "", "", true}, {"Standard / Pack", "", "", true}, {"In-House Use", "", "", true},
+		{"Exclude", "", "", true}, {"Unknown", "", "", true},
+		{" SERVICE ", "", "", false}, {"Asset", "", "", false}, {"unavailable", "", "", false},
+		{"", "SURGICAL supply", "", false}, {"", "", "surgical tools", false},
+	} {
+		if got := Stockable(tc.behaviour, tc.productType, tc.category); got != tc.want {
+			t.Errorf("Stockable(%q,%q,%q)=%t", tc.behaviour, tc.productType, tc.category, got)
+		}
+	}
+}
+
 func TestSharedEligibilityRules(t *testing.T) {
 	for _, exclude := range []string{"1", "TRUE", "YES", "EXCLUDE", " true ", "Yes", " exclude "} {
 		if !Excluded(exclude) || RoutineEligible("routine", exclude, "", "Available", "", "") {

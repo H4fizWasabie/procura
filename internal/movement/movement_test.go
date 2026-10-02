@@ -43,6 +43,11 @@ func TestRecalcROPPersistsVelocityAndROP(t *testing.T) {
 	if vel != 4 || rop != 8 {
 		t.Errorf("vel/rop = %v/%v, want 4/8", vel, rop)
 	}
+	exec(t, s, `UPDATE items SET exclude='YES',purchase_policy='do_not_reorder',product_status='not-available' WHERE stock_id='X'`)
+	s.RecalcROP()
+	if err := s.DB.QueryRow("SELECT rop, velocity FROM items WHERE stock_id='X'").Scan(&rop, &vel); err != nil || rop != 8 || vel != 4 {
+		t.Fatalf("purchase controls changed weighted ROP/velocity=%v/%v err=%v", rop, vel, err)
+	}
 }
 
 func TestSpikeCapBoundsOneOffAdjustment(t *testing.T) {
@@ -77,6 +82,55 @@ func TestVelocityOverridePersists(t *testing.T) {
 	s.DB.QueryRow("SELECT rop, COALESCE(velocity,0) FROM items WHERE stock_id='Z'").Scan(&rop, &vel)
 	if vel != 7 || rop != 14 {
 		t.Errorf("vel/rop = %v/%v, want 7/14", vel, rop)
+	}
+}
+
+func TestRecalcROPIgnoresPurchaseControlsButRespectsStockability(t *testing.T) {
+	s := testDB(t)
+	defer s.DB.Close()
+	for _, tc := range []struct {
+		id                                       string
+		exclude, policy                          interface{}
+		behaviour, status, productType, category string
+		rop                                      float64
+	}{
+		{"INTEGER_EXCLUDE", 1, "routine", "", "Available", "", "", 10},
+		{"STRING_EXCLUDE", "1", "routine", "", "Available", "", "", 10},
+		{"TRUE_EXCLUDE", "TRUE", "routine", "", "Available", "", "", 10},
+		{"YES_EXCLUDE", "YES", "routine", "", "Available", "", "", 10},
+		{"WORD_EXCLUDE", "EXCLUDE", "routine", "", "Available", "", "", 10},
+		{"UNCLASSIFIED", 0, nil, "Standard / Pack", "Available", "", "", 10},
+		{"ON_DEMAND", 0, "on_demand", "In-House Use", "Available", "", "", 10},
+		{"DO_NOT_REORDER", 0, "do_not_reorder", "", "Available", "", "", 10},
+		{"NOT_AVAILABLE", 0, "routine", "", "not-available", "", "", 10},
+		{"LEGACY_STATUS", 0, "routine", "", "Unavailable", "", "", 10},
+		{"LEGACY_BEHAVIOUR", 0, "routine", "Exclude", "Available", "", "", 10},
+		{"UNKNOWN_BEHAVIOUR", 0, "routine", "Unknown", "Available", "", "", 10},
+		{"SERVICE", 0, "routine", "Service", "Available", "", "", 0},
+		{"ASSET", 0, "routine", "Asset", "Available", "", "", 0},
+		{"UNAVAILABLE_BEHAVIOUR", 0, "routine", "Unavailable", "Available", "", "", 0},
+		{"SURGICAL_TYPE", 0, "routine", "", "Available", "Surgical", "", 0},
+		{"SURGICAL_CATEGORY", 0, "routine", "", "Available", "", "Surgical", 0},
+	} {
+		exec(t, s, `INSERT INTO items(stock_id,item_name,rop,velocity_override,exclude,purchase_policy,
+			item_behaviour,product_status,product_type,category) VALUES(?,?,99,5,?,?,?,?,?,?)`,
+			tc.id, tc.id, tc.exclude, tc.policy, tc.behaviour, tc.status, tc.productType, tc.category)
+		s.RecalcROP()
+		var rop, vel float64
+		if err := s.DB.QueryRow(`SELECT rop,COALESCE(velocity,0) FROM items WHERE stock_id=?`, tc.id).Scan(&rop, &vel); err != nil {
+			t.Fatal(err)
+		}
+		wantVel := tc.rop / 2
+		if rop != tc.rop || vel != wantVel {
+			t.Errorf("%s: ROP/velocity=%v/%v want %v/%v", tc.id, rop, vel, tc.rop, wantVel)
+		}
+	}
+	// Changing every purchase control on an already calculated item leaves its ROP intact.
+	exec(t, s, `UPDATE items SET exclude='YES',purchase_policy=NULL,product_status='not-available' WHERE stock_id='ON_DEMAND'`)
+	s.RecalcROP()
+	var rop float64
+	if err := s.DB.QueryRow(`SELECT rop FROM items WHERE stock_id='ON_DEMAND'`).Scan(&rop); err != nil || rop != 10 {
+		t.Fatalf("seasonal toggle erased ROP=%v err=%v", rop, err)
 	}
 }
 

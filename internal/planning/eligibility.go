@@ -42,6 +42,18 @@ func surgical(productType, category string) bool {
 	return strings.Contains(strings.ToLower(productType), "surgical") || strings.Contains(strings.ToLower(category), "surgical")
 }
 
+// Stockable governs ROP calculation independently of purchase intent and availability.
+func Stockable(behaviour, productType, category string) bool {
+	if surgical(productType, category) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(behaviour)) {
+	case "service", "asset", "unavailable":
+		return false
+	}
+	return true
+}
+
 // Purchasable checks curated policy only; surgical and on-demand items are allowed.
 func Purchasable(policy string) bool {
 	return policy == "routine" || policy == "on_demand"

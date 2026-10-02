@@ -128,7 +128,7 @@ func (s *Service) RecalcROP() int {
 
 	// 2. Fetch all items
 	itemRows, err := s.DB.Query(`
-		SELECT stock_id, COALESCE(rop,0), COALESCE(exclude,''),
+		SELECT stock_id, COALESCE(rop,0),
 		       COALESCE(item_behaviour,''), COALESCE(velocity_override,0),
 		       COALESCE(product_type,''), COALESCE(category,'')
 		FROM items
@@ -141,7 +141,6 @@ func (s *Service) RecalcROP() int {
 	type itemRec struct {
 		id       string
 		currROP  float64
-		exclude  string
 		beh      string
 		velOv    float64
 		ptype    string
@@ -150,7 +149,7 @@ func (s *Service) RecalcROP() int {
 	var items []itemRec
 	for itemRows.Next() {
 		var it itemRec
-		if err := itemRows.Scan(&it.id, &it.currROP, &it.exclude, &it.beh, &it.velOv, &it.ptype, &it.category); err != nil {
+		if err := itemRows.Scan(&it.id, &it.currROP, &it.beh, &it.velOv, &it.ptype, &it.category); err != nil {
 			continue
 		}
 		items = append(items, it)
@@ -172,8 +171,8 @@ func (s *Service) RecalcROP() int {
 	for _, it := range items {
 		newROP, newVel := 0.0, 0.0
 
-		// Skip non-plannable items (shared predicate with planning, #14)
-		if !planning.Plannable(it.exclude, it.beh, "", it.ptype, it.category) {
+		// Seasonal exclusion, policy and availability never destroy a stockable item's ROP.
+		if !planning.Stockable(it.beh, it.ptype, it.category) {
 			newROP = 0
 		} else if it.velOv > 0 {
 			// Velocity override

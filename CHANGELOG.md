@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-10-02
+- [movement] Recalculate ROP using stockability only after all planning views adopt shared eligibility — exclusion, purchase policy and availability toggles no longer erase the reorder point
 - [planning] Share routine eligibility and strict stored-ROP thresholds across planning views, retain all-item valuation/validation and browsing-only Active filtering — consistent recommendations without hiding historical linking choices
 - [po/rfq] Check purchase policy on new lines and require logged availability acknowledgement, while historical edits and direct orders remain recordable with visible warnings — separate routine suggestions from explicit purchase intent
 - [import] Preserve item columns absent from a workbook and compare UOM only when supplied — partial sheets cannot erase prices or catalogue fields or create false UOM flags
