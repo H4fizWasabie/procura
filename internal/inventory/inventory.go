@@ -250,6 +250,11 @@ func (s *Service) UpdateAnchors(stockID, changedBy, reason string, updates map[s
 	if reason == "" || changedBy == "" {
 		return fmt.Errorf("%w: changed_by and reason are required", ErrInvalidUpdate)
 	}
+	for field := range updates {
+		if _, ok := anchorValidation[field]; !ok {
+			return fmt.Errorf("%w: unknown field %q; editable fields: %s (reason is also allowed)", ErrInvalidUpdate, field, strings.Join(anchorFields, ", "))
+		}
+	}
 	validated := make(map[string]interface{}, len(updates))
 	for _, field := range anchorFields {
 		if value, ok := updates[field]; ok {
@@ -283,7 +288,11 @@ func (s *Service) UpdateAnchors(stockID, changedBy, reason string, updates map[s
 	for i, field := range anchorFields {
 		oldValues[field] = values[i]
 	}
-	if behaviour, ok := validated["item_behaviour"].(string); ok && (behaviour == "Service" || behaviour == "Asset") {
+	behaviour, behaviourSubmitted := validated["item_behaviour"].(string)
+	if !behaviourSubmitted {
+		behaviour = fmt.Sprint(oldValues["item_behaviour"])
+	}
+	if behaviour == "Service" || behaviour == "Asset" {
 		validated["rop"] = float64(0)
 	}
 
@@ -320,6 +329,12 @@ func (s *Service) UpdateAnchors(stockID, changedBy, reason string, updates map[s
 func auditValue(v interface{}) string {
 	if v == nil {
 		return ""
+	}
+	if value, ok := v.(float64); ok {
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	}
+	if value, ok := v.(float32); ok {
+		return strconv.FormatFloat(float64(value), 'f', -1, 64)
 	}
 	return fmt.Sprint(v)
 }

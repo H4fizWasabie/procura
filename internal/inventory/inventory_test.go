@@ -134,6 +134,48 @@ func TestUpdateAnchorsForcedROPIsAudited(t *testing.T) {
 	}
 }
 
+func TestUpdateAnchorsStoredNonStockBehaviourForcesROPZero(t *testing.T) {
+	for _, behaviour := range []string{"Service", "Asset"} {
+		t.Run(behaviour, func(t *testing.T) {
+			db := inventoryDB(t)
+			if _, err := db.Exec("UPDATE items SET item_behaviour=? WHERE stock_id='A'", behaviour); err != nil {
+				t.Fatal(err)
+			}
+			if err := (&Service{DB: db}).UpdateAnchors("A", "editor@example.test", "non-stock item", map[string]interface{}{"cost": 2.0}); err != nil {
+				t.Fatal(err)
+			}
+			var rop float64
+			if err := db.QueryRow("SELECT rop FROM items WHERE stock_id='A'").Scan(&rop); err != nil {
+				t.Fatal(err)
+			}
+			if rop != 0 {
+				t.Fatalf("ROP = %v, want 0 for stored %s behaviour", rop, behaviour)
+			}
+		})
+	}
+}
+
+func TestUpdateAnchorsRejectsUnknownFieldsWithEditableList(t *testing.T) {
+	db := inventoryDB(t)
+	err := (&Service{DB: db}).UpdateAnchors("A", "editor@example.test", "correction", map[string]interface{}{
+		"product_status": "Unavailable",
+	})
+	if !errors.Is(err, ErrInvalidUpdate) {
+		t.Fatalf("unknown field error = %v, want ErrInvalidUpdate", err)
+	}
+	for _, field := range anchorFields {
+		if !strings.Contains(err.Error(), field) {
+			t.Errorf("unknown field error %q does not list editable field %q", err, field)
+		}
+	}
+}
+
+func TestAuditValueFormatsLargeFloatsWithoutExponent(t *testing.T) {
+	if got := auditValue(float64(1_000_000)); got != "1000000" {
+		t.Fatalf("auditValue(1e6) = %q, want 1000000", got)
+	}
+}
+
 func TestUpdateAnchorsAuditFailureRollsBack(t *testing.T) {
 	db := inventoryDB(t)
 	if _, err := db.Exec(`CREATE TRIGGER reject_item_audit BEFORE INSERT ON item_anchor_audit
