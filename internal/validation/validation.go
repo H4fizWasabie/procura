@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"procura/internal/planning"
 )
 
 type Issue struct {
@@ -117,22 +119,34 @@ func (s *Service) Run(nonzeroOnly bool) []Issue {
 		}
 	}
 
-	// 5. Items with ROP > 0 but zero current stock (potential dead stock not marked)
+	// 5. Zero-stock reorder signal uses routine eligibility; quality checks above use all items.
 	rows, _ = s.DB.Query(`
-		SELECT stock_id, COALESCE(item_name,''), rop, current_stock
+		SELECT stock_id, COALESCE(item_name,''), rop, current_stock,
+		       purchase_policy, exclude, item_behaviour, product_status, product_type, category
 		FROM items
 		WHERE rop > 0 AND current_stock = 0
 		ORDER BY stock_id
-		LIMIT 200
 	`)
 	if rows != nil {
 		defer rows.Close()
+		count := 0
 		for rows.Next() {
 			var id, name string
 			var rop, curr float64
-			rows.Scan(&id, &name, &rop, &curr)
+			var policy, exclude, behaviour, status, productType, category sql.NullString
+			if err := rows.Scan(&id, &name, &rop, &curr, &policy, &exclude, &behaviour, &status, &productType, &category); err != nil {
+				continue
+			}
+			if !planning.RoutineEligible(policy.String, exclude.String, behaviour.String, status.String, productType.String, category.String) {
+				continue
+			}
 			issues = append(issues, Issue{Type: "ZERO_STOCK_WITH_ROP", StockID: id, Name: name, Detail: fmt.Sprintf("ROP=%.0f but stock is 0", rop)})
+			count++
+			if count == 200 {
+				break
+			}
 		}
+		rows.Close()
 	}
 
 	// 6. Duplicate stock_ids

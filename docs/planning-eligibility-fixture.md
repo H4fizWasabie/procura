@@ -26,7 +26,7 @@ go test . -run TestEligibilityViewComparison -v
 | All inventory / Dashboard total items | 15 | 15 |
 | Order dropdown | 15 | 15 |
 | Validation MISSING_MOVEMENT | 13 | 15 |
-| Validation ZERO_STOCK_WITH_ROP | 1 | 2 |
+| Validation ZERO_STOCK_WITH_ROP | 1 | 0 |
 | Inventory asset valuation | 34 | 34 |
 
 All routine views retain ROUTINE and EMPTY_BEHAVIOUR. Both remain REVIEW in
@@ -41,13 +41,14 @@ Planning (no usage history). No retained item changes Planning status.
 | Analytics critical (displayed) | ASSET, EXCLUDED, NOT_AVAILABLE, ON_DEMAND, SERVICE, SURGICAL_CATEGORY, SURGICAL_TYPE, UNCLASSIFIED, ZERO_EXCLUDED | EMPTY_BEHAVIOUR |
 | Inventory Active | None | LEGACY_EXCLUDE_BEHAVIOUR |
 | Validation MISSING_MOVEMENT | None | EXCLUDED, ZERO_EXCLUDED |
-| Validation ZERO_STOCK_WITH_ROP | None | ZERO_EXCLUDED |
+| Validation ZERO_STOCK_WITH_ROP | ON_DEMAND | None |
 | All inventory / Order dropdown | None | None |
 
 EMPTY_BEHAVIOUR enters the displayed Analytics list because filtering removes
 items ahead of the ten-row cap; it was already low-stock in the baseline.
 Active now checks only the exclusion flag, so a legacy Exclude behaviour with
-the flag off remains browsable. Validation deliberately includes excluded items.
+the flag off remains browsable. Data-quality validation deliberately includes
+excluded items; ZERO_STOCK_WITH_ROP is a routine reorder signal and uses RoutineEligible.
 
 Separate regression tests cover all five loose exclusion representations,
 availability spellings and unknown/blank statuses, policy/behaviour/surgical
