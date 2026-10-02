@@ -1,10 +1,14 @@
 # Changelog
 
 ## 2026-10-02
+- [po/rfq] Require exact inventory IDs for every assistant-created line inside the create transaction — blank, unknown and mis-cased IDs cannot bypass purchase or UOM guards
 - [validation/dashboard] Apply routine eligibility to the zero-stock reorder signal while retaining all-item data-quality checks, and break alert health ties by stock ID — prevent seasonal items leaking into signals and stabilize the top ten
 - [movement] Recalculate ROP using stockability only after all planning views adopt shared eligibility — exclusion, purchase policy and availability toggles no longer erase the reorder point
 - [planning] Share routine eligibility and strict stored-ROP thresholds across planning views, retain all-item valuation/validation and browsing-only Active filtering — consistent recommendations without hiding historical linking choices
 - [po/rfq] Check purchase policy on new lines and require logged availability acknowledgement, while historical edits and direct orders remain recordable with visible warnings — separate routine suggestions from explicit purchase intent
+- [po/rfq] Reject assistant availability acknowledgements and unavailable, blocked-policy or pending-UOM items during draft creation — availability overrides remain human-only
+- [po/rfq] Allocate assistant draft IDs inside the insert transaction with a serialized writer lock and create-only inserts, forcing safe PO status and skipping unrelated mapping/direct-order writes — concurrent drafts cannot overwrite records
+- [auth/inventory] Add the ASSISTANT permission boundary and validate known user roles — allow only draft creates and audited edits to the eight agreed item fields
 - [import] Preserve item columns absent from a workbook and compare UOM only when supplied — partial sheets cannot erase prices or catalogue fields or create false UOM flags
 - [inventory] Trust hospital product-type re-sync and limit the EDITOR/ADMIN check to Confirm UOM — manual type validation remains enforced without blocking other item edits
 - [po/rfq] Reject newly added pending-UOM items on re-save and return 400 only for that guard — existing lines remain editable and database failures still return 500

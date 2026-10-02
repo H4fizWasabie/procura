@@ -54,6 +54,19 @@ func (s *Service) GenerateID() string {
 
 // Save creates or updates an RFQ.
 func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
+	return s.save(rfq, createdBy, false)
+}
+
+// CreateAssistant allocates an ID at insert time and never replaces an RFQ.
+func (s *Service) CreateAssistant(rfq RFQ, createdBy string) (string, error) {
+	if rfq.AcknowledgedStockIDs != nil {
+		return "", planning.ErrAssistantAcknowledgement
+	}
+	rfq.RFQID = ""
+	return s.save(rfq, createdBy, true)
+}
+
+func (s *Service) save(rfq RFQ, createdBy string, createOnly bool) (string, error) {
 	existingItems := map[string]bool{}
 	var raw sql.NullString
 	err := s.DB.QueryRow(`SELECT raw_rfq_json FROM rfq_logs WHERE rfq_id=?`, rfq.RFQID).Scan(&raw)
@@ -71,7 +84,7 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 	}
 	var overrides []string
 	for _, item := range rfq.Items {
-		if !existingItems[item.StockID] {
+		if !existingItems[item.StockID] && !createOnly {
 			if err := core.CheckPendingUOM(s.DB, item.StockID); err != nil {
 				return "", err
 			}
@@ -85,7 +98,7 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 			existingItems[item.StockID] = true
 		}
 	}
-	if rfq.RFQID == "" {
+	if rfq.RFQID == "" && !createOnly {
 		rfq.RFQID = s.GenerateID()
 	}
 	rfq.Count = len(rfq.Items)
@@ -99,15 +112,35 @@ func (s *Service) Save(rfq RFQ, createdBy string) (string, error) {
 			"id": it.StockID, "n": it.Name, "u": it.UOM, "q": it.Qty,
 		}
 	}
-	rawJSON, _ := json.Marshal(compact)
+	rawJSON, err := json.Marshal(compact)
+	if err != nil {
+		return "", err
+	}
 
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(`
-		INSERT OR REPLACE INTO rfq_logs (rfq_id, date, supplier, items_count, created_by, raw_rfq_json)
+	if createOnly {
+		rfq.RFQID, err = core.NextDocumentID(tx, "rfq_logs", "rfq_id", "RFQ-"+time.Now().Format("012006")+"-", 2)
+		if err != nil {
+			return "", err
+		}
+		for _, item := range rfq.Items {
+			if err := core.CheckPendingUOM(tx, item.StockID); err != nil {
+				return "", err
+			}
+			if err := planning.CheckAssistantPurchase(tx, item.StockID); err != nil {
+				return "", err
+			}
+		}
+	}
+	insert := "INSERT"
+	if !createOnly {
+		insert += " OR REPLACE"
+	}
+	_, err = tx.Exec(insert+` INTO rfq_logs (rfq_id, date, supplier, items_count, created_by, raw_rfq_json)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, rfq.RFQID, rfq.Date, rfq.Supplier, rfq.Count, createdBy, string(rawJSON))
 	if err != nil {

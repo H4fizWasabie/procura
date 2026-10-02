@@ -24,6 +24,7 @@ var anchorFields = []string{
 }
 
 var ErrInvalidUpdate = errors.New("invalid inventory update")
+var ErrForbiddenEdit = errors.New("forbidden inventory edit")
 
 type Item struct {
 	StockID        string  `json:"stock_id"`
@@ -308,6 +309,15 @@ func (s *Service) UpdateAnchors(stockID, changedBy, reason string, updates map[s
 
 // UpdateAnchorsAs applies editor changes and explicit re-sync/confirmation actions.
 func (s *Service) UpdateAnchorsAs(stockID, changedBy, role, reason string, updates map[string]interface{}) error {
+	if role == "ASSISTANT" {
+		for field := range updates {
+			switch field {
+			case "exclude", "item_behaviour", "purchase_policy", "product_status", "product_type", "rop", "velocity_override", "pack_size":
+			default:
+				return fmt.Errorf("%w: %w: ASSISTANT cannot edit %s", ErrInvalidUpdate, ErrForbiddenEdit, field)
+			}
+		}
+	}
 	reason = strings.TrimSpace(reason)
 	changedBy = strings.TrimSpace(changedBy)
 	if reason == "" || changedBy == "" {

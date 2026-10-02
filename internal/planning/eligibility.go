@@ -2,10 +2,13 @@ package planning
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
+
+	"procura/internal/core"
 )
 
 // Excluded normalizes the loose legacy flag for planning and inventory browsing.
@@ -16,6 +19,9 @@ func Excluded(value string) bool {
 	}
 	return false
 }
+
+var ErrAssistantAcknowledgement = errors.New("ASSISTANT cannot supply acknowledged_stock_ids; a human must create unavailable-item orders in the UI")
+var ErrAssistantStockID = errors.New("ASSISTANT requires every line to have a stock_id matching an existing inventory item exactly")
 
 // NotAvailable accepts the canonical value and its legacy spelling.
 func NotAvailable(status string) bool {
@@ -81,7 +87,7 @@ func (e *PurchaseError) Error() string {
 
 // CheckPurchase applies only to newly added linked PO/RFQ lines. Its result
 // identifies a successful availability override for the save's audit log.
-func CheckPurchase(db *sql.DB, stockID string, acknowledged []string) (bool, error) {
+func CheckPurchase(db core.RowQuerier, stockID string, acknowledged []string) (bool, error) {
 	if stockID == "" {
 		return false, nil
 	}
@@ -143,4 +149,23 @@ func DirectOrderWarnings(db *sql.DB, stockID string) ([]string, error) {
 		warnings = append(warnings, fmt.Sprintf("%s (%s) is not-available", name, stockID))
 	}
 	return warnings, nil
+}
+
+// CheckAssistantPurchase requires exact inventory linkage and never acknowledges availability.
+func CheckAssistantPurchase(db core.RowQuerier, stockID string) error {
+	var exists bool
+	if strings.TrimSpace(stockID) != "" {
+		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM items WHERE stock_id COLLATE BINARY = ?)`, stockID).Scan(&exists); err != nil {
+			return err
+		}
+	}
+	if !exists {
+		return fmt.Errorf("stock_id %q: %w", stockID, ErrAssistantStockID)
+	}
+	_, err := CheckPurchase(db, stockID, nil)
+	var failure *PurchaseError
+	if errors.As(err, &failure) && failure.AvailabilityOverride {
+		return fmt.Errorf("%w; ASSISTANT cannot override availability; a human must create this PO/RFQ in the UI", err)
+	}
+	return err
 }

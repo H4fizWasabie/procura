@@ -183,6 +183,16 @@ func (s *Service) Middleware(next http.HandlerFunc) http.HandlerFunc {
 		r.Header.Set("X-User-Email", claims.Email)
 		r.Header.Set("X-User-Role", claims.Role)
 		r.Header.Set("X-User-Name", claims.Name)
+		if claims.Role == "ASSISTANT" && r.Method != http.MethodGet {
+			allowed := r.Method == http.MethodPost && (r.URL.Path == "/api/pos" || r.URL.Path == "/api/rfq" ||
+				strings.HasPrefix(r.URL.Path, "/api/inventory/") || r.URL.Path == "/api/reports/item-history")
+			if !allowed {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"error":"ASSISTANT may only create POs/RFQs and edit permitted item fields"}`))
+				return
+			}
+		}
 		// VIEWER = read-only: block every non-GET except read-only/self-service POSTs
 		if claims.Role == "VIEWER" && r.Method != http.MethodGet &&
 			r.URL.Path != "/api/reports/item-history" && r.URL.Path != "/api/change-pin" {
@@ -292,6 +302,9 @@ func (s *Service) ListUsers() []UserRecord {
 }
 
 func (s *Service) AddUser(email, name, role string) (string, error) {
+	if !ValidRole(role) {
+		return "", fmtError("role must be VIEWER, ASSISTANT, EDITOR or ADMIN")
+	}
 	email = strings.TrimSpace(strings.ToLower(email))
 	if email == "" || name == "" {
 		return "", fmtError("Email and name required")
@@ -307,8 +320,20 @@ func (s *Service) AddUser(email, name, role string) (string, error) {
 }
 
 func (s *Service) UpdateUser(email, name, role string) error {
+	if !ValidRole(role) {
+		return fmtError("role must be VIEWER, ASSISTANT, EDITOR or ADMIN")
+	}
 	_, err := s.DB.Exec("UPDATE users SET name = ?, role = ?, auth_version = auth_version + 1 WHERE email = ?", name, role, email)
 	return err
+}
+
+// ValidRole restricts role changes to the supported permission sets.
+func ValidRole(role string) bool {
+	switch role {
+	case "VIEWER", "ASSISTANT", "EDITOR", "ADMIN":
+		return true
+	}
+	return false
 }
 
 func (s *Service) ResetUserPIN(email string) (string, error) {

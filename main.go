@@ -63,6 +63,16 @@ func main() {
 	} else if pin := (&auth.Service{DB: db}).BootstrapAdmin(); pin != "" {
 		log.Printf("*** FIRST RUN: admin user created — email: admin@procura.local  PIN: %s ***", pin)
 	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8082"
+	}
+	log.Println("procura listening on :" + port)
+	http.ListenAndServe(":"+port, newHandler(db, demoMode))
+}
+
+// newHandler builds the same routes for the server and HTTP permission tests.
+func newHandler(db *sql.DB, demoMode bool) http.Handler {
 
 	// Load logo and signature from embedded static
 	if b, err := assets.ReadFile("static/logo.png"); err == nil {
@@ -313,7 +323,7 @@ func main() {
 		writeJSON(w, http.StatusOK, items)
 	}))
 
-	mux.HandleFunc("POST /api/inventory/", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/inventory/", protected(auth.RequireRole("ASSISTANT", "EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		stockID := strings.TrimPrefix(r.URL.Path, "/api/inventory/")
 		if stockID == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "stock_id required"})
@@ -327,6 +337,10 @@ func main() {
 		reason, _ := updates["reason"].(string)
 		delete(updates, "reason")
 		if err := invSvc.UpdateAnchorsAs(stockID, r.Header.Get("X-User-Email"), r.Header.Get("X-User-Role"), reason, updates); err != nil {
+			if errors.Is(err, inventory.ErrForbiddenEdit) {
+				writeJSON(w, http.StatusForbidden, map[string]interface{}{"success": false, "error": err.Error()})
+				return
+			}
 			status := http.StatusInternalServerError
 			if errors.Is(err, inventory.ErrInvalidUpdate) {
 				status = http.StatusBadRequest
@@ -508,9 +522,13 @@ func main() {
 	mux.HandleFunc("GET /api/pos/next-id", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"id": poSvc.GenerateID()})
 	}))
-	mux.HandleFunc("POST /api/pos", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/pos", protected(auth.RequireRole("ASSISTANT", "EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body po.PO
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := decodeOrderRequest(r, &body); err != nil {
+			if errors.Is(err, planning.ErrAssistantAcknowledgement) {
+				writeOrderSaveError(w, err)
+				return
+			}
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid PO request body"})
 			return
 		}
@@ -518,9 +536,19 @@ func main() {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
-		id, err := poSvc.SaveAs(body, r.Header.Get("X-User-Email"))
+		var id string
+		var err error
+		if r.Header.Get("X-User-Role") == "ASSISTANT" {
+			id, err = poSvc.CreateAssistant(body)
+		} else {
+			id, err = poSvc.SaveAs(body, r.Header.Get("X-User-Email"))
+		}
 		if err != nil {
 			writeOrderSaveError(w, err)
+			return
+		}
+		if r.Header.Get("X-User-Role") == "ASSISTANT" {
+			writeJSON(w, 200, map[string]interface{}{"success": true, "po_id": id})
 			return
 		}
 		// A covering PO supersedes ACTIVE direct orders for its stock_ids (#6).
@@ -712,10 +740,23 @@ func main() {
 	mux.HandleFunc("GET /api/rfq/next-id", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"id": rfqSvc.GenerateID()})
 	}))
-	mux.HandleFunc("POST /api/rfq", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/rfq", protected(auth.RequireRole("ASSISTANT", "EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body rfq.RFQ
-		json.NewDecoder(r.Body).Decode(&body)
-		id, err := rfqSvc.Save(body, r.Header.Get("X-User-Email"))
+		if err := decodeOrderRequest(r, &body); err != nil {
+			if errors.Is(err, planning.ErrAssistantAcknowledgement) {
+				writeOrderSaveError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid RFQ request body"})
+			return
+		}
+		var id string
+		var err error
+		if r.Header.Get("X-User-Role") == "ASSISTANT" {
+			id, err = rfqSvc.CreateAssistant(body, r.Header.Get("X-User-Email"))
+		} else {
+			id, err = rfqSvc.Save(body, r.Header.Get("X-User-Email"))
+		}
 		if err != nil {
 			writeOrderSaveError(w, err)
 			return
@@ -1273,12 +1314,7 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 	}))
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8082"
-	}
-	log.Println("procura listening on :" + port)
-	http.ListenAndServe(":"+port, mux)
+	return mux
 }
 
 func userFromReq(r *http.Request) map[string]string {
@@ -1289,10 +1325,30 @@ func userFromReq(r *http.Request) map[string]string {
 	}
 }
 
+// decodeOrderRequest rejects acknowledgements even when empty/null or case-varied.
+func decodeOrderRequest(r *http.Request, body interface{}) error {
+	var raw json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		return err
+	}
+	if r.Header.Get("X-User-Role") == "ASSISTANT" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return err
+		}
+		for key := range fields {
+			if strings.EqualFold(key, "acknowledged_stock_ids") {
+				return planning.ErrAssistantAcknowledgement
+			}
+		}
+	}
+	return json.Unmarshal(raw, body)
+}
+
 func writeOrderSaveError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	body := map[string]interface{}{"success": false, "error": err.Error()}
-	if errors.Is(err, core.ErrPendingUOM) {
+	if errors.Is(err, core.ErrPendingUOM) || errors.Is(err, planning.ErrAssistantStockID) {
 		status = http.StatusBadRequest
 	}
 	var purchaseError *planning.PurchaseError
@@ -1301,6 +1357,9 @@ func writeOrderSaveError(w http.ResponseWriter, err error) {
 		if purchaseError.AvailabilityOverride {
 			body["unavailable_stock_ids"] = []string{purchaseError.StockID}
 		}
+	}
+	if errors.Is(err, planning.ErrAssistantAcknowledgement) {
+		status = http.StatusForbidden
 	}
 	writeJSON(w, status, body)
 }
