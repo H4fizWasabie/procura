@@ -21,6 +21,7 @@ func Excluded(value string) bool {
 }
 
 var ErrAssistantAcknowledgement = errors.New("ASSISTANT cannot supply acknowledged_stock_ids; a human must create unavailable-item orders in the UI")
+var ErrAssistantStockID = errors.New("ASSISTANT requires every line to have a stock_id matching an existing inventory item exactly")
 
 // NotAvailable accepts the canonical value and its legacy spelling.
 func NotAvailable(status string) bool {
@@ -150,8 +151,17 @@ func DirectOrderWarnings(db *sql.DB, stockID string) ([]string, error) {
 	return warnings, nil
 }
 
-// CheckAssistantPurchase never passes availability acknowledgements to the shared guard.
+// CheckAssistantPurchase requires exact inventory linkage and never acknowledges availability.
 func CheckAssistantPurchase(db core.RowQuerier, stockID string) error {
+	var exists bool
+	if strings.TrimSpace(stockID) != "" {
+		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM items WHERE stock_id COLLATE BINARY = ?)`, stockID).Scan(&exists); err != nil {
+			return err
+		}
+	}
+	if !exists {
+		return fmt.Errorf("stock_id %q: %w", stockID, ErrAssistantStockID)
+	}
 	_, err := CheckPurchase(db, stockID, nil)
 	var failure *PurchaseError
 	if errors.As(err, &failure) && failure.AvailabilityOverride {

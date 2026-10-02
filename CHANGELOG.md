@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-10-02
+- [po/rfq] Require exact inventory IDs for every assistant-created line inside the create transaction — blank, unknown and mis-cased IDs cannot bypass purchase or UOM guards
 - [validation/dashboard] Apply routine eligibility to the zero-stock reorder signal while retaining all-item data-quality checks, and break alert health ties by stock ID — prevent seasonal items leaking into signals and stabilize the top ten
 - [movement] Recalculate ROP using stockability only after all planning views adopt shared eligibility — exclusion, purchase policy and availability toggles no longer erase the reorder point
 - [planning] Share routine eligibility and strict stored-ROP thresholds across planning views, retain all-item valuation/validation and browsing-only Active filtering — consistent recommendations without hiding historical linking choices

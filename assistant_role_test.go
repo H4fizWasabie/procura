@@ -313,9 +313,9 @@ func TestAssistantDraftPurchaseGuards(t *testing.T) {
 
 func assistantCreate(db *sql.DB, route string, suppliedID string) (string, error) {
 	if route == "po" {
-		return (&po.Service{DB: db}).CreateAssistant(po.PO{POID: suppliedID, Status: "Approved", Date: "2026-01-02", Department: "Ward", Supplier: "Fixture supplier", Items: []po.Item{{Name: "Fixture item", Qty: 1}}})
+		return (&po.Service{DB: db}).CreateAssistant(po.PO{POID: suppliedID, Status: "Approved", Date: "2026-01-02", Department: "Ward", Supplier: "Fixture supplier", Items: []po.Item{{StockID: "FIXTURE-ITEM", Name: "Fixture item", Qty: 1}}})
 	}
-	return (&rfq.Service{DB: db}).CreateAssistant(rfq.RFQ{RFQID: suppliedID, Supplier: "Fixture supplier", Items: []rfq.Item{{Name: "Fixture item", Qty: 1}}}, "assistant@example.test")
+	return (&rfq.Service{DB: db}).CreateAssistant(rfq.RFQ{RFQID: suppliedID, Supplier: "Fixture supplier", Items: []rfq.Item{{StockID: "FIXTURE-ITEM", Name: "Fixture item", Qty: 1}}}, "assistant@example.test")
 }
 
 func TestConcurrentAssistantCreatesAcrossDBConnections(t *testing.T) {
@@ -332,6 +332,9 @@ func TestConcurrentAssistantCreatesAcrossDBConnections(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer second.Close()
+			if _, err := first.Exec(`INSERT INTO items(stock_id,item_name) VALUES('FIXTURE-ITEM','Fixture item')`); err != nil {
+				t.Fatal(err)
+			}
 			table, column, prefix := "purchase_orders", "po_id", "PO - "+time.Now().Format("012006")+" - "
 			if route == "rfq" {
 				table, column, prefix = "rfq_logs", "rfq_id", "RFQ-"+time.Now().Format("012006")+"-"
@@ -395,6 +398,9 @@ func TestAssistantCreateRollback(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
+			if _, err := db.Exec(`INSERT INTO items(stock_id,item_name) VALUES('FIXTURE-ITEM','Fixture item')`); err != nil {
+				t.Fatal(err)
+			}
 			table, triggerTable := "purchase_orders", "purchase_order_items"
 			if route == "rfq" {
 				table, triggerTable = "rfq_logs", "rfq_logs"
@@ -416,5 +422,48 @@ func TestAssistantCreateRollback(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestAssistantDraftRequiresExactInventoryIDs(t *testing.T) {
+	db, request := assistantHTTP(t)
+	// Lowercase "a" must not bypass the blocks on stored item "A".
+	if _, err := db.Exec(`UPDATE items SET purchase_policy='do_not_reorder',product_status='not-available' WHERE stock_id='A'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/pos", "/api/rfq"} {
+		for _, stockID := range []string{"", "FIXTURE-UNKNOWN", "a", " "} {
+			t.Run(path+"/"+stockID, func(t *testing.T) {
+				body := map[string]interface{}{"date": "2026-01-02", "department": "Ward", "supplier": "Fixture supplier",
+					"items": []map[string]interface{}{{"stock_id": "B", "item_name": "Valid fixture", "qty": 1}, {"stock_id": stockID, "item_name": "Invalid fixture", "qty": 1}}}
+				w := request("POST", path, body)
+				if w.Code != 400 || !strings.Contains(w.Body.String(), "stock_id") || !strings.Contains(w.Body.String(), "existing inventory item exactly") {
+					t.Fatalf("invalid linkage accepted: %d %s", w.Code, w.Body.String())
+				}
+				var count int
+				if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM purchase_orders)+(SELECT COUNT(*) FROM purchase_order_items)+(SELECT COUNT(*) FROM rfq_logs)`).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("invalid create left records=%d err=%v", count, err)
+				}
+			})
+		}
+	}
+}
+
+func TestHumanDraftKeepsSoftInventoryLinkage(t *testing.T) {
+	db, _ := assistantHTTP(t)
+	for _, route := range []string{"po", "rfq"} {
+		for _, stockID := range []string{"", "FIXTURE-UNKNOWN", "a"} {
+			t.Run(route+"/"+stockID, func(t *testing.T) {
+				var err error
+				if route == "po" {
+					_, err = (&po.Service{DB: db}).SaveAs(po.PO{Date: "2026-01-02", Department: "Ward", Supplier: "Fixture supplier", Items: []po.Item{{StockID: stockID, Name: "Unresolved fixture", Qty: 1}}}, "editor@example.test")
+				} else {
+					_, err = (&rfq.Service{DB: db}).Save(rfq.RFQ{Supplier: "Fixture supplier", Items: []rfq.Item{{StockID: stockID, Name: "Unresolved fixture", Qty: 1}}}, "editor@example.test")
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
 }
