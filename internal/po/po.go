@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"procura/internal/core"
 	"procura/internal/planning"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -184,6 +185,30 @@ func (s *Service) GenerateID() string {
 	return prefix + fmt.Sprintf("%03d", maxSeq+1)
 }
 
+// SettingTermsAutoDelivered ("1" = on) makes new POs from suppliers on day
+// terms (14/30/60 days) start as Delivered; other terms start as Pending.
+const SettingTermsAutoDelivered = "po.terms_auto_delivered"
+
+var dayTerms = regexp.MustCompile(`(?i)\b\d+\s*days?\b`)
+
+// CreditTerms reports whether payment terms give days to pay ("30 Days Terms").
+func CreditTerms(terms string) bool { return dayTerms.MatchString(terms) }
+
+func (s *Service) TermsAutoDelivered() bool {
+	var v string
+	s.DB.QueryRow(`SELECT value FROM settings WHERE key=?`, SettingTermsAutoDelivered).Scan(&v)
+	return v == "1"
+}
+
+func (s *Service) SetTermsAutoDelivered(on bool) error {
+	v := "0"
+	if on {
+		v = "1"
+	}
+	_, err := s.DB.Exec(`INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, SettingTermsAutoDelivered, v)
+	return err
+}
+
 // Save creates or updates a PO with its items.
 func (s *Service) Save(p PO) (string, error) {
 	return s.SaveAs(p, "")
@@ -200,7 +225,7 @@ func (s *Service) CreateAssistant(p PO) (string, error) {
 		return "", planning.ErrAssistantAcknowledgement
 	}
 	p.POID = ""
-	p.Status, p.ShipStatus = "Pending Approval", "Pending"
+	p.Status, p.ShipStatus = "Pending Approval", ""
 	p.Paid, p.Balance, p.InvoiceDate = 0, 0, ""
 	return s.save(p, "", true)
 }
@@ -212,6 +237,15 @@ func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 	var exists bool
 	if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM purchase_orders WHERE po_id=?)`, p.POID).Scan(&exists); err != nil {
 		return "", err
+	}
+	if !exists && strings.TrimSpace(p.ShipStatus) == "" {
+		if strings.TrimSpace(p.Terms) == "" {
+			s.DB.QueryRow(`SELECT COALESCE(payment_terms,'') FROM suppliers WHERE supplier_name=? COLLATE NOCASE`, strings.TrimSpace(p.Supplier)).Scan(&p.Terms)
+		}
+		p.ShipStatus = "Pending"
+		if s.TermsAutoDelivered() && CreditTerms(p.Terms) {
+			p.ShipStatus = "Delivered"
+		}
 	}
 	setRFQ, linkedRFQ := p.LinkedRFQ != nil, ""
 	if setRFQ {

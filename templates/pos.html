@@ -90,7 +90,7 @@
             <div class="form-group"><label>Bill #</label><input id="npo-bill" placeholder="Optional invoice ref"></div>
             <div class="form-group"><label>Invoice Date</label><input type="text" id="npo-inv-date" placeholder="DD/MM/YYYY"></div>
             <div class="form-group"><label>Terms</label><input id="npo-terms" readonly placeholder="Auto from supplier"></div>
-            <div class="form-group"><label>Shipping Status</label><select id="npo-ship">
+            <div class="form-group"><label>Shipping Status</label><select id="npo-ship" data-auto-delivered="{{.TermsAutoDelivered}}">
                 <option>Pending</option><option>Shipped</option><option>Partial</option><option>Delivered</option><option>Received</option>
             </select></div>
         </div>
@@ -208,6 +208,10 @@ async function initPo() {
         const name = this.value.trim(); if(!name) return;
         const match = suppliers.find(s => s.supplier_name.toLowerCase() === name.toLowerCase());
         if (match) document.getElementById('npo-terms').value = match.payment_terms || '';
+        // Optional org rule: on new POs, day terms (30 Days) start Delivered, anything else (advance, COD, blank) Pending.
+        const ship = document.getElementById('npo-ship');
+        if (ship.dataset.autoDelivered === 'true' && !document.getElementById('npo-id').value)
+            ship.value = /\b\d+\s*days?\b/i.test(document.getElementById('npo-terms').value) ? 'Delivered' : 'Pending';
         fillSupplierUOM();
         renderPoRfqOptions();
     });

@@ -5,6 +5,12 @@
     <button onclick="showForm()">+ New Supplier</button>
 </div>
 
+{{if eq .User.role "ADMIN"}}
+<label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:13px">
+    <input type="checkbox" id="terms-auto" style="width:auto" {{if .TermsAutoDelivered}}checked{{end}} onchange="setTermsAuto(this)">
+    New POs from suppliers on day terms (14/30/60 days) start as Delivered; advance, COD and blank terms start as Pending
+</label>
+{{end}}
 <div class="search-bar">
     <input type="text" id="search" placeholder="Search by name or contact..." oninput="loadList()">
 </div>
@@ -90,6 +96,12 @@ function editSupplier(name) {
     document.getElementById('f-acc').value = s.account_no || '';
     document.getElementById('f-bank').value = s.bank_name || '';
     document.getElementById('modal').style.display = 'flex';
+}
+
+async function setTermsAuto(box) {
+    const res = await fetch('/api/settings/terms-auto-delivered', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({on: box.checked})});
+    if (res.ok) toast(box.checked ? 'Day-terms POs will start as Delivered' : 'New POs will start as Pending', true);
+    else { box.checked = !box.checked; toast('Setting not saved', false); }
 }
 
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
