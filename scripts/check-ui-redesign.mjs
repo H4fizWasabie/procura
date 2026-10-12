@@ -32,7 +32,7 @@ try {
  const routes=['/','/pos','/items','/planning','/rfq','/suppliers','/catalogue','/workflow','/tasks','/movement','/reports','/analytics','/scorecard','/uom','/import','/validation','/users','/pos/unlinked'];
  for(const route of routes) {
   await navigate(route);await delay(700);
-  assert.equal(await run('document.querySelectorAll(".primary-nav>a").length'),5,route);
+  assert.equal(await run('document.querySelectorAll(".primary-nav>a").length'),6,route);
   assert.equal(await run('document.querySelector("main").children.length > 0'),true,route);
   const active=await run('document.querySelector(".side-nav a[aria-current=page]")?.getAttribute("href")');
   assert.equal(active,route==='/pos/unlinked'?'/pos':route,route);

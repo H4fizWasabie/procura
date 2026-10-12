@@ -2,40 +2,82 @@ package tasks
 
 import (
 	"database/sql"
+	"errors"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Task struct {
-	TaskID      string `json:"id"`
-	Title       string `json:"title"`
-	Notes       string `json:"notes"`
-	Attachments string `json:"attachments"`
-	Status      string `json:"status"`
-	CreatedBy   string `json:"created_by"`
-	CreatedDate string `json:"created_date"`
+	TaskID         string `json:"id"`
+	Title          string `json:"title"`
+	Notes          string `json:"notes"`
+	Attachments    string `json:"attachments"`
+	Status         string `json:"status"`
+	CreatedBy      string `json:"created_by"`
+	CreatedDate    string `json:"created_date"`
+	AssignedTo     string `json:"assigned_to"`
+	CreatedByName  string `json:"created_by_name"`
+	AssignedToName string `json:"assigned_to_name"`
 }
+
+var ErrUnknownAssignee = errors.New("assigned_to is not a user")
 
 type Service struct{ DB *sql.DB }
 
-func (s *Service) List() []Task {
-	rows, _ := s.DB.Query("SELECT task_id, title, notes, attachments, status, created_by, created_date FROM tasks ORDER BY created_date DESC")
-	if rows == nil { return []Task{} }
+// List returns tasks newest first, without deleted ones, with user names.
+func (s *Service) List() ([]Task, error) {
+	rows, err := s.DB.Query(`
+		SELECT t.task_id, t.title, t.notes, t.attachments, t.status, t.created_by, t.created_date, t.assigned_to,
+		       COALESCE(c.name, ''), COALESCE(a.name, '')
+		FROM tasks t
+		LEFT JOIN users c ON c.email = t.created_by
+		LEFT JOIN users a ON a.email = t.assigned_to
+		WHERE COALESCE(t.status, '') != 'Deleted'
+		ORDER BY t.created_date DESC`)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
-	return scanTasks(rows)
+	out := []Task{}
+	for rows.Next() {
+		var t Task
+		var tid, title, notes, att, status, by, date, to sql.NullString
+		if err := rows.Scan(&tid, &title, &notes, &att, &status, &by, &date, &to, &t.CreatedByName, &t.AssignedToName); err != nil {
+			return nil, err
+		}
+		t.TaskID, t.Title, t.Notes, t.Attachments = tid.String, title.String, notes.String, att.String
+		t.Status, t.CreatedBy, t.CreatedDate, t.AssignedTo = status.String, by.String, date.String, to.String
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
-func (s *Service) Save(t Task) error {
+// Save creates a task as user, or updates its title, notes, status and
+// assignee; the creator and created date are never overwritten.
+func (s *Service) Save(t Task, user string) error {
+	t.AssignedTo = strings.TrimSpace(t.AssignedTo)
+	if t.AssignedTo != "" {
+		var ok bool
+		if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)`, t.AssignedTo).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return ErrUnknownAssignee
+		}
+	}
 	if t.TaskID == "" {
 		t.TaskID = "TK-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
-	if t.CreatedDate == "" {
-		t.CreatedDate = time.Now().Format("2006-01-02")
+	if t.Status == "" {
+		t.Status = "Pending"
 	}
 	_, err := s.DB.Exec(`
-		INSERT OR REPLACE INTO tasks (task_id, title, notes, attachments, status, created_by, created_date)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, t.TaskID, t.Title, t.Notes, t.Attachments, t.Status, t.CreatedBy, t.CreatedDate)
+		INSERT INTO tasks (task_id, title, notes, attachments, status, created_by, created_date, assigned_to)
+		VALUES (?, ?, ?, '', ?, ?, ?, NULLIF(?, ''))
+		ON CONFLICT(task_id) DO UPDATE SET title = excluded.title, notes = excluded.notes,
+			status = excluded.status, assigned_to = excluded.assigned_to
+	`, t.TaskID, t.Title, t.Notes, t.Status, user, time.Now().Format("2006-01-02T15:04:05"), t.AssignedTo)
 	return err
 }
 
@@ -43,19 +85,3 @@ func (s *Service) Delete(taskID string) error {
 	_, err := s.DB.Exec("DELETE FROM tasks WHERE task_id = ?", taskID)
 	return err
 }
-
-func scanTasks(rows *sql.Rows) []Task {
-	var out []Task
-	for rows.Next() {
-		var t Task
-		var tid, title, notes, att, status, by, date sql.NullString
-		rows.Scan(&tid, &title, &notes, &att, &status, &by, &date)
-		t.TaskID = strv(tid); t.Title = strv(title); t.Notes = strv(notes)
-		t.Attachments = strv(att); t.Status = strv(status)
-		t.CreatedBy = strv(by); t.CreatedDate = strv(date)
-		out = append(out, t)
-	}
-	return out
-}
-
-func strv(s sql.NullString) string { if s.Valid { return s.String }; return "" }
