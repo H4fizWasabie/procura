@@ -1132,7 +1132,12 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 
 	// ── Tasks ──
 	mux.HandleFunc("GET /api/tasks", protected(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, taskSvc.List())
+		list, err := taskSvc.List()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, list)
 	}))
 	mux.HandleFunc("POST /api/tasks", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body tasks.Task

@@ -26,8 +26,8 @@ var ErrUnknownAssignee = errors.New("assigned_to is not a user")
 type Service struct{ DB *sql.DB }
 
 // List returns tasks newest first, without deleted ones, with user names.
-func (s *Service) List() []Task {
-	rows, _ := s.DB.Query(`
+func (s *Service) List() ([]Task, error) {
+	rows, err := s.DB.Query(`
 		SELECT t.task_id, t.title, t.notes, t.attachments, t.status, t.created_by, t.created_date, t.assigned_to,
 		       COALESCE(c.name, ''), COALESCE(a.name, '')
 		FROM tasks t
@@ -35,20 +35,22 @@ func (s *Service) List() []Task {
 		LEFT JOIN users a ON a.email = t.assigned_to
 		WHERE COALESCE(t.status, '') != 'Deleted'
 		ORDER BY t.created_date DESC`)
-	if rows == nil {
-		return []Task{}
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	out := []Task{}
 	for rows.Next() {
 		var t Task
 		var tid, title, notes, att, status, by, date, to sql.NullString
-		rows.Scan(&tid, &title, &notes, &att, &status, &by, &date, &to, &t.CreatedByName, &t.AssignedToName)
+		if err := rows.Scan(&tid, &title, &notes, &att, &status, &by, &date, &to, &t.CreatedByName, &t.AssignedToName); err != nil {
+			return nil, err
+		}
 		t.TaskID, t.Title, t.Notes, t.Attachments = tid.String, title.String, notes.String, att.String
 		t.Status, t.CreatedBy, t.CreatedDate, t.AssignedTo = status.String, by.String, date.String, to.String
 		out = append(out, t)
 	}
-	return out
+	return out, rows.Err()
 }
 
 // Save creates a task as user, or updates its title, notes, status and

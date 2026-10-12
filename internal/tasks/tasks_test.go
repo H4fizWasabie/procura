@@ -24,7 +24,10 @@ func TestSaveRecordsCreatorAndAssignee(t *testing.T) {
 	if err := s.Save(Task{Title: "Call supplier", AssignedTo: "staff@x"}, "boss@x"); err != nil {
 		t.Fatal(err)
 	}
-	list := s.List()
+	list, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 1 {
 		t.Fatalf("deleted tasks must be hidden: %+v", list)
 	}
@@ -36,7 +39,8 @@ func TestSaveRecordsCreatorAndAssignee(t *testing.T) {
 	if err := s.Save(got, "staff@x"); err != nil {
 		t.Fatal(err)
 	}
-	after := s.List()[0]
+	all, _ := s.List()
+	after := all[0]
 	if after.Status != "Done" || after.AssignedTo != "" || after.CreatedBy != "boss@x" || after.CreatedDate != got.CreatedDate {
 		t.Fatalf("update must keep creator and date: %+v", after)
 	}
