@@ -10,6 +10,7 @@ func TestCreditTerms(t *testing.T) {
 	for terms, want := range map[string]bool{
 		"30 Days Terms": true, "30 DAYS": true, "30 Day Terms": true, "60 Days": true, "14 Days Terms": true,
 		"Pay in Advance": false, "COD": false, "C.O.D. (3% discount)": false, "20% Deposit": false, "PREPAID": false, "": false, "Legacy": false,
+		"Pay in Advance; delivery in 30 days": false, "COD within 7 days": false, "50% deposit, balance 30 days": false, "P.I.A. 7 days": false,
 	} {
 		if CreditTerms(terms) != want {
 			t.Errorf("CreditTerms(%q) = %v", terms, !want)

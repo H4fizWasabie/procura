@@ -209,9 +209,9 @@ async function initPo() {
         const match = suppliers.find(s => s.supplier_name.toLowerCase() === name.toLowerCase());
         if (match) document.getElementById('npo-terms').value = match.payment_terms || '';
         // Optional org rule: on new POs, day terms (30 Days) start Delivered, anything else (advance, COD, blank) Pending.
-        const ship = document.getElementById('npo-ship');
-        if (ship.dataset.autoDelivered === 'true' && !document.getElementById('npo-id').value)
-            ship.value = /\b\d+\s*days?\b/i.test(document.getElementById('npo-terms').value) ? 'Delivered' : 'Pending';
+        const ship = document.getElementById('npo-ship'), terms = document.getElementById('npo-terms').value;
+        if (ship.dataset.autoDelivered === 'true' && !document.getElementById('npo-id').value) // same rule as po.CreditTerms
+            ship.value = /\b\d+\s*days?\b/i.test(terms) && !/adv|prepa|deposit|\bc\.?o\.?d\b|\bp\.?i\.?a\b/i.test(terms) ? 'Delivered' : 'Pending';
         fillSupplierUOM();
         renderPoRfqOptions();
     });

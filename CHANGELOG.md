@@ -1,7 +1,7 @@
 # Changelog
 
 ## 2026-10-12
-- [po/suppliers] Admin toggle on the Suppliers page (settings po.terms_auto_delivered, off by default): when on, a new PO from a supplier on day terms (14/30/60 days) starts as Delivered, and advance, COD, deposit or blank terms start as Pending; the form sets it on supplier pick and it stays editable, assistant drafts follow the same rule, and edits never change it — the procurement officer may receive goods on credit terms before manager approval
+- [po/suppliers] Admin toggle on the Suppliers page (settings po.terms_auto_delivered, off by default): when on, a new PO from a supplier on day terms (14/30/60 days) starts as Delivered, and advance, COD, deposit or blank terms (or day terms that also mention paying up front) start as Pending; the form sets it on supplier pick and it stays editable, assistant drafts follow the same rule, and edits never change it — the procurement officer may receive goods on credit terms before manager approval
 - [po/rfq] Optionally start a PO from an RFQ (From RFQ field or Make PO on the RFQ list): fills the supplier, offers the RFQ lines to pick into the add row, warns when the PO supplier differs, and saves purchase_orders.linked_rfq (internal only, several POs per RFQ allowed); the RFQ list shows its POs — invoices for an RFQ no longer need retyping, and planning stops counting a linked RFQ as incoming
 - [rfq] Read text quantities in older RFQs (73 in production) instead of showing 0
 - [rfq/po] GET /api/rfq/{id}; the PO form fetches an RFQ by id when it is older than the newest 100 the RFQ list returns (269 in production), and text quantities like "NaN" read as 0 — an older RFQ could not fill the form, and a NaN would break the RFQ list JSON

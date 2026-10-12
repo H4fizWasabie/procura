@@ -190,9 +190,13 @@ func (s *Service) GenerateID() string {
 const SettingTermsAutoDelivered = "po.terms_auto_delivered"
 
 var dayTerms = regexp.MustCompile(`(?i)\b\d+\s*days?\b`)
+var upfrontTerms = regexp.MustCompile(`(?i)adv|prepa|deposit|\bc\.?o\.?d\b|\bp\.?i\.?a\b`)
 
-// CreditTerms reports whether payment terms give days to pay ("30 Days Terms").
-func CreditTerms(terms string) bool { return dayTerms.MatchString(terms) }
+// CreditTerms reports whether payment terms give days to pay ("30 Days Terms");
+// any mention of paying up front ("Pay in Advance; delivery in 30 days") wins.
+func CreditTerms(terms string) bool {
+	return dayTerms.MatchString(terms) && !upfrontTerms.MatchString(terms)
+}
 
 func (s *Service) TermsAutoDelivered() bool {
 	var v string
