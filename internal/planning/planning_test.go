@@ -229,6 +229,9 @@ func TestIncomingLinksExpireAfter30Days(t *testing.T) {
 	mustExec(t, s, `INSERT INTO purchase_orders (po_id, date, linked_rfq, status, ship_status) VALUES ('PO-RFQ-OLD','2026-08-01','RFQ-RECENT','Approved','Pending')`)
 	mustExec(t, s, `INSERT INTO rfq_logs (rfq_id, date, raw_rfq_json) VALUES ('RFQ-RECENT','2026-09-05','[{"id":"RFQ-AFTER-OLD-PO","q":4}]')`)
 
+	seedItem(t, s, "CLOSED-RFQ", 50, 10)
+	mustExec(t, s, `INSERT INTO rfq_logs (rfq_id, date, raw_rfq_json, closed_at) VALUES ('RFQ-CLOSED','2026-09-05','[{"id":"CLOSED-RFQ","q":4}]','2026-09-06T09:00:00')`)
+
 	incoming, err := s.incomingPipeline()
 	if err != nil {
 		t.Fatal(err)
@@ -241,6 +244,9 @@ func TestIncomingLinksExpireAfter30Days(t *testing.T) {
 	}
 	if len(incoming["RFQ-AFTER-OLD-PO"]) != 1 {
 		t.Fatalf("recent RFQ stayed suppressed by expired PO: %#v", incoming["RFQ-AFTER-OLD-PO"])
+	}
+	if len(incoming["CLOSED-RFQ"]) != 0 {
+		t.Fatalf("closed RFQ still incoming: %#v", incoming["CLOSED-RFQ"])
 	}
 }
 

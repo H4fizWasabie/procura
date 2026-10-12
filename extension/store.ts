@@ -144,7 +144,7 @@ export function createStore(query: Query) {
         SELECT stock_id AS sid, order_id AS ref FROM direct_orders
         WHERE stock_id IN (${list(ids)}) AND status = 'ACTIVE' AND substr(COALESCE(date,''),1,10) > date('now','-30 day')`);
       for (const row of lines) add(text(row.sid), text(row.ref));
-      const rfqs = await query(`SELECT rfq_id, raw_rfq_json FROM rfq_logs WHERE substr(COALESCE(date,''),1,10) > date('now','-30 day')`);
+      const rfqs = await query(`SELECT rfq_id, raw_rfq_json FROM rfq_logs WHERE substr(COALESCE(date,''),1,10) > date('now','-30 day') AND closed_at IS NULL`);
       for (const row of rfqs) for (const id of rfqIds(row.raw_rfq_json)) if (ids.includes(id)) add(id, text(row.rfq_id));
       return out;
     },

@@ -358,10 +358,10 @@ async function selectPoRfq() {
     renderPoRfqLines();
 }
 
-// RFQs Planning still counts as incoming: same supplier, under 30 days old, no PO yet.
+// RFQs Planning still counts as incoming: same supplier, under 30 days old, not closed, no PO yet.
 function openPoRfqs(supplier) {
     const cutoff = new Date(Date.now() - 30*864e5).toISOString().slice(0, 10);
-    return poRfqs.filter(r => sameSupplier(r.supplier, supplier) && !r.po_ids && (r.date||'').slice(0, 10) >= cutoff);
+    return poRfqs.filter(r => sameSupplier(r.supplier, supplier) && !r.po_ids && !r.closed_at && (r.date||'').slice(0, 10) >= cutoff);
 }
 
 function useSuggestedRfq(id) { document.getElementById('npo-rfq').value = id; selectPoRfq(); }
