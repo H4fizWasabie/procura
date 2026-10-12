@@ -19,6 +19,7 @@ type RFQ struct {
 	Count                int      `json:"items_count"`
 	Items                []Item   `json:"items"`
 	POIDs                string   `json:"po_ids,omitempty"` // non-void POs linked to this RFQ
+	ClosedAt             string   `json:"closed_at,omitempty"` // closed RFQs no longer count as incoming
 	AcknowledgedStockIDs []string `json:"acknowledged_stock_ids,omitempty"`
 }
 
@@ -160,7 +161,7 @@ func (s *Service) History() []RFQ {
 	rows, _ := s.DB.Query(`
 		SELECT rfq_id, date, supplier, items_count, raw_rfq_json,
 		       (SELECT GROUP_CONCAT(po.po_id, ', ') FROM purchase_orders po
-		        WHERE po.linked_rfq = r.rfq_id AND COALESCE(po.status,'') != 'VOID')
+		        WHERE po.linked_rfq = r.rfq_id AND COALESCE(po.status,'') != 'VOID'), closed_at
 		FROM rfq_logs r ORDER BY date DESC, CAST(SUBSTR(rfq_id, 12) AS INTEGER) DESC LIMIT 100
 	`)
 	if rows == nil {
@@ -171,9 +172,10 @@ func (s *Service) History() []RFQ {
 	for rows.Next() {
 		var r RFQ
 		var raw sql.NullString
-		var date, sup, pos sql.NullString
-		rows.Scan(&r.RFQID, &date, &sup, &r.Count, &raw, &pos)
+		var date, sup, pos, closed sql.NullString
+		rows.Scan(&r.RFQID, &date, &sup, &r.Count, &raw, &pos, &closed)
 		r.POIDs = strv(pos)
+		r.ClosedAt = strv(closed)
 		r.Date = strv(date)
 		r.Supplier = strv(sup)
 		if raw.Valid {

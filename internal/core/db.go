@@ -261,6 +261,7 @@ var migrations = []migration{
 	clearLegacyPackSize,
 	normalizeInvoiceDates,
 	execMigration("ALTER TABLE tasks ADD COLUMN assigned_to TEXT"),
+	execMigration("ALTER TABLE rfq_logs ADD COLUMN closed_at TEXT"),
 }
 
 func Open(dataDir string) (*sql.DB, error) {

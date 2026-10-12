@@ -280,11 +280,11 @@ func (s *Service) incomingPipeline() (map[string][]Incoming, error) {
 	}
 	rows.Close()
 
-	// RFQs suppress until a recent PO links them. A stale PO must not keep its
-	// RFQ suppressed forever.
+	// RFQs suppress until a recent PO links them or they are closed. A stale PO
+	// must not keep its RFQ suppressed forever.
 	rows, err = s.DB.Query(`
 		SELECT rfq_id, raw_rfq_json FROM rfq_logs r
-		WHERE substr(COALESCE(r.date,''),1,10) > ?
+		WHERE substr(COALESCE(r.date,''),1,10) > ? AND r.closed_at IS NULL
 		  AND NOT EXISTS (
 			SELECT 1 FROM purchase_orders po
 			WHERE po.linked_rfq = r.rfq_id

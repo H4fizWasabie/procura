@@ -46,7 +46,7 @@ try {
  await run(`resetPoForm(false)`);
  assert.deepEqual(await run(`[document.getElementById('npo-rfq').value,document.getElementById('npo-rfq-lines').hidden]`),['',true]);
  const pickSupplier=name=>run(`(()=>{const s=document.getElementById('npo-supplier');s.value=${JSON.stringify(name)};s.dispatchEvent(new Event('change'));return [...document.querySelectorAll('#npo-rfq-lines:not([hidden]) button')].map(b=>b.dataset.rfq||'')})()`);
- assert.deepEqual(await pickSupplier('Other'),['RFQ-OPEN'],'only the recent RFQ without a PO is suggested');
+ assert.deepEqual(await pickSupplier('Other'),['RFQ-OPEN'],'only the recent, unclosed RFQ without a PO is suggested');
  await run(`document.querySelector('#npo-rfq-lines button').click()`);
  assert.equal(await run(`document.getElementById('npo-rfq').value`),'RFQ-OPEN');
  await wait(`document.querySelector('#npo-rfq-lines button')?.textContent.includes('Item 3')`);

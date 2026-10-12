@@ -40,6 +40,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             db.execute("UPDATE items SET pack_qty=12,pack_uom='box',pack_size='12/box',exclude=1 WHERE stock_id='I002'")
             db.execute("""INSERT INTO rfq_logs(rfq_id,date,supplier,items_count,raw_rfq_json) VALUES('RFQ-CHECK',date('now'),'Target',2,'[{"id":"I000","n":"Item 0","q":3,"u":"box"},{"id":"I001","n":"Item 1","q":1,"u":"Tablet"}]')""")
             db.execute("""INSERT INTO rfq_logs(rfq_id,date,supplier,items_count,raw_rfq_json) VALUES('RFQ-OPEN',date('now','-3 day'),'Other',1,'[{"id":"I003","n":"Item 3","q":5,"u":"box"}]'),('RFQ-STALE',date('now','-40 day'),'Other',1,'[{"id":"I004","n":"Item 4","q":1,"u":"box"}]')""")
+            db.execute("""INSERT INTO rfq_logs(rfq_id,date,supplier,items_count,raw_rfq_json,closed_at) VALUES('RFQ-CLOSED',date('now','-2 day'),'Other',1,'[{"id":"I004","n":"Item 4","q":1,"u":"box"}]',datetime('now'))""")
             db.commit()
             def token(role):
                 enc=lambda v:base64.urlsafe_b64encode(json.dumps(v).encode()).rstrip(b'=')

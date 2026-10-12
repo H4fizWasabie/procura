@@ -15,7 +15,7 @@ function fixture() {
     CREATE TABLE purchase_orders (po_id TEXT, date TEXT, supplier TEXT, department TEXT, status TEXT, ship_status TEXT, total REAL);
     CREATE TABLE purchase_order_items (id INTEGER PRIMARY KEY, po_id TEXT, stock_id TEXT, quantity REAL);
     CREATE TABLE direct_orders (order_id TEXT, date TEXT, stock_id TEXT, status TEXT);
-    CREATE TABLE rfq_logs (rfq_id TEXT, date TEXT, supplier TEXT, raw_rfq_json TEXT);
+    CREATE TABLE rfq_logs (rfq_id TEXT, date TEXT, supplier TEXT, raw_rfq_json TEXT, closed_at TEXT);
     CREATE TABLE supplier_item_mappings (id INTEGER PRIMARY KEY, supplier_name TEXT, stock_id TEXT, supplier_uom TEXT, is_active INTEGER);
     INSERT INTO items VALUES ('A1','Alpha','Antibiotic','Medication','box',12.5,3,10,NULL,'Available',1,'','',NULL,NULL,'', NULL,NULL,0);
     INSERT INTO items VALUES ('B2','Beta','Antibiotic','Medication','vial',4,0,5,'routine','not-available',0,'Service','10s',10,'box','2','Available','Medication',1);
@@ -27,8 +27,9 @@ function fixture() {
     INSERT INTO purchase_order_items (po_id, stock_id, quantity) VALUES ('PO - 102026 - 001','A1',4),('PO - 102026 - 001','B2',1),
       ('PO - 102026 - 002','A1',2),('PO - 092026 - 009','A1',7),('PO - 102026 - 003','A1',1);
     INSERT INTO direct_orders VALUES ('DO-1','${day(-3)}','B2','ACTIVE'),('DO-2','${day(-3)}','A1','DELIVERED');
-    INSERT INTO rfq_logs VALUES ('RFQ-102026-01','${day(-4)}','ACME SDN BHD','[{"id":"A1","n":"Alpha","q":6,"u":"box"}]');
-    INSERT INTO rfq_logs VALUES ('RFQ-092026-05','${day(-50)}','ACME SDN BHD','[{"id":"B2","q":1}]');
+    INSERT INTO rfq_logs VALUES ('RFQ-102026-01','${day(-4)}','ACME SDN BHD','[{"id":"A1","n":"Alpha","q":6,"u":"box"}]',NULL);
+    INSERT INTO rfq_logs VALUES ('RFQ-092026-05','${day(-50)}','ACME SDN BHD','[{"id":"B2","q":1}]',NULL);
+    INSERT INTO rfq_logs VALUES ('RFQ-102026-02','${day(-3)}','ACME SDN BHD','[{"id":"B2","q":2}]','${day(-1)}');
     INSERT INTO supplier_item_mappings (supplier_name, stock_id, supplier_uom, is_active) VALUES ('ACME SDN BHD','A1','carton',1),('ACME SDN BHD','B2','x',0),('O''Brien Vet','A1','pack',1);
   `);
   return createStore(async (sql) => db.prepare(sql).all() as Record<string, unknown>[]);
@@ -62,7 +63,7 @@ test("suppliers, departments and supplier units", async () => {
   assert.deepEqual([...(await store.supplierUoms("O'Brien Vet", ["A1"])).entries()], [["A1", "pack"]], "an apostrophe in a name is safe");
 });
 
-test("on-order covers open PO lines, active direct orders and recent RFQs only", async () => {
+test("on-order covers open PO lines, active direct orders and recent, unclosed RFQs only", async () => {
   const store = fixture();
   const onOrder = await store.onOrder(["A1", "B2"]);
   assert.deepEqual(onOrder.get("A1")?.sort(), ["PO - 102026 - 001", "RFQ-102026-01"]);
@@ -84,5 +85,5 @@ test("recent documents for a supplier come newest first", async () => {
   const pos = await store.recentPos("ACME SDN BHD");
   assert.equal(pos[0]?.po_id, "PO - 102026 - 003");
   assert.equal(pos.length, 4);
-  assert.equal((await store.recentRfqs("ACME SDN BHD"))[0]?.rfq_id, "RFQ-092026-05");
+  assert.equal((await store.recentRfqs("ACME SDN BHD"))[0]?.rfq_id, "RFQ-102026-02", "closed RFQs still appear in history");
 });
