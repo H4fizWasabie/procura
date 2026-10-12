@@ -167,21 +167,55 @@ func normalizeDepartment(dept string) string {
 	return dept
 }
 
-// user-frozen baselines from settings (key "analytics_frozen": {year:{month:{ih,val,cons,rev,spend}}})
-func (s *Service) settingsFrozen() map[string]map[string]map[string]float64 {
-	m := map[string]map[string]map[string]float64{}
+// frozenMap is the "analytics_frozen" setting: {year:{zero-based month:{ih,val,cons,rev,spend,po_rowid}}}.
+// po_rowid is the last purchase_orders rowid the frozen figures had seen.
+type frozenMap = map[string]map[string]map[string]float64
+
+// user-frozen baselines from settings
+func (s *Service) settingsFrozen() frozenMap {
+	m := frozenMap{}
 	if raw := s.getSetting("analytics_frozen"); raw != "" {
 		json.Unmarshal([]byte(raw), &m)
 	}
 	return m
 }
 
+// withoutMonth copies f without one month, so re-freezing a month counts every PO in it.
+func withoutMonth(f frozenMap, year, month int) frozenMap {
+	out := frozenMap{}
+	for y, months := range f {
+		out[y] = map[string]map[string]float64{}
+		for mo, v := range months { if y != strconv.Itoa(year) || mo != strconv.Itoa(month) { out[y][mo] = v } }
+	}
+	return out
+}
+
+func (s *Service) maxPORowid() (float64, error) {
+	var n float64
+	err := s.DB.QueryRow("SELECT COALESCE(MAX(rowid),0) FROM purchase_orders").Scan(&n)
+	return n, err
+}
+
+// saveSettings writes several settings atomically.
+func (s *Service) saveSettings(kv map[string]string) error {
+	tx, err := s.DB.Begin()
+	if err != nil { return err }
+	defer tx.Rollback()
+	for k, v := range kv {
+		if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", k, v); err != nil { return err }
+	}
+	return tx.Commit()
+}
+
 // Freeze snapshots the monthly trends and spend for a month into settings.
 func (s *Service) Freeze(year, month int) (map[string]float64, error) {
-	// Freeze from raw data so an existing baseline cannot reproduce itself.
-	m := s.compute(year, month, year, month, false)
-	vals := map[string]float64{"ih":m.Operation.InHouseConsumption[0], "val":m.Inventory.ValuationTrend[0], "cons":m.Inventory.ConsumptionTrend[0], "rev":m.Business.GrossRevenueTrend[0], "spend":m.Finance.MonthlySpend[0]}
 	frozen := s.settingsFrozen()
+	// ponytail: a PO saved between these two lines can be counted twice; freezing is a monthly click.
+	rowid, err := s.maxPORowid()
+	if err != nil { return nil, err }
+	// Freeze from raw data so an existing baseline cannot reproduce itself.
+	m := s.compute(year, month, year, month, false, withoutMonth(frozen, year, month))
+	vals := map[string]float64{"ih":m.Operation.InHouseConsumption[0], "val":m.Inventory.ValuationTrend[0], "cons":m.Inventory.ConsumptionTrend[0], "rev":m.Business.GrossRevenueTrend[0], "spend":m.Finance.MonthlySpend[0], "po_rowid":rowid}
 	key := strconv.Itoa(year)
 	if frozen[key] == nil { frozen[key] = map[string]map[string]float64{} }
 	frozen[key][strconv.Itoa(month)] = vals
@@ -199,21 +233,33 @@ func (s *Service) RefreezeInvoiceSpend() error {
 	done := []string{}
 	for _, mo := range []int{7, 8} { // zero-based Aug, Sep
 		if fs, ok := frozen["2026"][strconv.Itoa(mo)]; ok {
-			fs["spend"] = s.compute(2026, mo, 2026, mo, false).Finance.MonthlySpend[0]
+			fs["spend"] = s.compute(2026, mo, 2026, mo, false, withoutMonth(frozen, 2026, mo)).Finance.MonthlySpend[0]
 			done = append(done, monthLabels[mo]+fmt.Sprintf(" %.2f", fs["spend"]))
 		}
 	}
 	if len(done) == 0 { done = []string{"no frozen months"} }
 	b, err := json.Marshal(frozen)
 	if err != nil { return err }
-	tx, err := s.DB.Begin()
-	if err != nil { return err }
-	defer tx.Rollback()
-	for k, v := range map[string]string{"analytics_frozen": string(b), marker: strings.Join(done, ", ")} {
-		if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", k, v); err != nil { return err }
-	}
-	if err := tx.Commit(); err != nil { return err }
+	if err := s.saveSettings(map[string]string{"analytics_frozen": string(b), marker: strings.Join(done, ", ")}); err != nil { return err }
 	log.Printf("analytics: frozen 2026 spend recomputed by invoice date: %v", done)
+	return nil
+}
+
+// MarkFreezeWatermarks records, once, the last PO that months frozen before
+// watermarks existed had seen, so later POs invoiced into them count in their PO month.
+func (s *Service) MarkFreezeWatermarks() error {
+	const marker = "migration.freeze_rowid.v1"
+	if s.getSetting(marker) != "" { return nil }
+	rowid, err := s.maxPORowid()
+	if err != nil { return err }
+	frozen := s.settingsFrozen()
+	for _, months := range frozen {
+		for _, fs := range months { if _, ok := fs["po_rowid"]; !ok { fs["po_rowid"] = rowid } }
+	}
+	b, err := json.Marshal(frozen)
+	if err != nil { return err }
+	if err := s.saveSettings(map[string]string{"analytics_frozen": string(b), marker: fmt.Sprintf("po_rowid %.0f", rowid)}); err != nil { return err }
+	log.Printf("analytics: frozen months marked at PO rowid %.0f", rowid)
 	return nil
 }
 
@@ -221,10 +267,12 @@ func (s *Service) RefreezeInvoiceSpend() error {
 type Service struct{DB *sql.DB}
 
 func (s *Service) Compute(fromYear, fromMonth, toYear, toMonth int) Metrics {
-	return s.compute(fromYear, fromMonth, toYear, toMonth, true)
+	return s.compute(fromYear, fromMonth, toYear, toMonth, true, s.settingsFrozen())
 }
 
-func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen bool) Metrics {
+// compute buckets POs by spend date; sf always moves POs entered after their
+// invoice month was frozen, and its values replace the live ones only when applyFrozen.
+func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen bool, sf frozenMap) Metrics {
 	window := buildWindow(fromYear, fromMonth, toYear, toMonth)
 	ws := len(window)
 	labels := make([]string, ws)
@@ -256,16 +304,22 @@ func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen 
 	if len(m.Operation.CriticalItems)>10 { m.Operation.CriticalItems = m.Operation.CriticalItems[:10] }
 
 	// PO scan
-	rows, _ := s.DB.Query("SELECT po_id, date, total, status, department, supplier, invoice_date FROM purchase_orders")
+	rows, _ := s.DB.Query("SELECT rowid, po_id, date, total, status, department, supplier, invoice_date FROM purchase_orders")
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var poID, dateStr, status, dept, supplier, invDate sql.NullString; var total sql.NullFloat64
-			rows.Scan(&poID,&dateStr,&total,&status,&dept,&supplier,&invDate)
+			var poID, dateStr, status, dept, supplier, invDate sql.NullString; var total sql.NullFloat64; var rowid float64
+			rows.Scan(&rowid,&poID,&dateStr,&total,&status,&dept,&supplier,&invDate)
 			st := strings.ToUpper(strings.TrimSpace(strv(status)))
 			if st=="VOID"||st=="CANCELLED"||st=="REJECT" { continue }
 			i := -1
-			if d := parseDate(strv(dateStr), strv(poID)); d != nil { sd := core.SpendDate(*d, strv(invDate)); i = idx(sd.Year(), int(sd.Month())-1) }
+			if d := parseDate(strv(dateStr), strv(poID)); d != nil {
+				sd := core.SpendDate(*d, strv(invDate))
+				// Entered after its invoice month was frozen: the frozen figure missed it, so count it in its PO month.
+				// ponytail: an invoice date edited into a frozen month after freezing still drops out.
+				if fs, ok := sf[itoa(sd.Year())][strconv.Itoa(int(sd.Month())-1)]; ok && fs["po_rowid"] > 0 && rowid > fs["po_rowid"] { sd = *d }
+				i = idx(sd.Year(), int(sd.Month())-1)
+			}
 			if i == -1 { continue }
 			t := f64v(total)
 			m.Finance.TotalSpend += t
@@ -291,8 +345,6 @@ func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen 
 	}
 
 	// Apply approved baseline data (settings overrides legacy GAS baselines).
-	var sf map[string]map[string]map[string]float64
-	if applyFrozen { sf = s.settingsFrozen() }
 	for i, w := range window {
 		if applyFrozen {
 			legacy := w[0] < legacyBaselineThroughYear || (w[0] == legacyBaselineThroughYear && w[1] <= legacyBaselineThroughMonth)
