@@ -158,6 +158,11 @@ input:focus, select:focus, textarea:focus { outline:2px solid #5688b0; outline-o
 .side-nav a:hover { color:#fff; background:#35485c; }
 .side-nav a.active { color:#fff; background:#41536a; font-weight:650; }
 .side-nav .material-icons { font-size:18px; color:inherit; }
+.nav-count { margin-left:auto; min-width:20px; padding:1px 6px; border-radius:10px; background:#f5c46b; color:#1f2933; font-size:11px; font-weight:700; text-align:center; }
+.overview-tasks .ot-row { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:10px 0; border-top:1px solid var(--border-soft); }
+.overview-tasks .ot-meta { font-size:12px; color:var(--muted); margin-top:2px; white-space:pre-line; }
+.overview-tasks form { display:grid; grid-template-columns:2fr 3fr 1fr auto; gap:8px; margin-top:12px; }
+@media (max-width:700px) { .overview-tasks form { grid-template-columns:1fr; } }
 .primary-nav { padding-bottom:18px; margin-bottom:8px; border-bottom:1px solid #4c5c6e; }
 .nav-group { margin:4px 0; }
 .nav-group summary { display:flex; align-items:center; justify-content:space-between; padding:11px 12px; color:#d6e0eb; cursor:pointer; font-size:12px; font-weight:600; list-style:none; }

@@ -1,5 +1,17 @@
 {{template "base.html" .}}
 {{define "content_dashboard"}}
+<section class="card section overview-tasks" id="overview-tasks" data-me="{{.User.email}}" data-can-edit="{{or (eq .User.role "ADMIN") (eq .User.role "EDITOR")}}">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h3>Pending tasks</h3><a href="/tasks">All tasks →</a></div>
+    <div id="ot-list" style="margin-top:8px"></div>
+    {{if or (eq .User.role "ADMIN") (eq .User.role "EDITOR")}}
+    <form onsubmit="addOverviewTask(event)">
+        <input id="ot-title" placeholder="New task" required aria-label="New task title">
+        <input id="ot-notes" placeholder="Notes (optional)" aria-label="Notes">
+        <select id="ot-assign" aria-label="Assigned to"><option value="">For anyone</option>{{range .People}}<option value="{{.Email}}">For {{.Name}}</option>{{end}}</select>
+        <button>Add</button>
+    </form>
+    {{end}}
+</section>
 <section class="priority-actions section" aria-label="Daily work">
     <a href="/pos"><strong>Purchase orders</strong><span>Review, create and track orders</span><span aria-hidden="true">→</span></a>
     <a href="/items"><strong>Inventory</strong><span>Check stock and item details</span><span aria-hidden="true">→</span></a>
@@ -77,4 +89,40 @@
         </div>
     </div>
 </div>
+<div id="toast" class="toast" style="display:none"></div>
+<script>
+const otBox = document.getElementById('overview-tasks'), otMe = otBox.dataset.me, otCanEdit = otBox.dataset.canEdit === 'true';
+let otTasks = [];
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function toast(msg,ok){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(ok?'toast-ok':'toast-err');t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function ago(d) {
+    const days = Math.floor((Date.now() - new Date(d && d.length > 10 ? d : d+'T00:00:00')) / 864e5);
+    return isNaN(days) ? '' : days <= 0 ? 'today' : days === 1 ? 'yesterday' : days+' days ago';
+}
+async function loadOverviewTasks() {
+    const rank = t => t.assigned_to === otMe ? 0 : !t.assigned_to ? 1 : 2; // for you, for anyone, for others
+    otTasks = (await fetch('/api/tasks').then(r => r.ok ? r.json() : [])).filter(t => t.status !== 'Done').sort((a, b) => rank(a) - rank(b));
+    const more = otTasks.length - 5;
+    document.getElementById('ot-list').innerHTML = otTasks.length ? otTasks.slice(0, 5).map((t, i) => `<div class="ot-row"><div>
+        <strong>${esc(t.title)}</strong>${t.assigned_to === otMe ? ' <span class="badge badge-amber">For you</span>' : ''}
+        ${t.notes ? `<div class="ot-meta">${esc(t.notes)}</div>` : ''}
+        <div class="ot-meta">${[t.created_by ? 'From '+esc(t.created_by_name || t.created_by) : '', t.assigned_to ? 'For '+esc(t.assigned_to_name || t.assigned_to) : 'For anyone', ago(t.created_date)].filter(Boolean).join(' · ')}</div>
+        </div>${otCanEdit ? `<button class="btn-sm" onclick="doneOverviewTask(${i})">Done</button>` : ''}</div>`).join('') + (more > 0 ? `<a href="/tasks" class="ot-meta">+${more} more in Tasks</a>` : '')
+        : '<p class="ot-meta">No pending tasks.</p>';
+}
+async function saveOverviewTask(body, msg) {
+    const res = await fetch('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await res.json().catch(() => ({}));
+    toast(d.success ? msg : (d.error || 'Not saved'), !!d.success);
+    if (d.success) { loadOverviewTasks(); refreshTaskCount(); }
+    return !!d.success;
+}
+function doneOverviewTask(i) { const t = otTasks[i]; if (t) saveOverviewTask({...t, status:'Done'}, 'Done: '+t.title); }
+async function addOverviewTask(e) {
+    e.preventDefault();
+    const body = {title: document.getElementById('ot-title').value.trim(), notes: document.getElementById('ot-notes').value.trim(), assigned_to: document.getElementById('ot-assign').value};
+    if (body.title && await saveOverviewTask(body, 'Task added')) e.target.reset();
+}
+loadOverviewTasks();
+</script>
 {{end}}

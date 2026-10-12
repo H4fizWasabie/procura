@@ -20,13 +20,13 @@
                 <a href="/items" class="{{if eq .Active "inventory"}}active{{end}}" {{if eq .Active "inventory"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">inventory_2</span>Inventory</a>
                 <a href="/planning" class="{{if eq .Active "planning"}}active{{end}}" {{if eq .Active "planning"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">event_note</span>Planning</a>
                 <a href="/rfq" class="{{if eq .Active "rfq"}}active{{end}}" {{if eq .Active "rfq"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">request_quote</span>RFQs</a>
+                <a href="/tasks" class="{{if eq .Active "tasks"}}active{{end}}" {{if eq .Active "tasks"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">task_alt</span>Tasks<span class="nav-count" id="task-count" data-me="{{.User.email}}" title="Pending tasks for you" hidden></span></a>
             </div>
-            <details class="nav-group" {{if or (eq .Active "suppliers") (eq .Active "catalogue") (eq .Active "workflow") (eq .Active "tasks")}}open{{end}}>
+            <details class="nav-group" {{if or (eq .Active "suppliers") (eq .Active "catalogue") (eq .Active "workflow")}}open{{end}}>
                 <summary>Purchasing support</summary>
                 <a href="/suppliers" class="{{if eq .Active "suppliers"}}active{{end}}" {{if eq .Active "suppliers"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">local_shipping</span>Suppliers</a>
                 <a href="/catalogue" class="{{if eq .Active "catalogue"}}active{{end}}" {{if eq .Active "catalogue"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">menu_book</span>Catalogue</a>
                 <a href="/workflow" class="{{if eq .Active "workflow"}}active{{end}}" {{if eq .Active "workflow"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">fact_check</span>Approvals & payments</a>
-                <a href="/tasks" class="{{if eq .Active "tasks"}}active{{end}}" {{if eq .Active "tasks"}}aria-current="page"{{end}}><span class="material-icons" aria-hidden="true">task_alt</span>Tasks</a>
             </details>
             <details class="nav-group" {{if or (eq .Active "movement")}}open{{end}}>
                 <summary>Stock</summary>
@@ -74,6 +74,16 @@
     </main>
     </div></div>
 <script>
+// Sidebar count of pending tasks for this user (assigned to them or to anyone).
+async function refreshTaskCount() {
+    const badge = document.getElementById('task-count');
+    if (!badge) return;
+    const list = await fetch('/api/tasks').then(r => r.ok ? r.json() : []).catch(() => []);
+    const n = list.filter(t => t.status !== 'Done' && (!t.assigned_to || t.assigned_to === badge.dataset.me)).length;
+    badge.textContent = n; badge.hidden = !n;
+}
+refreshTaskCount();
+
 // Retry only an explicitly acknowledged availability warning; other save errors stop.
 async function saveWithAvailabilityOverride(url, body) {
     const acknowledged = new Set(body.acknowledged_stock_ids || []);

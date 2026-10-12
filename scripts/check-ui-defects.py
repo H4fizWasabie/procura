@@ -82,6 +82,8 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             for role in ['VIEWER','OTHER']:
                 check(role+' cannot edit inventory',lambda role=role:expect(request('/api/inventory/I001',{'cost':2},role)[0],403))
                 check(role+' cannot freeze analytics',lambda role=role:expect(request('/api/analytics/freeze?year=2026&month=8',{},role)[0],403))
+            check('task with an unknown assignee is rejected',lambda:expect(request('/api/tasks',{'title':'x','assigned_to':'nobody@test.local'})[0],400))
+            check('VIEWER cannot add tasks',lambda:expect(request('/api/tasks',{'title':'x'},'VIEWER')[0],403))
             for role in ['EDITOR','VIEWER']:
                 check(role+' cannot change the terms setting',lambda role=role:expect(request('/api/settings/terms-auto-delivered',{'on':True},role)[0],403))
             def edit():
@@ -104,6 +106,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             subprocess.run(['node',str(root/'scripts/check-po-pack-size.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             subprocess.run(['node',str(root/'scripts/check-po-from-rfq.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             subprocess.run(['node',str(root/'scripts/check-po-terms.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
+            subprocess.run(['node',str(root/'scripts/check-overview-tasks.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             db.close()
         finally:
             proc.terminate();proc.wait(timeout=5)

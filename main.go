@@ -248,7 +248,7 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
 			"Active": "dashboard", "ContentBlock": "content_dashboard",
 			"User":  userFromReq(r),
-			"Stats": dashSvc.Compute(),
+			"Stats": dashSvc.Compute(), "People": taskPeople(authSvc),
 		})
 	}))
 
@@ -907,7 +907,7 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "scorecard", "ContentBlock": "content_scorecard", "User": userFromReq(r)})
 	}))
 	mux.HandleFunc("GET /tasks", protected(func(w http.ResponseWriter, r *http.Request) {
-		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "tasks", "ContentBlock": "content_tasks", "User": userFromReq(r)})
+		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "tasks", "ContentBlock": "content_tasks", "User": userFromReq(r), "People": taskPeople(authSvc)})
 	}))
 	mux.HandleFunc("GET /workflow", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "workflow", "ContentBlock": "content_workflow", "User": userFromReq(r)})
@@ -1136,9 +1136,16 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 	}))
 	mux.HandleFunc("POST /api/tasks", protected(auth.RequireRole("EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body tasks.Task
-		json.NewDecoder(r.Body).Decode(&body)
-		if err := taskSvc.Save(body); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Title) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "title is required"})
+			return
+		}
+		if err := taskSvc.Save(body, r.Header.Get("X-User-Email")); err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, tasks.ErrUnknownAssignee) {
+				status = http.StatusBadRequest
+			}
+			writeJSON(w, status, map[string]interface{}{"success": false, "error": err.Error()})
 			return
 		}
 		writeJSON(w, 200, map[string]interface{}{"success": true})
@@ -1338,6 +1345,17 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 	}))
 
 	return mux
+}
+
+// taskPeople lists the people a task can be assigned to (not the assistant).
+func taskPeople(a *auth.Service) []auth.UserRecord {
+	var out []auth.UserRecord
+	for _, u := range a.ListUsers() {
+		if u.Role != "ASSISTANT" {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 func userFromReq(r *http.Request) map[string]string {
