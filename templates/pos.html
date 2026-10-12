@@ -339,7 +339,7 @@ function renderPoRfqOptions() {
     const supplier = document.getElementById('npo-supplier').value;
     const list = [...poRfqs].sort((a, b) => sameSupplier(b.supplier, supplier) - sameSupplier(a.supplier, supplier));
     document.getElementById('po-rfq-list').innerHTML = list.map(r =>
-        `<option value="${esc(r.rfq_id)}">${esc(r.supplier||'')} · ${toDMY(r.date)}${r.po_ids ? ' · has '+esc(r.po_ids) : ''}</option>`).join('');
+        `<option value="${esc(r.rfq_id)}">${esc(r.supplier||'')} · ${esc(toDMY(r.date))}${r.po_ids ? ' · has '+esc(r.po_ids) : ''}</option>`).join('');
 }
 
 async function selectPoRfq() {
@@ -373,7 +373,7 @@ function renderPoRfqLines() {
         const open = isNew ? openPoRfqs(document.getElementById('npo-supplier').value.trim()) : [];
         box.hidden = !open.length;
         box.innerHTML = open.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:4px">This supplier has ${open.length > 1 ? open.length+' open RFQs' : 'an open RFQ'} with no PO yet. Use one?</div>` +
-            open.map(r => `<button class="btn-secondary btn-sm" style="margin:0 6px 6px 0" data-rfq="${esc(r.rfq_id)}" onclick="useSuggestedRfq(this.dataset.rfq)">${esc(r.rfq_id)} · ${toDMY(r.date)} · ${(r.items||[]).length} lines</button>`).join('') : '';
+            open.map(r => `<button class="btn-secondary btn-sm" style="margin:0 6px 6px 0" data-rfq="${esc(r.rfq_id)}" onclick="useSuggestedRfq(this.dataset.rfq)">${esc(r.rfq_id)} · ${esc(toDMY(r.date))} · ${(r.items||[]).length} lines</button>`).join('') : '';
         return;
     }
     box.hidden = false;
