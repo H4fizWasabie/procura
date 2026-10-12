@@ -393,9 +393,23 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 	mux.HandleFunc("GET /suppliers", protected(func(w http.ResponseWriter, r *http.Request) {
 		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{
 			"Active": "suppliers", "ContentBlock": "content_suppliers",
-			"User": userFromReq(r),
+			"User": userFromReq(r), "TermsAutoDelivered": poSvc.TermsAutoDelivered(),
 		})
 	}))
+	mux.HandleFunc("POST /api/settings/terms-auto-delivered", protected(auth.RequireRole("ADMIN")(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			On bool `json:"on"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "invalid body"})
+			return
+		}
+		if err := poSvc.SetTermsAutoDelivered(body.On); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "on": body.On})
+	})))
 
 	mux.HandleFunc("GET /api/suppliers", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, supSvc.List(r.URL.Query().Get("search")))
@@ -513,7 +527,7 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 
 	// ── PO ──
 	mux.HandleFunc("GET /pos", protected(func(w http.ResponseWriter, r *http.Request) {
-		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "pos", "ContentBlock": "content_pos", "User": userFromReq(r)})
+		tmpl.ExecuteTemplate(w, "base.html", map[string]interface{}{"Active": "pos", "ContentBlock": "content_pos", "User": userFromReq(r), "TermsAutoDelivered": poSvc.TermsAutoDelivered()})
 	}))
 	mux.HandleFunc("GET /api/pos", protected(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()

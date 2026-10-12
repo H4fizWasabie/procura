@@ -30,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             for role in ['ADMIN','EDITOR','VIEWER','OTHER']:
                 db.execute('INSERT INTO users(email,name,role,pin_hash,auth_version) VALUES(?,?,?,?,0)',(role+'@test.local',role,role,'unused'))
             db.execute("INSERT INTO suppliers(supplier_name) VALUES('Target'),('Other'),('Supplier')")
+            db.execute("INSERT INTO suppliers(supplier_name,payment_terms) VALUES('Credit Co','30 Days Terms'),('Cash Co','COD'),('Advance Co','Pay in Advance; delivery in 30 days')")
             db.execute('CREATE TABLE IF NOT EXISTS supplier_item_mappings(id INTEGER PRIMARY KEY, stock_id TEXT, supplier_name TEXT, supplier_item_name TEXT, supplier_uom TEXT)')
             for i in range(65):
                 db.execute('INSERT INTO items(stock_id,item_name,supplier_name,category,current_stock,rop,exclude,item_behaviour) VALUES(?,?,?,?,?,?,?,?)',(f'I{i:03}',f'Item {i}','Target' if i<3 else 'Other','Clinic',0,2,0,''))
@@ -80,6 +81,8 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             for role in ['VIEWER','OTHER']:
                 check(role+' cannot edit inventory',lambda role=role:expect(request('/api/inventory/I001',{'cost':2},role)[0],403))
                 check(role+' cannot freeze analytics',lambda role=role:expect(request('/api/analytics/freeze?year=2026&month=8',{},role)[0],403))
+            for role in ['EDITOR','VIEWER']:
+                check(role+' cannot change the terms setting',lambda role=role:expect(request('/api/settings/terms-auto-delivered',{'on':True},role)[0],403))
             def edit():
                 expect(request('/api/inventory/I001',{'cost':2,'reason':'check'},'EDITOR')[0],200);expect(db.execute("SELECT cost FROM items WHERE stock_id='I001'").fetchone()[0],2)
             check('editor inventory save persists',edit)
@@ -99,6 +102,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             subprocess.run(['node',str(root/'scripts/check-ui-browser.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             subprocess.run(['node',str(root/'scripts/check-po-pack-size.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             subprocess.run(['node',str(root/'scripts/check-po-from-rfq.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
+            subprocess.run(['node',str(root/'scripts/check-po-terms.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             db.close()
         finally:
             proc.terminate();proc.wait(timeout=5)
