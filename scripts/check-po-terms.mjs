@@ -36,6 +36,7 @@ try {
  await openPos();
  assert.equal(await shipFor('Credit Co'),'Delivered');
  assert.equal(await shipFor('Cash Co'),'Pending');
+ assert.equal(await shipFor('Advance Co'),'Pending','upfront terms with delivery days start Pending');
  assert.equal(await shipFor('Target'),'Pending','blank terms start Pending');
  await shipFor('Credit Co');
  await run(`document.getElementById('npo-id').value='PO-EXISTING'`);
