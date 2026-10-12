@@ -39,3 +39,15 @@ func TestRefreezeInvoiceSpendOnce(t *testing.T) {
 		t.Fatalf("must run once: err=%v frozen=%v", err, s.settingsFrozen()["2026"])
 	}
 }
+
+func TestRefreezeInvoiceSpendMarksDoneWithoutFrozenMonths(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Service{DB: db}
+	if err := s.RefreezeInvoiceSpend(); err != nil || s.getSetting("migration.invoice_spend.v1") == "" {
+		t.Fatalf("marker not written: err=%v", err)
+	}
+}

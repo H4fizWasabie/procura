@@ -203,6 +203,7 @@ func (s *Service) RefreezeInvoiceSpend() error {
 			done = append(done, monthLabels[mo]+fmt.Sprintf(" %.2f", fs["spend"]))
 		}
 	}
+	if len(done) == 0 { done = []string{"no frozen months"} }
 	b, err := json.Marshal(frozen)
 	if err != nil { return err }
 	tx, err := s.DB.Begin()
