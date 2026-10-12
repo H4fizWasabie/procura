@@ -144,9 +144,10 @@ func (s *Service) save(rfq RFQ, createdBy string, createOnly bool) (string, erro
 	if !createOnly {
 		insert += " OR REPLACE"
 	}
-	_, err = tx.Exec(insert+` INTO rfq_logs (rfq_id, date, supplier, items_count, created_by, raw_rfq_json)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, rfq.RFQID, rfq.Date, rfq.Supplier, rfq.Count, createdBy, string(rawJSON))
+	// closed_at is read before REPLACE deletes the old row, so editing keeps a closed RFQ closed.
+	_, err = tx.Exec(insert+` INTO rfq_logs (rfq_id, date, supplier, items_count, created_by, raw_rfq_json, closed_at)
+		VALUES (?, ?, ?, ?, ?, ?, (SELECT closed_at FROM rfq_logs WHERE rfq_id = ?))
+	`, rfq.RFQID, rfq.Date, rfq.Supplier, rfq.Count, createdBy, string(rawJSON), rfq.RFQID)
 	if err != nil {
 		return "", err
 	}

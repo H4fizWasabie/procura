@@ -1,6 +1,7 @@
 package rfq
 
 import (
+	"database/sql"
 	"testing"
 
 	"procura/internal/core"
@@ -72,5 +73,26 @@ func TestHistoryListsNonVoidLinkedPOs(t *testing.T) {
 	}
 	if got["RFQ-102026-18"] != "PO-1" || got["RFQ-102026-19"] != "" {
 		t.Fatalf("po_ids = %v", got)
+	}
+}
+
+func TestEditingKeepsAClosedRFQClosed(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO items(stock_id,item_name) VALUES('A','Item A');
+		INSERT INTO rfq_logs(rfq_id,date,supplier,items_count,raw_rfq_json,closed_at) VALUES('RFQ-092026-01','2026-09-01','YSP',1,'[{"id":"A","n":"Item A","q":1}]','2026-10-12T22:00:00')`); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{DB: db}
+	if _, err := s.Save(RFQ{RFQID: "RFQ-092026-01", Date: "2026-09-01", Supplier: "YSP", Items: []Item{{StockID: "A", Name: "Item A", Qty: 2}}}, "x"); err != nil {
+		t.Fatal(err)
+	}
+	var closed sql.NullString
+	db.QueryRow(`SELECT closed_at FROM rfq_logs WHERE rfq_id='RFQ-092026-01'`).Scan(&closed)
+	if closed.String != "2026-10-12T22:00:00" {
+		t.Fatalf("closed_at = %v", closed)
 	}
 }

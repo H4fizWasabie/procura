@@ -298,6 +298,11 @@ func Open(dataDir string) (*sql.DB, error) {
 			return nil, fmt.Errorf("migration incomplete: items.%s is missing: %v", column, err)
 		}
 	}
+	var hasRFQClosedAt bool
+	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM pragma_table_info('rfq_logs') WHERE name='closed_at')").Scan(&hasRFQClosedAt); err != nil || !hasRFQClosedAt {
+		db.Close()
+		return nil, fmt.Errorf("migration incomplete: rfq_logs.closed_at is missing: %v", err)
+	}
 	if err := rebuildDirectOrdersPK(db); err != nil {
 		return nil, err
 	}
