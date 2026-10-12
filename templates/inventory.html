@@ -70,7 +70,10 @@
                     <option value="">Unclassified</option><option value="routine">Routine</option><option value="on_demand">On demand</option><option value="do_not_reorder">Do not reorder</option>
                 </select></div>
                 <div class="form-group"><label>Velocity Override</label><input id="ae-velocity" placeholder="Blank or 0 to use movement-derived ROP"></div>
-                <div class="form-group"><label>Pack Size</label><input id="ae-pack"></div>
+                <div class="form-group"><label>Pack Size</label><div style="display:flex;gap:6px;align-items:center">
+                    <input id="ae-pack-qty" type="number" min="0" step="any" placeholder="Qty" style="width:90px"><span id="ae-pack-unit"></span><span>per</span>
+                    <select id="ae-pack-uom"><option value="">—</option>{{range packUOMs}}<option>{{.}}</option>{{end}}</select>
+                </div></div>
                 <div class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="ae-exclude"><label>Exclude from Planning &amp; ROP</label></div>
                 <div class="form-group"><label>Reason</label><input id="ae-reason" required placeholder="Required reason for audit"></div>
                 <button onclick="saveAnchors()">Save Anchor Fields</button>
@@ -190,7 +193,9 @@ async function showDetail(stockId) {
     document.getElementById('ae-behaviour').value = d.item_behaviour||'Standard / Pack';
     document.getElementById('ae-purchase-policy').value = d.purchase_policy||'';
     document.getElementById('ae-velocity').value = d.velocity_override||'';
-    document.getElementById('ae-pack').value = d.pack_size||'';
+    document.getElementById('ae-pack-qty').value = d.pack_qty ?? '';
+    document.getElementById('ae-pack-unit').textContent = d.uom||'';
+    document.getElementById('ae-pack-uom').value = d.pack_uom||'';
     document.getElementById('ae-exclude').checked = isExcluded(d.exclude);
     document.getElementById('ae-reason').value = '';
     document.getElementById('ae-cost').value = d.cost||0;
@@ -237,7 +242,8 @@ async function saveAnchors() {
     if (beh !== (selectedItem.item_behaviour||'Standard / Pack')) updates.item_behaviour = beh;
     if (purchasePolicy !== (selectedItem.purchase_policy||'')) updates.purchase_policy = purchasePolicy || null;
     if (Number(velocity) !== Number(selectedItem.velocity_override||0)) updates.velocity_override = velocity;
-    if (document.getElementById('ae-pack').value !== (selectedItem.pack_size||'')) updates.pack_size = document.getElementById('ae-pack').value;
+    const packQty = document.getElementById('ae-pack-qty').value.trim(), packUom = document.getElementById('ae-pack-uom').value;
+    if (packQty !== String(selectedItem.pack_qty ?? '') || packUom !== (selectedItem.pack_uom||'')) Object.assign(updates, {pack_qty: packQty, pack_uom: packUom});
     if (document.getElementById('ae-exclude').checked !== isExcluded(selectedItem.exclude)) updates.exclude = document.getElementById('ae-exclude').checked ? '1' : '0';
     const cost = Number(document.getElementById('ae-cost').value)||0;
     if (cost !== Number(selectedItem.cost||0)) updates.cost = cost;

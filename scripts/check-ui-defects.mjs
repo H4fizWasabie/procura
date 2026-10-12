@@ -8,6 +8,7 @@ function context(file){
  const document={getElementById(id){if(!elements.has(id))elements.set(id,{value:'',checked:false,textContent:'',innerHTML:'',disabled:false,style:{},scrollIntoView(){},classList:{add(){},remove(){},toggle(){}}});return elements.get(id)},querySelectorAll(){return []},createElement(){return {set textContent(v){this.innerHTML=v},innerHTML:''}},addEventListener(){}};
  const c=vm.createContext({document,URLSearchParams,AbortController,console,setTimeout(){},fetch(){throw Error('unexpected request')}});
  let source=fs.readFileSync('templates/'+file+'.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+ source=source.replaceAll('{{packUOMs}}','["box"]');
  source=source.replace(/(?:initPo|loadWf|initReports|init|loadSummary)\(\);\s*$/,'');vm.runInContext(source,c);
  c.messages=[];c.toast=(message,ok)=>c.messages.push({message,ok});return c;
 }

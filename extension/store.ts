@@ -20,6 +20,8 @@ export interface ItemRow {
   exclude: string;
   item_behaviour: string;
   pack_size: string;
+  pack_qty: number | null;
+  pack_uom: string | null;
   velocity_override: string;
   hospital_product_status: string | null;
   hospital_product_type: string | null;
@@ -72,6 +74,8 @@ function toItem(row: Row): ItemRow {
     exclude: text(row.exclude),
     item_behaviour: text(row.item_behaviour),
     pack_size: text(row.pack_size),
+    pack_qty: row.pack_qty === null || row.pack_qty === undefined ? null : num(row.pack_qty),
+    pack_uom: row.pack_uom === null || row.pack_uom === undefined ? null : text(row.pack_uom),
     velocity_override: text(row.velocity_override),
     hospital_product_status: row.hospital_product_status === null || row.hospital_product_status === undefined ? null : text(row.hospital_product_status),
     hospital_product_type: row.hospital_product_type === null || row.hospital_product_type === undefined ? null : text(row.hospital_product_type),
@@ -97,7 +101,7 @@ export function createStore(query: Query) {
       const out = new Map<string, ItemRow>();
       if (ids.length === 0) return out;
       const rows = await query(`SELECT stock_id, item_name, category, product_type, uom, cost, current_stock, rop,
-        purchase_policy, product_status, exclude, item_behaviour, pack_size, velocity_override,
+        purchase_policy, product_status, exclude, item_behaviour, pack_size, pack_qty, pack_uom, velocity_override,
         hospital_product_status, hospital_product_type, uom_confirmation_pending
         FROM items WHERE stock_id IN (${list(ids)})`);
       for (const row of rows) out.set(text(row.stock_id), toItem(row));

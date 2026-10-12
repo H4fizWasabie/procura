@@ -232,7 +232,7 @@ var inventoryFieldPatterns = []struct {
 	{"supplier", []string{"supplier_name", "supplier name", "supplier", "vendor", "mfr", "manufacturer"}},
 	{"uom", []string{"uom", "unit", "measure", "pkg", "packing"}},
 	{"current", []string{"actual_stock", "actual stock", "current_stock", "current stock", "current", "qty_on_hand", "qty on hand", "quantity", "qty", "balance", "on_hand", "on hand", "stock", "closing_balance", "closing balance", "closing"}},
-	{"pack_size", []string{"pack_size", "pack size"}},
+	{"pack_size", []string{"pack_size", "pack size"}}, // claimed so it maps to nothing else; pack size is set in Procura
 	{"exclude", []string{"exclude"}},
 	{"velocity_override", []string{"velocity_override", "velocity override"}},
 	{"item_behaviour", []string{"item_behaviour", "item behaviour"}},
@@ -499,14 +499,14 @@ func (s *Service) upsertItem(fields map[string]string, timestamp string) error {
 	}
 	_, err := s.DB.Exec(`INSERT INTO items
 		(stock_id,item_name,cost,selling_price,uom,product_type,category,supplier_name,product_status,
-		 current_stock,last_updated,pack_size,exclude,velocity_override,item_behaviour,
+		 current_stock,last_updated,exclude,velocity_override,item_behaviour,
 		 hospital_product_status,hospital_product_type)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(stock_id) DO UPDATE SET `+strings.Join(updates, ", "),
 		strVal(fields["stock_id"]), strVal(fields["item_name"]), floatVal(fields["cost"]),
 		floatVal(fields["selling_price"]), strVal(fields["uom"]), strVal(fields["product_type"]),
 		strVal(fields["category"]), strVal(fields["supplier"]), strVal(fields["product_status"]),
-		floatVal(fields["current"]), timestamp, strVal(fields["pack_size"]), intVal(fields["exclude"]),
+		floatVal(fields["current"]), timestamp, intVal(fields["exclude"]),
 		strVal(fields["velocity_override"]), strVal(fields["item_behaviour"]),
 		strVal(fields["product_status"]), strVal(fields["product_type"]))
 	return err

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-12
+- [inventory/core] Replace free-text pack size with pack_qty + pack_uom from a fixed unit list (box, pack, bag, bottle, carton, roll, tube, can, jar, vial, pouch, drum, gallon), set or cleared together and audited; pack_size is now derived as "12/box" for mino and older readers — free text like "100ml" or "1.0" could not be parsed or compared
+- [core] Clear the 49 legacy free-text pack sizes once at startup with one audit row each — pack sizes are re-entered in the new format while ordering
+- [core/po] Leave structured pack values untouched if the legacy clear retries, and keep the PO form marked unsaved when a pack update fails — review findings on #68
+- [po] Enter pack size per line in the PO form and save it to the item after the PO saves (never stored on or shown in the PO); Sup.UOM becomes the same unit dropdown, saved lowercase, with unchanged pre-list values on old POs kept — uniform units instead of box/BOX/BOZ/PACLK
+- [import] Stop writing workbook pack_size on new items — pack size is owned by Procura
+- [extension] Edit pack size as pack_qty + pack_uom and drop unlisted supplier units from assistant PO drafts — matches the server's new validation
+- [scripts] Add check-po-pack-size.mjs and send the now-required edit reason in the UI checks
+
 ## 2026-10-02
 - [extension] Add assistant write tools (preview/create PO and RFQ, single and batch item edits) that call Procura's HTTP API as the restricted ASSISTANT account, with preview-then-reply confirmation, read-back verification and no retry of unclear saves; search now returns purchase policy, behaviour and exclude — Theoses drafts and classifies while approvals stay human
 - [po/rfq] Require exact inventory IDs for every assistant-created line inside the create transaction — blank, unknown and mis-cased IDs cannot bypass purchase or UOM guards
@@ -38,6 +47,7 @@
 - [uom] Prefer the matching item label when updating supplier mappings by stock ID — avoid renaming a legacy duplicate and violating the supplier/name unique constraint
 
 ## 2026-09-23
+- [analytics] Normalize three butterfly needle item labels to In-House Use in production — include their movement value in future in-house analytics without changing frozen months
 - [planning] Propagate incoming-pipeline query, scan, and rows.Err failures through Plan and the /api/planning route instead of returning a silent empty pipeline — a database fault now surfaces as a server error, not a false "no incoming stock" (#39)
 - [import] Save each PurchaseOrder sheet row's header and lines atomically and report malformed po_data_json and SQL errors instead of counting them as imported — a failed PO row no longer overwrites its previous header/lines or inflates import_runs counts (#38)
 - [planning] Wrap direct-order batch inserts and supersede updates in transactions, and rebuild the legacy single-column order_id primary key into a surrogate id — a failed row no longer leaves partial direct orders or blocks every multi-item order from ever saving (#37)

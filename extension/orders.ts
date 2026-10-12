@@ -4,6 +4,7 @@
 // createOrder() re-checks, saves through the API, then reads the document back.
 
 import { AmbiguousOutcomeError, type ProcuraApi } from "./client.ts";
+import { listedUom } from "./items.ts";
 import type { ItemRow, PoRecord, RfqRecord, Store } from "./store.ts";
 
 export interface OrderLineInput {
@@ -132,7 +133,7 @@ export async function previewOrder(rawInput: OrderInput, store: Store, today: st
     const item = items.get(line.stock_id);
     if (!item) return [];
     const cost = line.cost ?? item.cost;
-    return [{ line, item, uom: line.uom?.trim() || item.uom, cost, total: round2(line.qty * cost), supplierUom: supplierUoms.get(line.stock_id) ?? "" }];
+    return [{ line, item, uom: line.uom?.trim() || item.uom, cost, total: round2(line.qty * cost), supplierUom: listedUom(supplierUoms.get(line.stock_id) ?? "") }];
   });
 
   let payload: Record<string, unknown> | null = null;

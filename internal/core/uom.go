@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var ErrPendingUOM = errors.New("pending UOM change")
+var ErrInvalidPackUOM = errors.New("unit is not in the list")
 
 // RowQuerier lets guards use either the pool or a document's transaction.
 type RowQuerier interface {
@@ -36,4 +38,18 @@ func CheckPendingUOM(db RowQuerier, stockID string) error {
 		return fmt.Errorf("%s (%s) has a %w; use Confirm UOM in the item editor", name, stockID, ErrPendingUOM)
 	}
 	return nil
+}
+
+// PackUOMs is the fixed unit list for item pack sizes and PO supplier units.
+var PackUOMs = []string{"box", "pack", "bag", "bottle", "carton", "roll", "tube", "can", "jar", "vial", "pouch", "drum", "gallon"}
+
+// NormalizePackUOM returns the listed unit matching s, ignoring case and spaces.
+func NormalizePackUOM(s string) (string, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, u := range PackUOMs {
+		if s == u {
+			return u, true
+		}
+	}
+	return "", false
 }
