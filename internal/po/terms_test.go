@@ -65,3 +65,27 @@ func TestNewPOShipStatusFollowsTermsWhenEnabled(t *testing.T) {
 		t.Fatalf("editing must not apply the rule: err=%v ship=%q", err, ship(id))
 	}
 }
+
+func TestInvoiceDateIsValidatedAndNormalized(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.Exec(`INSERT INTO items(stock_id,item_name) VALUES('A','Item A')`)
+	s := &Service{DB: db}
+	p := PO{Date: "2026-09-08", Supplier: "S", Department: "Ward", Items: []Item{{StockID: "A", Name: "Item A", Qty: 1}}}
+	for _, bad := range []string{"129/06/2026", "2027-09-08", "next week"} {
+		p.InvoiceDate = bad
+		if _, err := s.Save(p); err == nil {
+			t.Errorf("invoice date %q accepted", bad)
+		}
+	}
+	p.InvoiceDate = "26-9-8"
+	id, err := s.Save(p)
+	var got string
+	db.QueryRow(`SELECT invoice_date FROM purchase_orders WHERE po_id=?`, id).Scan(&got)
+	if err != nil || got != "2026-09-08" {
+		t.Fatalf("normalize: err=%v got=%q", err, got)
+	}
+}

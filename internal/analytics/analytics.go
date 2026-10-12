@@ -3,12 +3,15 @@ package analytics
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"procura/internal/core"
 	"procura/internal/planning"
 )
 
@@ -187,6 +190,33 @@ func (s *Service) Freeze(year, month int) (map[string]float64, error) {
 	return vals, s.setSetting("analytics_frozen", string(b))
 }
 
+// RefreezeInvoiceSpend recomputes, once, the frozen spend of Aug and Sep 2026
+// by invoice date; their other frozen metrics are kept.
+func (s *Service) RefreezeInvoiceSpend() error {
+	const marker = "migration.invoice_spend.v1"
+	if s.getSetting(marker) != "" { return nil }
+	frozen := s.settingsFrozen()
+	done := []string{}
+	for _, mo := range []int{7, 8} { // zero-based Aug, Sep
+		if fs, ok := frozen["2026"][strconv.Itoa(mo)]; ok {
+			fs["spend"] = s.compute(2026, mo, 2026, mo, false).Finance.MonthlySpend[0]
+			done = append(done, monthLabels[mo]+fmt.Sprintf(" %.2f", fs["spend"]))
+		}
+	}
+	if len(done) == 0 { done = []string{"no frozen months"} }
+	b, err := json.Marshal(frozen)
+	if err != nil { return err }
+	tx, err := s.DB.Begin()
+	if err != nil { return err }
+	defer tx.Rollback()
+	for k, v := range map[string]string{"analytics_frozen": string(b), marker: strings.Join(done, ", ")} {
+		if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", k, v); err != nil { return err }
+	}
+	if err := tx.Commit(); err != nil { return err }
+	log.Printf("analytics: frozen 2026 spend recomputed by invoice date: %v", done)
+	return nil
+}
+
 // Service exposes analytics metrics
 type Service struct{DB *sql.DB}
 
@@ -226,16 +256,16 @@ func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen 
 	if len(m.Operation.CriticalItems)>10 { m.Operation.CriticalItems = m.Operation.CriticalItems[:10] }
 
 	// PO scan
-	rows, _ := s.DB.Query("SELECT po_id, date, total, status, department, supplier FROM purchase_orders")
+	rows, _ := s.DB.Query("SELECT po_id, date, total, status, department, supplier, invoice_date FROM purchase_orders")
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var poID, dateStr, status, dept, supplier sql.NullString; var total sql.NullFloat64
-			rows.Scan(&poID,&dateStr,&total,&status,&dept,&supplier)
+			var poID, dateStr, status, dept, supplier, invDate sql.NullString; var total sql.NullFloat64
+			rows.Scan(&poID,&dateStr,&total,&status,&dept,&supplier,&invDate)
 			st := strings.ToUpper(strings.TrimSpace(strv(status)))
 			if st=="VOID"||st=="CANCELLED"||st=="REJECT" { continue }
 			i := -1
-			if d := parseDate(strv(dateStr), strv(poID)); d != nil { i = idx(d.Year(), int(d.Month())-1) }
+			if d := parseDate(strv(dateStr), strv(poID)); d != nil { sd := core.SpendDate(*d, strv(invDate)); i = idx(sd.Year(), int(sd.Month())-1) }
 			if i == -1 { continue }
 			t := f64v(total)
 			m.Finance.TotalSpend += t
