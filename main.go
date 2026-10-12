@@ -737,6 +737,14 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 	mux.HandleFunc("GET /api/rfq", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, rfqSvc.History())
 	}))
+	mux.HandleFunc("GET /api/rfq/{rfqId}", protected(func(w http.ResponseWriter, r *http.Request) {
+		rfq, err := rfqSvc.GetByID(r.PathValue("rfqId"))
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{"success": false, "error": "RFQ not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, rfq)
+	}))
 	mux.HandleFunc("GET /api/rfq/next-id", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"id": rfqSvc.GenerateID()})
 	}))
@@ -1349,7 +1357,7 @@ func decodeOrderRequest(r *http.Request, body interface{}) error {
 func writeOrderSaveError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	body := map[string]interface{}{"success": false, "error": err.Error()}
-	if errors.Is(err, core.ErrPendingUOM) || errors.Is(err, core.ErrInvalidPackUOM) || errors.Is(err, planning.ErrAssistantStockID) {
+	if errors.Is(err, core.ErrPendingUOM) || errors.Is(err, core.ErrInvalidPackUOM) || errors.Is(err, po.ErrUnknownRFQ) || errors.Is(err, planning.ErrAssistantStockID) {
 		status = http.StatusBadRequest
 	}
 	var purchaseError *planning.PurchaseError

@@ -3,6 +3,7 @@ package po
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"procura/internal/core"
 	"procura/internal/planning"
@@ -23,6 +24,7 @@ type PO struct {
 	Department           string   `json:"department"`
 	Terms                string   `json:"terms"`
 	InvoiceDate          string   `json:"invoice_date"`
+	LinkedRFQ            *string  `json:"linked_rfq"` // nil on save keeps the stored link; "" clears it
 	Items                []Item   `json:"items"`
 	AcknowledgedStockIDs []string `json:"acknowledged_stock_ids,omitempty"`
 }
@@ -93,14 +95,16 @@ type Service struct {
 	DB *sql.DB
 }
 
+var ErrUnknownRFQ = errors.New("unknown RFQ")
+
 // List returns POs filtered by search/supplier/status/unpaid. Max 200 rows.
 func (s *Service) List(search, supplier, status, shipStatus string, unpaidOnly bool) []PO {
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if search != "" {
-		where = append(where, "(LOWER(po_id) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(COALESCE(bill_no,'')) LIKE ?)")
+		where = append(where, "(LOWER(po_id) LIKE ? OR LOWER(supplier) LIKE ? OR LOWER(COALESCE(bill_no,'')) LIKE ? OR LOWER(COALESCE(linked_rfq,'')) LIKE ?)")
 		term := "%" + strings.ToLower(search) + "%"
-		args = append(args, term, term, term)
+		args = append(args, term, term, term, term)
 	}
 	if supplier != "" {
 		where = append(where, "supplier = ?")
@@ -120,7 +124,7 @@ func (s *Service) List(search, supplier, status, shipStatus string, unpaidOnly b
 
 	rows, err := s.DB.Query(`
 		SELECT po_id, date, supplier, bill_no, total, paid, balance,
-		       status, ship_status, department, terms, invoice_date, raw_po_json
+		       status, ship_status, department, terms, invoice_date, linked_rfq, raw_po_json
 		FROM purchase_orders
 		WHERE `+strings.Join(where, " AND ")+`
 		ORDER BY date DESC, po_id DESC LIMIT 200
@@ -134,10 +138,11 @@ func (s *Service) List(search, supplier, status, shipStatus string, unpaidOnly b
 	for rows.Next() {
 		var p PO
 		var rawJSON sql.NullString
-		var date, bill, dep, terms, invDate, sup, st, ship sql.NullString
+		var date, bill, dep, terms, invDate, rfq, sup, st, ship sql.NullString
 		var total, paid, balance sql.NullFloat64
 		rows.Scan(&p.POID, &date, &sup, &bill, &total, &paid, &balance,
-			&st, &ship, &dep, &terms, &invDate, &rawJSON)
+			&st, &ship, &dep, &terms, &invDate, &rfq, &rawJSON)
+		p.LinkedRFQ = &rfq.String
 		p.Date = strv(date)
 		p.Supplier = strv(sup)
 		p.BillNo = strv(bill)
@@ -207,6 +212,21 @@ func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 	var exists bool
 	if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM purchase_orders WHERE po_id=?)`, p.POID).Scan(&exists); err != nil {
 		return "", err
+	}
+	setRFQ, linkedRFQ := p.LinkedRFQ != nil, ""
+	if setRFQ {
+		linkedRFQ = strings.TrimSpace(*p.LinkedRFQ)
+	}
+	if linkedRFQ != "" {
+		// A link kept unchanged on a legacy PO need not name a current RFQ.
+		var known bool
+		if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM rfq_logs WHERE rfq_id=?)
+			OR EXISTS(SELECT 1 FROM purchase_orders WHERE po_id=? AND linked_rfq=?)`, linkedRFQ, p.POID, linkedRFQ).Scan(&known); err != nil {
+			return "", err
+		}
+		if !known {
+			return "", fmt.Errorf("%w: %s", ErrUnknownRFQ, linkedRFQ)
+		}
 	}
 	existingItems := map[string]bool{}
 	legacyUOMs := map[string]bool{}
@@ -302,18 +322,19 @@ func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 
 	query := `
 		INSERT INTO purchase_orders
-			(po_id, date, supplier, bill_no, total, status, ship_status, department, terms, invoice_date, raw_po_json)
+			(po_id, date, supplier, bill_no, total, status, ship_status, department, terms, invoice_date, linked_rfq, raw_po_json)
 		VALUES (?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), 'Pending Approval'), COALESCE(NULLIF(?, ''), 'Pending'),
-		        ?, ?, ?, ?)`
+		        ?, ?, ?, NULLIF(?, ''), ?)`
 	args := []interface{}{p.POID, p.Date, p.Supplier, p.BillNo, p.Total, p.Status, p.ShipStatus,
-		p.Department, p.Terms, p.InvoiceDate, string(itemsJSON)}
+		p.Department, p.Terms, p.InvoiceDate, linkedRFQ, string(itemsJSON)}
 	if !createOnly {
 		query += ` ON CONFLICT(po_id) DO UPDATE SET
 			date=excluded.date, supplier=excluded.supplier, bill_no=excluded.bill_no,
 			total=excluded.total, status=COALESCE(NULLIF(?, ''), purchase_orders.status),
 			ship_status=excluded.ship_status, department=excluded.department,
-			terms=excluded.terms, invoice_date=excluded.invoice_date, raw_po_json=excluded.raw_po_json`
-		args = append(args, p.Status)
+			terms=excluded.terms, invoice_date=excluded.invoice_date, raw_po_json=excluded.raw_po_json,
+			linked_rfq=CASE WHEN ? THEN excluded.linked_rfq ELSE purchase_orders.linked_rfq END`
+		args = append(args, p.Status, setRFQ)
 	}
 	_, err = tx.Exec(query, args...)
 	if err != nil {
@@ -407,18 +428,19 @@ func (s *Service) Void(poID string) error {
 // GetByID returns a single PO with items.
 func (s *Service) GetByID(poID string) (PO, error) {
 	var p PO
-	var date, bill, dep, terms, invDate, sup, st, ship sql.NullString
+	var date, bill, dep, terms, invDate, rfq, sup, st, ship sql.NullString
 	var total, paid, balance sql.NullFloat64
 	var rawJSON sql.NullString
 	err := s.DB.QueryRow(`
 		SELECT po_id, date, supplier, bill_no, total, paid, balance,
-		       status, ship_status, department, terms, invoice_date, raw_po_json
+		       status, ship_status, department, terms, invoice_date, linked_rfq, raw_po_json
 		FROM purchase_orders WHERE po_id = ?
 	`, poID).Scan(&p.POID, &date, &sup, &bill, &total, &paid, &balance,
-		&st, &ship, &dep, &terms, &invDate, &rawJSON)
+		&st, &ship, &dep, &terms, &invDate, &rfq, &rawJSON)
 	if err != nil {
 		return p, err
 	}
+	p.LinkedRFQ = &rfq.String
 	p.Date = strv(date)
 	p.Supplier = strv(sup)
 	p.BillNo = strv(bill)

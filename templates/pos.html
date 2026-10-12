@@ -86,6 +86,7 @@
             <div class="form-group"><label>Department</label><select id="npo-dept" required><option value="">-- Select --</option>
                 <option>Pharmacy</option><option>Surgical</option><option>Diagnostic</option><option>Lab</option><option>Medical/Ward</option></select></div>
             <div class="form-group"><label>Supplier</label><input id="npo-supplier" list="po-sup-list" placeholder="Search supplier..." required><datalist id="po-sup-list"></datalist></div>
+            <div class="form-group"><label>From RFQ</label><input id="npo-rfq" list="po-rfq-list" placeholder="Optional" autocomplete="off" onchange="selectPoRfq()"><datalist id="po-rfq-list"></datalist></div>
             <div class="form-group"><label>Bill #</label><input id="npo-bill" placeholder="Optional invoice ref"></div>
             <div class="form-group"><label>Invoice Date</label><input type="text" id="npo-inv-date" placeholder="DD/MM/YYYY"></div>
             <div class="form-group"><label>Terms</label><input id="npo-terms" readonly placeholder="Auto from supplier"></div>
@@ -94,6 +95,7 @@
             </select></div>
         </div>
 
+        <div id="npo-rfq-lines" hidden style="margin-bottom:12px"></div>
         <!-- Add Item Row -->
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
             <span style="font-size:13px;font-weight:600">Item:</span>
@@ -152,7 +154,7 @@
 
 <script>
 const PACK_UOMS = {{packUOMs}};
-let allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='', poSuggestionItems=[], poSuggestionIndex=-1;
+let poRfqs=[], allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='', poSuggestionItems=[], poSuggestionIndex=-1;
 let poView='history', selectedPo=null, poFormBaseline='', poListScroll=0, poRequest=0;
 
 function sizePoList() {
@@ -174,11 +176,14 @@ async function initPo() {
     ['#po-list-actions', '#tab-history .search-bar', '.po-column-options'].forEach(selector => poLayoutObserver.observe(document.querySelector(selector)));
 
     document.getElementById('npo-date').value = todayDMY();
-    const [itemRes,supRes,uomRes] = await Promise.all([
+    const [itemRes,supRes,uomRes,rfqRes] = await Promise.all([
         fetch('/api/inventory?page=1&pageSize=5000'),
         fetch('/api/suppliers'),
         fetch('/api/uom/mappings'),
+        fetch('/api/rfq'),
     ]);
+    poRfqs = (await rfqRes.json()) || [];
+    renderPoRfqOptions();
     poItemMaster = await itemRes.json();
     poItemLookup = {};
     poItemMaster.forEach(i => {
@@ -204,6 +209,7 @@ async function initPo() {
         const match = suppliers.find(s => s.supplier_name.toLowerCase() === name.toLowerCase());
         if (match) document.getElementById('npo-terms').value = match.payment_terms || '';
         fillSupplierUOM();
+        renderPoRfqOptions();
     });
     const itemInput = document.getElementById('npo-item-search');
     itemInput.addEventListener('change', fillSupplierUOM);
@@ -223,6 +229,8 @@ async function initPo() {
     poFormBaseline = poFormSnapshot();
     const requestedId = new URLSearchParams(location.search).get('order');
     if (requestedId) await selectPo(requestedId, false);
+    const fromRfq = new URLSearchParams(location.search).get('from_rfq');
+    if (fromRfq) { showPoView('new'); document.getElementById('npo-rfq').value = fromRfq; selectPoRfq(); }
     window.addEventListener('popstate', async () => {
         if (!canLeavePoForm()) {
             history.pushState({}, '', '/pos?edit=1');
@@ -316,6 +324,54 @@ function lookupSupplierUOM(item) {
     const supplier = document.getElementById('npo-supplier').value.trim();
     if (!supplier || !item || !item.stock_id) return '';
     return poSupplierUOMLookup[(supplier+'|'+item.stock_id).toLowerCase()] || '';
+}
+
+// RFQ link is optional and internal: it fills the supplier, offers the RFQ's lines to pick, and is saved as linked_rfq.
+const sameSupplier = (a, b) => String(a||'').trim().toLowerCase() === String(b||'').trim().toLowerCase();
+function findPoRfq() { const id = document.getElementById('npo-rfq').value.trim(); return poRfqs.find(r => r.rfq_id === id); }
+
+function renderPoRfqOptions() {
+    const supplier = document.getElementById('npo-supplier').value;
+    const list = [...poRfqs].sort((a, b) => sameSupplier(b.supplier, supplier) - sameSupplier(a.supplier, supplier));
+    document.getElementById('po-rfq-list').innerHTML = list.map(r =>
+        `<option value="${esc(r.rfq_id)}">${esc(r.supplier||'')} · ${toDMY(r.date)}${r.po_ids ? ' · has '+esc(r.po_ids) : ''}</option>`).join('');
+}
+
+async function selectPoRfq() {
+    const id = document.getElementById('npo-rfq').value.trim();
+    let rfq = findPoRfq();
+    if (id && !rfq) { // older than the newest 100 that /api/rfq lists
+        const res = await fetch('/api/rfq/'+encodeURIComponent(id));
+        if (res.ok) poRfqs.push(rfq = await res.json());
+        else toast('RFQ '+id+' not found', false);
+    }
+    if (rfq) {
+        const supplier = document.getElementById('npo-supplier');
+        if (!supplier.value.trim()) { supplier.value = rfq.supplier||''; supplier.dispatchEvent(new Event('change')); }
+        else if (!sameSupplier(supplier.value, rfq.supplier)) toast('Note: '+rfq.rfq_id+' was sent to '+rfq.supplier, false);
+    }
+    renderPoRfqLines();
+}
+
+function renderPoRfqLines() {
+    const box = document.getElementById('npo-rfq-lines'), rfq = findPoRfq();
+    box.hidden = !rfq;
+    if (!rfq) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:4px">Lines from ${esc(rfq.rfq_id)}: pick one, enter the invoice line total, then Add Item.</div>` +
+        (rfq.items||[]).map((it, i) => {
+            const used = poItems.some(p => p.stock_id && p.stock_id === it.stock_id);
+            return `<button class="btn-secondary btn-sm" style="margin:0 6px 6px 0" onclick="useRfqLine(${i})">${used ? '✓ ' : ''}${esc(it.item_name)} × ${it.qty} ${esc(it.uom||'')}</button>`;
+        }).join('');
+}
+
+function useRfqLine(i) {
+    const it = (findPoRfq()?.items||[])[i];
+    if (!it) return;
+    document.getElementById('npo-item-search').value = `[${it.stock_id}] ${(poItemLookup[(it.stock_id||'').toLowerCase()]||it).item_name}`;
+    fillSupplierUOM();
+    if (listedUom(it.uom)) document.getElementById('npo-sup-uom').value = listedUom(it.uom);
+    document.getElementById('npo-qty').value = it.qty || '';
+    document.getElementById('npo-line-total').focus();
 }
 
 function listedUom(v) { v = String(v||'').trim().toLowerCase(); return PACK_UOMS.includes(v) ? v : ''; }
@@ -476,7 +532,7 @@ async function selectPo(poId, push = true) {
 }
 function renderPoDetail(po) {
     document.getElementById('po-detail-title').textContent = po.po_id;
-    const details = [['Order date',toDMY(po.date)||'-'],['Supplier',po.supplier||'-'],['Total','RM '+(po.total||0).toFixed(2)],['Paid','RM '+(po.paid||0).toFixed(2)],['Outstanding balance','RM '+(po.balance||0).toFixed(2)],['Effective balance','RM '+((po.total||0)-(po.paid||0)-(po.balance||0)).toFixed(2)],['Invoice number',po.bill_no||'-'],['Invoice date',toDMY(po.invoice_date)||'-'],['Terms',po.terms||'-'],['Department',po.department||'-'],['Approval / payment',po.status||'-'],['Shipping',po.ship_status||'-']];
+    const details = [['Order date',toDMY(po.date)||'-'],['Supplier',po.supplier||'-'],['Total','RM '+(po.total||0).toFixed(2)],['Paid','RM '+(po.paid||0).toFixed(2)],['Outstanding balance','RM '+(po.balance||0).toFixed(2)],['Effective balance','RM '+((po.total||0)-(po.paid||0)-(po.balance||0)).toFixed(2)],['Invoice number',po.bill_no||'-'],['Invoice date',toDMY(po.invoice_date)||'-'],['Terms',po.terms||'-'],['Department',po.department||'-'],['From RFQ',po.linked_rfq||'-'],['Approval / payment',po.status||'-'],['Shipping',po.ship_status||'-']];
     document.getElementById('po-detail-grid').innerHTML = details.map(([label,value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join('');
     setPoSelect('po-edit-status', po.status||'');
     setPoSelect('po-edit-ship', po.ship_status||'');
@@ -543,6 +599,7 @@ function editSelectedPo() {
         stock_id: it.stock_id, item_name: it.item_name, uom: it.uom||'UNIT',
         supplier_uom: it.supplier_uom||'', quantity: it.quantity, cost: it.cost, total: it.total, ...itemPack(it.stock_id),
     }));
+    document.getElementById('npo-rfq').value = po.linked_rfq||'';
     renderPoItems();
     poFormBaseline = poFormSnapshot();
     updatePoEditState();
@@ -585,6 +642,7 @@ function removePoItem(i) { poItems.splice(i,1); renderPoItems(); }
 
 function renderPoItems() {
     updatePoEditState();
+    renderPoRfqLines();
     const tbody = document.getElementById('npo-items');
     if (!poItems.length) { tbody.innerHTML=''; document.getElementById('npo-empty').style.display='block';
         document.getElementById('npo-total').textContent='RM 0.00'; return; }
@@ -611,6 +669,7 @@ function resetPoForm(ask = true) {
     document.getElementById('npo-inv-date').value='';
     document.getElementById('npo-terms').value='';
     document.getElementById('npo-ship').value='Pending';
+    document.getElementById('npo-rfq').value='';
     poItems=[]; renderPoItems();
     poFormBaseline = poFormSnapshot(); updatePoEditState();
 }
@@ -625,6 +684,8 @@ async function savePo() {
     }
     const supplier = document.getElementById('npo-supplier').value.trim();
     if(!poItems.length) return toast('Add at least one item',false);
+    const linkedRfq = document.getElementById('npo-rfq').value.trim(), rfq = findPoRfq();
+    if (rfq && !sameSupplier(supplier, rfq.supplier) && !confirm(rfq.rfq_id+' was sent to '+rfq.supplier+', but this PO is for '+supplier+'. Save anyway?')) return;
     const packs = {};
     for (const it of poItems.filter(it => it.stock_id)) {
         if (!it.pack_qty !== !it.pack_uom) return toast(it.item_name+': enter both pack quantity and unit, or neither',false);
@@ -639,6 +700,7 @@ async function savePo() {
         invoice_date: fromDMY(document.getElementById('npo-inv-date').value),
         terms: document.getElementById('npo-terms').value,
         ship_status: document.getElementById('npo-ship').value,
+        linked_rfq: linkedRfq,
         items: poItems.map(it => ({stock_id:it.stock_id,item_name:it.item_name,name:it.item_name,
             quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom,supplier_uom:it.supplier_uom})),
     };

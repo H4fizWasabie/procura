@@ -12,7 +12,7 @@
 <div class="planning-filters search-bar">
     <div id="data-note" style="color:var(--muted);font-size:13px;flex:1"></div>
     <input type="text" id="filter" placeholder="Search name, ID, supplier..." oninput="render()" style="flex:1">
-    <select id="f-supplier" style="width:160px" onchange="render()"><option value="">All Suppliers</option></select>
+    <input id="f-supplier" list="f-supplier-list" placeholder="All Suppliers" autocomplete="off" style="width:200px" oninput="render()"><datalist id="f-supplier-list"></datalist>
     <select id="f-type" style="width:140px" onchange="render()"><option value="">All Types</option></select>
     <select id="f-category" style="width:150px" onchange="render()"><option value="">All Categories</option></select>
     <select id="f-status" style="width:120px" onchange="render()"><option value="">All Status</option></select>
@@ -108,7 +108,7 @@ function fillOptions() {
         sel.innerHTML = '<option value="">' + label + '</option>' + vals.map(v => `<option>${esc(v)}</option>`).join('');
         sel.value = cur;
     };
-    set('f-supplier', 'All Suppliers', uniq(data.map(i => i.supplier)));
+    document.getElementById('f-supplier-list').innerHTML = uniq(data.map(i => i.supplier)).map(v => `<option>${esc(v)}</option>`).join('');
     set('f-type', 'All Types', uniq(data.map(i => i.productType)));
     set('f-category', 'All Categories', uniq(data.map(i => i.category)));
     set('f-status', 'All Status', uniq(data.map(i => i.status)));
@@ -119,7 +119,8 @@ function matches(it) {
     if (q && !(it.id||'').toLowerCase().includes(q) && !(it.name||'').toLowerCase().includes(q)
             && !(it.supplier||'').toLowerCase().includes(q) && !(it.category||'').toLowerCase().includes(q)) return false;
     const v = id => document.getElementById(id).value;
-    if (v('f-supplier') && (it.supplier||'') !== v('f-supplier')) return false;
+    const supplier = v('f-supplier').trim().toLowerCase();
+    if (supplier && !(it.supplier||'').toLowerCase().includes(supplier)) return false;
     if (v('f-type') && (it.productType||'') !== v('f-type')) return false;
     if (v('f-category') && (it.category||'') !== v('f-category')) return false;
     if (v('f-status') && (it.status||'') !== v('f-status')) return false;
