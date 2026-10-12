@@ -3,6 +3,7 @@
 ## 2026-10-12
 - [inventory/core] Replace free-text pack size with pack_qty + pack_uom from a fixed unit list (box, pack, bag, bottle, carton, roll, tube, can, jar, vial, pouch, drum, gallon), set or cleared together and audited; pack_size is now derived as "12/box" for mino and older readers — free text like "100ml" or "1.0" could not be parsed or compared
 - [core] Clear the 49 legacy free-text pack sizes once at startup with one audit row each — pack sizes are re-entered in the new format while ordering
+- [core/po] Leave structured pack values untouched if the legacy clear retries, and keep the PO form marked unsaved when a pack update fails — review findings on #68
 - [po] Enter pack size per line in the PO form and save it to the item after the PO saves (never stored on or shown in the PO); Sup.UOM becomes the same unit dropdown, saved lowercase, with unchanged pre-list values on old POs kept — uniform units instead of box/BOX/BOZ/PACLK
 - [import] Stop writing workbook pack_size on new items — pack size is owned by Procura
 - [extension] Edit pack size as pack_qty + pack_uom and drop unlisted supplier units from assistant PO drafts — matches the server's new validation

@@ -291,6 +291,7 @@ func TestClearLegacyPackSizeRunsOnceWithAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO items(stock_id,item_name,pack_size) VALUES('A','Item A','12/box'),('B','Item B','');
+		INSERT INTO items(stock_id,item_name,pack_qty,pack_uom,pack_size) VALUES('C','Item C',3,'bag','3/bag');
 		DELETE FROM settings WHERE key='migration.clear_pack_size.v1'`); err != nil {
 		t.Fatal(err)
 	}
@@ -304,6 +305,10 @@ func TestClearLegacyPackSizeRunsOnceWithAudit(t *testing.T) {
 	db.QueryRow("SELECT COUNT(*) FROM item_anchor_audit WHERE stock_id='A' AND field_name='pack_size' AND old_value='12/box'").Scan(&audits)
 	if size.Valid || audits != 1 {
 		t.Fatalf("pack_size=%v audits=%d, want NULL and one audit", size, audits)
+	}
+	db.QueryRow("SELECT pack_size FROM items WHERE stock_id='C'").Scan(&size)
+	if size.String != "3/bag" {
+		t.Fatalf("structured pack was cleared: %v", size)
 	}
 	if _, err := db.Exec(`UPDATE items SET pack_qty=6, pack_uom='box', pack_size='6/box' WHERE stock_id='A'`); err != nil {
 		t.Fatal(err)

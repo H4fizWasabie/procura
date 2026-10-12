@@ -364,11 +364,12 @@ func clearLegacyPackSize(db *sql.DB) error {
 	if _, err := tx.Exec(`INSERT INTO item_anchor_audit
 		(timestamp, stock_id, item_name, field_name, old_value, new_value, reason, changed_by)
 		SELECT ?, stock_id, item_name, 'pack_size', pack_size, '', 'Cleared for structured pack size', 'system'
-		FROM items WHERE TRIM(COALESCE(pack_size, '')) != ''`, time.Now().Format("2006-01-02T15:04:05")); err != nil {
+		FROM items WHERE TRIM(COALESCE(pack_size, '')) != '' AND pack_qty IS NULL`, time.Now().Format("2006-01-02T15:04:05")); err != nil {
 		return err
 	}
-	res, err := tx.Exec(`UPDATE items SET pack_size = NULL, pack_qty = NULL, pack_uom = NULL
-		WHERE TRIM(COALESCE(pack_size, '')) != '' OR pack_qty IS NOT NULL OR pack_uom IS NOT NULL`)
+	// Structured rows are left alone in case an earlier failed run let edits in.
+	res, err := tx.Exec(`UPDATE items SET pack_size = NULL
+		WHERE TRIM(COALESCE(pack_size, '')) != '' AND pack_qty IS NULL`)
 	if err != nil {
 		return err
 	}
