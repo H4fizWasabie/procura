@@ -82,12 +82,28 @@ func TestLateInvoiceAfterFreezeCountsInPOMonth(t *testing.T) {
 	if got := spend(); got[0] != 110 || got[1] != 1000 {
 		t.Fatalf("after freezing Oct: %v", got)
 	}
-	// Re-freezing September takes the late PO in again, and it is not counted twice.
+	// Re-freezing September keeps its first watermark, so the late PO is not counted twice.
 	if _, err := s.Freeze(2026, 8); err != nil {
 		t.Fatal(err)
 	}
-	if got := spend(); got[0] != 1110 || got[1] != 1000 {
-		t.Fatalf("re-frozen Sep: %v (Oct stays as frozen)", got)
+	if got := spend(); got[0] != 110 || got[1] != 1000 {
+		t.Fatalf("re-frozen Sep: %v", got)
+	}
+}
+
+func TestZeroWatermarkStillMovesLatePOs(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Service{DB: db}
+	if _, err := s.Freeze(2026, 8); err != nil { // no POs yet: watermark 0
+		t.Fatal(err)
+	}
+	db.Exec(`INSERT INTO purchase_orders(po_id,date,invoice_date,total,status) VALUES('OCT-LATE','2026-10-05','2026-09-30',7,'Paid')`)
+	if got := s.Compute(2026, 8, 2026, 9).Finance.MonthlySpend; got[0] != 0 || got[1] != 7 {
+		t.Fatalf("spend = %v", got)
 	}
 }
 

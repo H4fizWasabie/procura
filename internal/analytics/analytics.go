@@ -168,7 +168,8 @@ func normalizeDepartment(dept string) string {
 }
 
 // frozenMap is the "analytics_frozen" setting: {year:{zero-based month:{ih,val,cons,rev,spend,po_rowid}}}.
-// po_rowid is the last purchase_orders rowid the frozen figures had seen.
+// po_rowid is the last purchase_orders rowid the month's first freeze saw; it never moves, so a
+// PO entered later always counts in its PO month, even when the month is re-frozen.
 type frozenMap = map[string]map[string]map[string]float64
 
 // user-frozen baselines from settings
@@ -178,16 +179,6 @@ func (s *Service) settingsFrozen() frozenMap {
 		json.Unmarshal([]byte(raw), &m)
 	}
 	return m
-}
-
-// withoutMonth copies f without one month, so re-freezing a month counts every PO in it.
-func withoutMonth(f frozenMap, year, month int) frozenMap {
-	out := frozenMap{}
-	for y, months := range f {
-		out[y] = map[string]map[string]float64{}
-		for mo, v := range months { if y != strconv.Itoa(year) || mo != strconv.Itoa(month) { out[y][mo] = v } }
-	}
-	return out
 }
 
 func (s *Service) maxPORowid() (float64, error) {
@@ -210,13 +201,16 @@ func (s *Service) saveSettings(kv map[string]string) error {
 // Freeze snapshots the monthly trends and spend for a month into settings.
 func (s *Service) Freeze(year, month int) (map[string]float64, error) {
 	frozen := s.settingsFrozen()
-	// ponytail: a PO saved between these two lines can be counted twice; freezing is a monthly click.
-	rowid, err := s.maxPORowid()
-	if err != nil { return nil, err }
-	// Freeze from raw data so an existing baseline cannot reproduce itself.
-	m := s.compute(year, month, year, month, false, withoutMonth(frozen, year, month))
-	vals := map[string]float64{"ih":m.Operation.InHouseConsumption[0], "val":m.Inventory.ValuationTrend[0], "cons":m.Inventory.ConsumptionTrend[0], "rev":m.Business.GrossRevenueTrend[0], "spend":m.Finance.MonthlySpend[0], "po_rowid":rowid}
 	key := strconv.Itoa(year)
+	rowid, kept := frozen[key][strconv.Itoa(month)]["po_rowid"]
+	if !kept {
+		// ponytail: a PO saved between this read and compute can be counted twice; freezing is a monthly click.
+		var err error
+		if rowid, err = s.maxPORowid(); err != nil { return nil, err }
+	}
+	// Freeze from raw data so an existing baseline cannot reproduce itself.
+	m := s.compute(year, month, year, month, false, frozen)
+	vals := map[string]float64{"ih":m.Operation.InHouseConsumption[0], "val":m.Inventory.ValuationTrend[0], "cons":m.Inventory.ConsumptionTrend[0], "rev":m.Business.GrossRevenueTrend[0], "spend":m.Finance.MonthlySpend[0], "po_rowid":rowid}
 	if frozen[key] == nil { frozen[key] = map[string]map[string]float64{} }
 	frozen[key][strconv.Itoa(month)] = vals
 	b, err := json.Marshal(frozen)
@@ -233,7 +227,7 @@ func (s *Service) RefreezeInvoiceSpend() error {
 	done := []string{}
 	for _, mo := range []int{7, 8} { // zero-based Aug, Sep
 		if fs, ok := frozen["2026"][strconv.Itoa(mo)]; ok {
-			fs["spend"] = s.compute(2026, mo, 2026, mo, false, withoutMonth(frozen, 2026, mo)).Finance.MonthlySpend[0]
+			fs["spend"] = s.compute(2026, mo, 2026, mo, false, frozen).Finance.MonthlySpend[0]
 			done = append(done, monthLabels[mo]+fmt.Sprintf(" %.2f", fs["spend"]))
 		}
 	}
@@ -317,7 +311,7 @@ func (s *Service) compute(fromYear, fromMonth, toYear, toMonth int, applyFrozen 
 				sd := core.SpendDate(*d, strv(invDate))
 				// Entered after its invoice month was frozen: the frozen figure missed it, so count it in its PO month.
 				// ponytail: an invoice date edited into a frozen month after freezing still drops out.
-				if fs, ok := sf[itoa(sd.Year())][strconv.Itoa(int(sd.Month())-1)]; ok && fs["po_rowid"] > 0 && rowid > fs["po_rowid"] { sd = *d }
+				if mark, ok := sf[itoa(sd.Year())][strconv.Itoa(int(sd.Month())-1)]["po_rowid"]; ok && rowid > mark { sd = *d }
 				i = idx(sd.Year(), int(sd.Month())-1)
 			}
 			if i == -1 { continue }
