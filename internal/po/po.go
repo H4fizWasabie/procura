@@ -238,6 +238,9 @@ func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 	if err := ValidateRequired(p); err != nil {
 		return "", err
 	}
+	if d, ok := core.ParseLooseDate(p.InvoiceDate); ok {
+		p.InvoiceDate = d.Format("2006-01-02")
+	}
 	var exists bool
 	if err := s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM purchase_orders WHERE po_id=?)`, p.POID).Scan(&exists); err != nil {
 		return "", err
@@ -419,6 +422,15 @@ func ValidateRequired(p PO) error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("required PO fields missing: %s", strings.Join(missing, ", "))
+	}
+	if inv := strings.TrimSpace(p.InvoiceDate); inv != "" {
+		d, ok := core.ParseLooseDate(inv)
+		if !ok {
+			return fmt.Errorf("invoice date %q is not a valid date (use DD/MM/YYYY)", inv)
+		}
+		if poDate, err := time.Parse("2006-01-02", p.Date); err == nil && (d.Sub(poDate) > core.MaxInvoiceGap || poDate.Sub(d) > core.MaxInvoiceGap) {
+			return fmt.Errorf("invoice date %s is more than 120 days from the PO date; check the year", d.Format("02/01/2006"))
+		}
 	}
 	return nil
 }

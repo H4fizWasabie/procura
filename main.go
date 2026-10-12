@@ -96,6 +96,9 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 	scoreSvc := &scorecard.Service{DB: db}
 	wfSvc := &workflow.Service{DB: db}
 	analyticsSvc := &analytics.Service{DB: db}
+	if err := analyticsSvc.RefreezeInvoiceSpend(); err != nil {
+		log.Printf("analytics: invoice-date spend refreeze failed: %v", err)
+	}
 	catalogueSvc := &catalogue.Service{DB: db}
 	uomSvc := &uom.Service{DB: db}
 	importSvc := &ximport.Service{DB: db, ImportsDir: "data/imports"}

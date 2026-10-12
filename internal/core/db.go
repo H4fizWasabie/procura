@@ -259,6 +259,7 @@ var migrations = []migration{
 	execMigration("ALTER TABLE items ADD COLUMN pack_qty REAL"),
 	execMigration("ALTER TABLE items ADD COLUMN pack_uom TEXT"),
 	clearLegacyPackSize,
+	normalizeInvoiceDates,
 	execMigration("ALTER TABLE tasks ADD COLUMN assigned_to TEXT"),
 }
 

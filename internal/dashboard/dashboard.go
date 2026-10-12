@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"procura/internal/core"
 	"procura/internal/planning"
 )
 
@@ -55,7 +56,7 @@ func (s *Service) Compute() Stats {
 
 	// ── A. PO SCAN ──
 	rows, err := s.DB.Query(`
-		SELECT po_id, date, total, status
+		SELECT po_id, date, total, status, COALESCE(invoice_date, '')
 		FROM purchase_orders
 		ORDER BY date DESC, po_id DESC
 		LIMIT 1000
@@ -63,9 +64,9 @@ func (s *Service) Compute() Stats {
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var poID, dateStr, status string
+			var poID, dateStr, status, invDate string
 			var total sql.NullFloat64
-			rows.Scan(&poID, &dateStr, &total, &status)
+			rows.Scan(&poID, &dateStr, &total, &status, &invDate)
 			status = strings.ToUpper(strings.TrimSpace(status))
 			if status == "VOID" || status == "CANCELLED" || poID == "" {
 				continue
@@ -79,7 +80,7 @@ func (s *Service) Compute() Stats {
 			// GAS: YTD sum for APPROVED/PAID/PARTIAL
 			// SQLite maps: Paid=PAID, Pending Payment≈APPROVED, Pending Approval≈PARTIAL
 			if status == "PAID" || status == "PENDING PAYMENT" || status == "PENDING APPROVAL" {
-				if d := parseDate(dateStr, poID); d != nil && d.Year() == currentYear {
+				if d := parseDate(dateStr, poID); d != nil && core.SpendDate(*d, invDate).Year() == currentYear {
 					st.Financials.YTDSpend += orZero(total)
 				}
 			}
