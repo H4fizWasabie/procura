@@ -51,3 +51,81 @@ func TestRefreezeInvoiceSpendMarksDoneWithoutFrozenMonths(t *testing.T) {
 		t.Fatalf("marker not written: err=%v", err)
 	}
 }
+
+func TestLateInvoiceAfterFreezeCountsInPOMonth(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Service{DB: db}
+	spend := func() []float64 { return s.Compute(2026, 8, 2026, 9).Finance.MonthlySpend } // Sep, Oct
+	if _, err := db.Exec(`INSERT INTO purchase_orders(po_id,date,invoice_date,total,status) VALUES
+		('SEP','2026-09-20','2026-09-18',100,'Paid'),
+		('OCT-EARLY','2026-10-02','2026-09-29',10,'Paid')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Freeze(2026, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := spend(); got[0] != 110 || got[1] != 0 {
+		t.Fatalf("after freezing Sep: %v", got)
+	}
+	// Entered after September was frozen, with a September invoice: counts in October, not lost.
+	db.Exec(`INSERT INTO purchase_orders(po_id,date,invoice_date,total,status) VALUES('OCT-LATE','2026-10-05','2026-09-30',1000,'Paid')`)
+	if got := spend(); got[0] != 110 || got[1] != 1000 {
+		t.Fatalf("late invoice: %v", got)
+	}
+	if _, err := s.Freeze(2026, 9); err != nil {
+		t.Fatal(err)
+	}
+	if got := spend(); got[0] != 110 || got[1] != 1000 {
+		t.Fatalf("after freezing Oct: %v", got)
+	}
+	// Re-freezing September keeps its first watermark, so the late PO is not counted twice.
+	if _, err := s.Freeze(2026, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := spend(); got[0] != 110 || got[1] != 1000 {
+		t.Fatalf("re-frozen Sep: %v", got)
+	}
+}
+
+func TestZeroWatermarkStillMovesLatePOs(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Service{DB: db}
+	if _, err := s.Freeze(2026, 8); err != nil { // no POs yet: watermark 0
+		t.Fatal(err)
+	}
+	db.Exec(`INSERT INTO purchase_orders(po_id,date,invoice_date,total,status) VALUES('OCT-LATE','2026-10-05','2026-09-30',7,'Paid')`)
+	if got := s.Compute(2026, 8, 2026, 9).Finance.MonthlySpend; got[0] != 0 || got[1] != 7 {
+		t.Fatalf("spend = %v", got)
+	}
+}
+
+func TestMarkFreezeWatermarksOnce(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.Exec(`INSERT INTO purchase_orders(po_id,date,total,status) VALUES('A','2026-09-01',1,'Paid'),('B','2026-09-02',1,'Paid');
+		INSERT INTO settings(key,value) VALUES('analytics_frozen','{"2026":{"7":{"spend":5},"8":{"spend":6,"po_rowid":1}}}')`)
+	s := &Service{DB: db}
+	if err := s.MarkFreezeWatermarks(); err != nil {
+		t.Fatal(err)
+	}
+	f := s.settingsFrozen()["2026"]
+	if f["7"]["po_rowid"] != 2 || f["8"]["po_rowid"] != 1 || f["7"]["spend"] != 5 {
+		t.Fatalf("watermarks = %v", f)
+	}
+	db.Exec(`INSERT INTO purchase_orders(po_id,date,total,status) VALUES('C','2026-09-03',1,'Paid')`)
+	db.Exec(`UPDATE settings SET value='{"2026":{"9":{"spend":1}}}' WHERE key='analytics_frozen'`)
+	if err := s.MarkFreezeWatermarks(); err != nil || s.settingsFrozen()["2026"]["9"]["po_rowid"] != 0 {
+		t.Fatalf("must run once: %v %v", err, s.settingsFrozen())
+	}
+}

@@ -99,6 +99,9 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 	if err := analyticsSvc.RefreezeInvoiceSpend(); err != nil {
 		log.Printf("analytics: invoice-date spend refreeze failed: %v", err)
 	}
+	if err := analyticsSvc.MarkFreezeWatermarks(); err != nil {
+		log.Printf("analytics: freeze watermarks failed: %v", err)
+	}
 	catalogueSvc := &catalogue.Service{DB: db}
 	uomSvc := &uom.Service{DB: db}
 	importSvc := &ximport.Service{DB: db, ImportsDir: "data/imports"}
