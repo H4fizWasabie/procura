@@ -45,7 +45,10 @@ try {
  assert.equal(rfq.po_ids,poId);
  await run(`resetPoForm(false)`);
  assert.deepEqual(await run(`[document.getElementById('npo-rfq').value,document.getElementById('npo-rfq-lines').hidden]`),['',true]);
- console.log('PASS: Make PO opens the form from an RFQ, fills the supplier, offers its lines to pick (qty, unit, ✓ when used), warns on a different supplier, saves linked_rfq internally (not on the preview), shows the PO on the RFQ list, and a reset form has no RFQ');
+ await run(`(async()=>{poRfqs=poRfqs.filter(r=>r.rfq_id!=='RFQ-CHECK');document.getElementById('npo-rfq').value='RFQ-CHECK';await selectPoRfq()})()`);
+ assert.equal(await run(`document.querySelectorAll('#npo-rfq-lines button').length`),2,'an RFQ outside the history list is fetched by id');
+ await run(`resetPoForm(false)`);
+ console.log('PASS: Make PO opens the form from an RFQ, fills the supplier, offers its lines to pick (qty, unit, ✓ when used), warns on a different supplier, saves linked_rfq internally (not on the preview), shows the PO on the RFQ list, a reset form has no RFQ, and an RFQ older than the list is fetched by id');
 } finally {
  if(send&&ws?.readyState===WebSocket.OPEN){try{await send('Browser.close')}catch{}}
  ws?.close();

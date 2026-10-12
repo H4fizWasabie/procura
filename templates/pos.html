@@ -337,9 +337,14 @@ function renderPoRfqOptions() {
         `<option value="${esc(r.rfq_id)}">${esc(r.supplier||'')} · ${toDMY(r.date)}${r.po_ids ? ' · has '+esc(r.po_ids) : ''}</option>`).join('');
 }
 
-function selectPoRfq() {
-    const id = document.getElementById('npo-rfq').value.trim(), rfq = findPoRfq();
-    if (id && !rfq) toast('RFQ '+id+' not found', false);
+async function selectPoRfq() {
+    const id = document.getElementById('npo-rfq').value.trim();
+    let rfq = findPoRfq();
+    if (id && !rfq) { // older than the newest 100 that /api/rfq lists
+        const res = await fetch('/api/rfq/'+encodeURIComponent(id));
+        if (res.ok) poRfqs.push(rfq = await res.json());
+        else toast('RFQ '+id+' not found', false);
+    }
     if (rfq) {
         const supplier = document.getElementById('npo-supplier');
         if (!supplier.value.trim()) { supplier.value = rfq.supplier||''; supplier.dispatchEvent(new Event('change')); }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"procura/internal/core"
 	"procura/internal/planning"
 	"strconv"
@@ -254,7 +255,10 @@ func f64v2(v interface{}) float64 {
 		f, _ := n.Float64()
 		return f
 	case string: // older RFQs store quantities as text
-		f, _ := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) { // JSON cannot encode NaN/Inf
+			return 0
+		}
 		return f
 	}
 	return 0
