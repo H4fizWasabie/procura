@@ -214,6 +214,7 @@ async function initPo() {
             ship.value = /\b\d+\s*days?\b/i.test(terms) && !/adv|prepa|deposit|\bc\.?o\.?d\b|\bp\.?i\.?a\b/i.test(terms) ? 'Delivered' : 'Pending';
         fillSupplierUOM();
         renderPoRfqOptions();
+        renderPoRfqLines();
     });
     const itemInput = document.getElementById('npo-item-search');
     itemInput.addEventListener('change', fillSupplierUOM);
@@ -357,10 +358,25 @@ async function selectPoRfq() {
     renderPoRfqLines();
 }
 
+// RFQs Planning still counts as incoming: same supplier, under 30 days old, no PO yet.
+function openPoRfqs(supplier) {
+    const cutoff = new Date(Date.now() - 30*864e5).toISOString().slice(0, 10);
+    return poRfqs.filter(r => sameSupplier(r.supplier, supplier) && !r.po_ids && (r.date||'').slice(0, 10) >= cutoff);
+}
+
+function useSuggestedRfq(id) { document.getElementById('npo-rfq').value = id; selectPoRfq(); }
+
 function renderPoRfqLines() {
     const box = document.getElementById('npo-rfq-lines'), rfq = findPoRfq();
-    box.hidden = !rfq;
-    if (!rfq) { box.innerHTML = ''; return; }
+    if (!rfq) {
+        const isNew = !document.getElementById('npo-id').value && !document.getElementById('npo-rfq').value.trim();
+        const open = isNew ? openPoRfqs(document.getElementById('npo-supplier').value.trim()) : [];
+        box.hidden = !open.length;
+        box.innerHTML = open.length ? `<div style="font-size:12px;color:var(--muted);margin-bottom:4px">This supplier has ${open.length > 1 ? open.length+' open RFQs' : 'an open RFQ'} with no PO yet. Use one?</div>` +
+            open.map(r => `<button class="btn-secondary btn-sm" style="margin:0 6px 6px 0" data-rfq="${esc(r.rfq_id)}" onclick="useSuggestedRfq(this.dataset.rfq)">${esc(r.rfq_id)} · ${toDMY(r.date)} · ${(r.items||[]).length} lines</button>`).join('') : '';
+        return;
+    }
+    box.hidden = false;
     box.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:4px">Lines from ${esc(rfq.rfq_id)}: pick one, enter the invoice line total, then Add Item.</div>` +
         (rfq.items||[]).map((it, i) => {
             const used = poItems.some(p => p.stock_id && p.stock_id === it.stock_id);
@@ -713,7 +729,8 @@ async function savePo() {
     button.disabled = true;
     try {
     const {response:res, data:d} = await saveWithAvailabilityOverride('/api/pos', body);
-    if(res.ok && d.success){ const packErrors = await savePoPacks(d.po_id);
+    if(res.ok && d.success){ if (rfq && !(rfq.po_ids||'').split(', ').includes(d.po_id)) rfq.po_ids = rfq.po_ids ? rfq.po_ids+', '+d.po_id : d.po_id;
+        const packErrors = await savePoPacks(d.po_id);
         toast(packErrors.length ? 'PO '+d.po_id+' saved; pack size not updated for '+packErrors.join('; ') : 'PO '+d.po_id+' saved!', !packErrors.length); document.getElementById('npo-id').value=d.po_id; if (!packErrors.length) poFormBaseline = poFormSnapshot(); updatePoEditState(); await loadPos(); selectedPoId=d.po_id; selectedPo=allPos.find(p => p.po_id === d.po_id)||null; }
     else toast('Error: '+d.error,false);
     } catch { toast('Could not confirm the save. Reload the order before retrying.',false); }
