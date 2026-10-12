@@ -37,6 +37,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             db.execute("CREATE TRIGGER reject_score BEFORE INSERT ON supplier_performance WHEN NEW.po_id='PO-FAIL' BEGIN SELECT RAISE(ABORT,'forced save failure'); END")
             db.execute("CREATE TRIGGER reject_status BEFORE UPDATE OF status ON purchase_orders WHEN NEW.status='Void' BEGIN SELECT RAISE(ABORT,'forced status failure'); END")
             db.execute("UPDATE items SET pack_qty=12,pack_uom='box',pack_size='12/box',exclude=1 WHERE stock_id='I002'")
+            db.execute("""INSERT INTO rfq_logs(rfq_id,date,supplier,items_count,raw_rfq_json) VALUES('RFQ-CHECK',date('now'),'Target',2,'[{"id":"I000","n":"Item 0","q":3,"u":"box"},{"id":"I001","n":"Item 1","q":1,"u":"Tablet"}]')""")
             db.commit()
             def token(role):
                 enc=lambda v:base64.urlsafe_b64encode(json.dumps(v).encode()).rstrip(b'=')
@@ -97,6 +98,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             db.commit()
             subprocess.run(['node',str(root/'scripts/check-ui-browser.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             subprocess.run(['node',str(root/'scripts/check-po-pack-size.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
+            subprocess.run(['node',str(root/'scripts/check-po-from-rfq.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             db.close()
         finally:
             proc.terminate();proc.wait(timeout=5)

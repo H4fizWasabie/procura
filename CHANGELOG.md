@@ -1,6 +1,8 @@
 # Changelog
 
 ## 2026-10-12
+- [po/rfq] Optionally start a PO from an RFQ (From RFQ field or Make PO on the RFQ list): fills the supplier, offers the RFQ lines to pick into the add row, warns when the PO supplier differs, and saves purchase_orders.linked_rfq (internal only, several POs per RFQ allowed); the RFQ list shows its POs — invoices for an RFQ no longer need retyping, and planning stops counting a linked RFQ as incoming
+- [rfq] Read text quantities in older RFQs (73 in production) instead of showing 0
 - [inventory/core] Replace free-text pack size with pack_qty + pack_uom from a fixed unit list (box, pack, bag, bottle, carton, roll, tube, can, jar, vial, pouch, drum, gallon), set or cleared together and audited; pack_size is now derived as "12/box" for mino and older readers — free text like "100ml" or "1.0" could not be parsed or compared
 - [core] Clear the 49 legacy free-text pack sizes once at startup with one audit row each — pack sizes are re-entered in the new format while ordering
 - [core/po] Leave structured pack values untouched if the legacy clear retries, and keep the PO form marked unsaved when a pack update fails — review findings on #68

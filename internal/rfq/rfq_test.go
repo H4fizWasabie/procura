@@ -49,3 +49,25 @@ func TestHistorySortsSameDayByRFQSequenceDescending(t *testing.T) {
 		t.Fatalf("same-day RFQs = %+v", history)
 	}
 }
+
+func TestHistoryListsNonVoidLinkedPOs(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO rfq_logs(rfq_id,date,supplier,items_count,raw_rfq_json) VALUES('RFQ-102026-18','2026-10-07','YSP',1,'[{"id":"A","n":"Item A","q":"80","u":"box"}]'),('RFQ-102026-19','2026-10-08','YSP',1,'[]');
+		INSERT INTO purchase_orders(po_id,date,linked_rfq,status) VALUES('PO-1','2026-10-09','RFQ-102026-18','Pending'),('PO-2','2026-10-10','RFQ-102026-18','VOID')`); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, r := range (&Service{DB: db}).History() {
+		got[r.RFQID] = r.POIDs
+		if r.RFQID == "RFQ-102026-18" && (len(r.Items) != 1 || r.Items[0].Qty != 80) {
+			t.Fatalf("text quantity not parsed: %+v", r.Items)
+		}
+	}
+	if got["RFQ-102026-18"] != "PO-1" || got["RFQ-102026-19"] != "" {
+		t.Fatalf("po_ids = %v", got)
+	}
+}

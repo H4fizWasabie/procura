@@ -1349,7 +1349,7 @@ func decodeOrderRequest(r *http.Request, body interface{}) error {
 func writeOrderSaveError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	body := map[string]interface{}{"success": false, "error": err.Error()}
-	if errors.Is(err, core.ErrPendingUOM) || errors.Is(err, core.ErrInvalidPackUOM) || errors.Is(err, planning.ErrAssistantStockID) {
+	if errors.Is(err, core.ErrPendingUOM) || errors.Is(err, core.ErrInvalidPackUOM) || errors.Is(err, po.ErrUnknownRFQ) || errors.Is(err, planning.ErrAssistantStockID) {
 		status = http.StatusBadRequest
 	}
 	var purchaseError *planning.PurchaseError

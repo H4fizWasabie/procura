@@ -5,7 +5,7 @@
     <input type="text" id="filter" placeholder="Search RFQ ID or supplier..." oninput="renderRFQ()" style="flex:1">
     <select id="f-supplier" style="width:180px" onchange="renderRFQ()"><option value="">All Suppliers</option></select>
 </div>
-<table><thead><tr><th>RFQ ID</th><th>Date</th><th>Supplier</th><th>Items</th><th>Actions</th></tr></thead><tbody id="body"></tbody></table>
+<table><thead><tr><th>RFQ ID</th><th>Date</th><th>Supplier</th><th>Items</th><th>PO</th><th>Actions</th></tr></thead><tbody id="body"></tbody></table>
 <div id="toast" class="toast" style="display:none"></div>
 
 <div id="create-modal" class="modal">
@@ -129,12 +129,14 @@ function renderRFQ() {
     document.getElementById('body').innerHTML = rows.length ? rows.map(r => `
         <tr><td class="link">${esc(r.rfq_id)}</td><td>${toDMY(r.date)}</td>
         <td>${esc(r.supplier||'')}</td><td>${r.items_count||0}</td>
+        <td>${(r.po_ids||'').split(', ').filter(Boolean).map(id => `<a href="/pos?order=${encodeURIComponent(id)}">${esc(id)}</a>`).join('<br>')}</td>
         <td style="display:flex;gap:4px">
+            <button onclick="location='/pos?from_rfq='+encodeURIComponent('${esc(r.rfq_id)}')" class="btn-sm" title="Start a PO from this RFQ">Make PO</button>
             <button onclick="previewRFQ('${esc(r.rfq_id)}')" class="btn-sm">👁</button>
             <button onclick="downloadRFQ('${esc(r.rfq_id)}')" class="btn-sm">📥</button>
             <button onclick="editRFQ('${esc(r.rfq_id)}')" class="btn-sm">Edit</button>
             <button onclick="delRFQ('${esc(r.rfq_id)}')" class="btn-sm btn-danger">Del</button>
-        </td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No RFQs match filters</td></tr>';
+        </td></tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--muted)">No RFQs match filters</td></tr>';
 }
 async function openCreate() {
     const res = await fetch('/api/rfq/next-id'); const {id} = await res.json();
