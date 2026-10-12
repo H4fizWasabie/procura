@@ -28,11 +28,11 @@ try {
  await run('document.getElementById("f-supplier").value="Target"; loadPage(1)');await wait('document.querySelectorAll("#items-body tr").length === 2');
  assert.equal(await run('document.getElementById("next-btn").disabled'),true);
  await run('showDetail("I001")');await wait('document.getElementById("detail-panel").style.display !== "none"');
- await run('document.getElementById("ae-cost").value="7.5"; saveAnchors()');await wait('document.getElementById("toast").textContent === "Saved"');
+ await run('document.getElementById("ae-cost").value="7.5"; document.getElementById("ae-reason").value="check"; saveAnchors()');await wait('document.getElementById("toast").textContent === "Saved"');
  await run('showDetail("I001")');await wait('document.getElementById("ae-cost").value === "7.5"');
- await run('showDetail("I002")');await wait('document.getElementById("ae-pack").value === "12"');assert.equal(await run('document.getElementById("ae-exclude").checked'),true);
- await run('document.getElementById("ae-cost").value="8"; saveAnchors()');await wait('document.getElementById("ae-cost").value === "8"');
- assert.equal(await run('document.getElementById("ae-pack").value'),'12');assert.equal(await run('document.getElementById("ae-exclude").checked'),true);
+ await run('showDetail("I002")');await wait('document.getElementById("ae-pack-qty").value === "12"');assert.equal(await run('document.getElementById("ae-exclude").checked'),true);
+ await run('document.getElementById("ae-cost").value="8"; document.getElementById("ae-reason").value="check"; saveAnchors()');await wait('document.getElementById("ae-cost").value === "8"');
+ assert.deepEqual(await run('[document.getElementById("ae-pack-qty").value,document.getElementById("ae-pack-uom").value]'),['12','box']);assert.equal(await run('document.getElementById("ae-exclude").checked'),true);
  console.log('PASS: authenticated inventory filter and edit reload preserve anchors in Chrome');
  await navigate('/pos');await wait('allPos.length > 0');
  for (const [width,height] of [[1440,900],[390,844]]) {

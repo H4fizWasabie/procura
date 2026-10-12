@@ -7,8 +7,12 @@ import { AmbiguousOutcomeError, type ProcuraApi } from "./client.ts";
 import type { ItemRow, Store } from "./store.ts";
 
 export const EDITABLE_FIELDS = [
-  "exclude", "item_behaviour", "purchase_policy", "product_status", "product_type", "rop", "velocity_override", "pack_size",
+  "exclude", "item_behaviour", "purchase_policy", "product_status", "product_type", "rop", "velocity_override", "pack_qty", "pack_uom",
 ] as const;
+/** Same fixed list as core.PackUOMs in Procura: pack size units and PO supplier units. */
+export const PACK_UOMS = ["box", "pack", "bag", "bottle", "carton", "roll", "tube", "can", "jar", "vial", "pouch", "drum", "gallon"];
+/** The listed unit matching value (case-insensitive), or "" when it is not listed. */
+export const listedUom = (value: string): string => (PACK_UOMS.includes(value.trim().toLowerCase()) ? value.trim().toLowerCase() : "");
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
 export type Value = string | number | boolean | null;
 export type Changes = Partial<Record<EditableField, Value>>;
@@ -63,8 +67,14 @@ function normalise(field: EditableField, value: Value): { value: Value } | { err
       const n = typeof text === "number" ? text : Number(text);
       return text !== "" && text !== null && Number.isFinite(n) && n >= 0 ? { value: n } : { error: `${field} must be a number, 0 or more` };
     }
-    case "pack_size":
-      return typeof text === "string" ? { value: text } : { error: "pack_size must be text (empty clears it)" };
+    case "pack_qty": {
+      if (text === null || text === "") return { value: null };
+      const n = typeof text === "number" ? text : Number(text);
+      return Number.isFinite(n) && n > 0 ? { value: n } : { error: "pack_qty must be a number above 0 (or empty to clear)" };
+    }
+    case "pack_uom":
+      if (text === null || text === "") return { value: null };
+      return typeof text === "string" && listedUom(text) ? { value: listedUom(text) } : { error: `pack_uom must be one of: ${PACK_UOMS.join(", ")} (or empty to clear)` };
   }
 }
 
@@ -77,7 +87,8 @@ function currentValue(item: ItemRow, field: EditableField): Value {
     case "product_type": return item.product_type;
     case "rop": return item.rop;
     case "velocity_override": return item.velocity_override.trim() === "" ? 0 : Number(item.velocity_override);
-    case "pack_size": return item.pack_size.trim();
+    case "pack_qty": return item.pack_qty;
+    case "pack_uom": return item.pack_uom;
   }
 }
 
@@ -128,6 +139,9 @@ export async function previewItemEdits(edits: ItemEdit[], reasonRaw: string, sto
       real[field] = result.value;
       diffs.push({ stock_id: id, name: item.item_name, field, from: show(from), to: show(result.value) });
     }
+    const packQty = "pack_qty" in real ? real.pack_qty : item.pack_qty;
+    const packUom = "pack_uom" in real ? real.pack_uom : item.pack_uom;
+    if ((packQty === null) !== (packUom === null)) blockers.push(`[${id}] pack_qty and pack_uom must be set or cleared together.`);
     if (isForcedZero(real) && item.rop !== 0) {
       diffs.push({ stock_id: id, name: item.item_name, field: "rop (forced)", from: show(item.rop), to: "0" });
       sideEffects.push(`[${id}] ${item.item_name}: Service/Asset behaviour forces the reorder point to 0.`);

@@ -13,13 +13,14 @@ import (
 	"time"
 
 	"github.com/xuri/excelize/v2"
+	"procura/internal/core"
 	"procura/internal/planning"
 )
 
 // Anchor fields that can be edited (matches GAS apiSaveInventoryItem).
 var anchorFields = []string{
 	"exclude", "velocity_override", "item_behaviour",
-	"cost", "uom", "selling_price", "rop", "pack_size", "purchase_policy",
+	"cost", "uom", "selling_price", "rop", "pack_qty", "pack_uom", "purchase_policy",
 	"product_status", "product_type",
 }
 
@@ -27,24 +28,26 @@ var ErrInvalidUpdate = errors.New("invalid inventory update")
 var ErrForbiddenEdit = errors.New("forbidden inventory edit")
 
 type Item struct {
-	StockID        string  `json:"stock_id"`
-	ItemName       string  `json:"item_name"`
-	Cost           float64 `json:"cost"`
-	UOM            string  `json:"uom"`
-	ProductType    string  `json:"product_type"`
-	Category       string  `json:"category"`
-	CurrentStock   float64 `json:"current_stock"`
-	ROP            float64 `json:"rop"`
-	SellingPrice   float64 `json:"selling_price"`
-	LastUpdated    string  `json:"last_updated"`
-	PackSize       string  `json:"pack_size"`
-	Exclude        string  `json:"exclude"`
-	ProductStatus  string  `json:"product_status"`
-	VelocityOv     string  `json:"velocity_override"`
-	SupplierName   string  `json:"supplier_name"`
-	ItemBehaviour  string  `json:"item_behaviour"`
-	PurchasePolicy *string `json:"purchase_policy"`
-	SupplierUOM    string  `json:"supplier_uom,omitempty"`
+	StockID        string   `json:"stock_id"`
+	ItemName       string   `json:"item_name"`
+	Cost           float64  `json:"cost"`
+	UOM            string   `json:"uom"`
+	ProductType    string   `json:"product_type"`
+	Category       string   `json:"category"`
+	CurrentStock   float64  `json:"current_stock"`
+	ROP            float64  `json:"rop"`
+	SellingPrice   float64  `json:"selling_price"`
+	LastUpdated    string   `json:"last_updated"`
+	PackSize       string   `json:"pack_size"`
+	PackQty        *float64 `json:"pack_qty"`
+	PackUOM        string   `json:"pack_uom"`
+	Exclude        string   `json:"exclude"`
+	ProductStatus  string   `json:"product_status"`
+	VelocityOv     string   `json:"velocity_override"`
+	SupplierName   string   `json:"supplier_name"`
+	ItemBehaviour  string   `json:"item_behaviour"`
+	PurchasePolicy *string  `json:"purchase_policy"`
+	SupplierUOM    string   `json:"supplier_uom,omitempty"`
 }
 
 type Service struct {
@@ -97,7 +100,7 @@ func (s *Service) ListFiltered(f Filters, page, pageSize int) ([]Item, error) {
 		order = "i.item_name, i.stock_id"
 	}
 	query := `SELECT i.stock_id, i.item_name, i.cost, i.uom, i.product_type, i.category,
- i.current_stock, i.rop, i.selling_price, i.last_updated, i.pack_size,
+ i.current_stock, i.rop, i.selling_price, i.last_updated, i.pack_size, i.pack_qty, i.pack_uom,
 	 i.exclude, i.product_status, i.velocity_override, i.supplier_name, i.item_behaviour, i.purchase_policy,
  COALESCE((SELECT m.supplier_uom FROM supplier_item_mappings m
  WHERE m.stock_id = i.stock_id AND m.supplier_name = i.supplier_name ORDER BY m.id LIMIT 1), '')
@@ -226,12 +229,25 @@ var anchorValidation = map[string]func(interface{}) (interface{}, error){
 		}
 		return strings.TrimSpace(s), nil
 	},
-	"pack_size": func(v interface{}) (interface{}, error) {
-		s, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("must be text (empty is allowed)")
+	"pack_qty": func(v interface{}) (interface{}, error) {
+		if s, ok := v.(string); v == nil || ok && strings.TrimSpace(s) == "" {
+			return nil, nil
 		}
-		return strings.TrimSpace(s), nil
+		n, err := nonNegativeNumber(v)
+		if err != nil || n == 0 {
+			return nil, fmt.Errorf("must be a number greater than 0, or empty to clear")
+		}
+		return n, nil
+	},
+	"pack_uom": func(v interface{}) (interface{}, error) {
+		s, ok := v.(string)
+		if v == nil || ok && strings.TrimSpace(s) == "" {
+			return nil, nil
+		}
+		if u, ok := core.NormalizePackUOM(s); ok {
+			return u, nil
+		}
+		return nil, fmt.Errorf("allowed values: %s, or empty to clear", strings.Join(core.PackUOMs, ", "))
 	},
 	"purchase_policy": func(v interface{}) (interface{}, error) {
 		if v == nil {
@@ -312,7 +328,7 @@ func (s *Service) UpdateAnchorsAs(stockID, changedBy, role, reason string, updat
 	if role == "ASSISTANT" {
 		for field := range updates {
 			switch field {
-			case "exclude", "item_behaviour", "purchase_policy", "product_status", "product_type", "rop", "velocity_override", "pack_size":
+			case "exclude", "item_behaviour", "purchase_policy", "product_status", "product_type", "rop", "velocity_override", "pack_qty", "pack_uom":
 			default:
 				return fmt.Errorf("%w: %w: ASSISTANT cannot edit %s", ErrInvalidUpdate, ErrForbiddenEdit, field)
 			}
@@ -415,6 +431,16 @@ func (s *Service) UpdateAnchorsAs(stockID, changedBy, role, reason string, updat
 	if behaviour == "Service" || behaviour == "Asset" {
 		validated["rop"] = float64(0)
 	}
+	packQty, packUOM := oldValues["pack_qty"], oldValues["pack_uom"]
+	if v, ok := validated["pack_qty"]; ok {
+		packQty = v
+	}
+	if v, ok := validated["pack_uom"]; ok {
+		packUOM = v
+	}
+	if (packQty == nil) != (packUOM == nil) {
+		return fmt.Errorf("%w: pack_qty and pack_uom must be set or cleared together", ErrInvalidUpdate)
+	}
 
 	sets, args := make([]string, 0, len(validated)), make([]interface{}, 0, len(validated)+1)
 	changed := make([]string, 0, len(validated))
@@ -435,6 +461,18 @@ func (s *Service) UpdateAnchorsAs(stockID, changedBy, role, reason string, updat
 	}
 	if len(changed) == 0 {
 		return tx.Commit()
+	}
+	for _, field := range changed {
+		if field == "pack_qty" || field == "pack_uom" {
+			// pack_size stays as derived text for mino and older readers.
+			var packSize interface{}
+			if packQty != nil {
+				packSize = auditValue(packQty) + "/" + fmt.Sprint(packUOM)
+			}
+			sets = append(sets, "pack_size = ?")
+			args = append(args, packSize)
+			break
+		}
 	}
 	args = append(args, stockID)
 	if _, err := tx.Exec("UPDATE items SET "+strings.Join(sets, ", ")+" WHERE stock_id = ?", args...); err != nil {
@@ -506,10 +544,10 @@ func scanItems(rows *sql.Rows) ([]Item, error) {
 	out := []Item{}
 	for rows.Next() {
 		var it Item
-		var cost, current, rop, selling sql.NullFloat64
-		var stockID, name, uom, ptype, cat, updated, pack, exclude, status, velOv, supplier, beh, supUom, policy sql.NullString
+		var cost, current, rop, selling, packQty sql.NullFloat64
+		var stockID, name, uom, ptype, cat, updated, pack, packUOM, exclude, status, velOv, supplier, beh, supUom, policy sql.NullString
 		if err := rows.Scan(&stockID, &name, &cost, &uom, &ptype, &cat, &current, &rop,
-			&selling, &updated, &pack, &exclude, &status, &velOv, &supplier, &beh, &policy, &supUom); err != nil {
+			&selling, &updated, &pack, &packQty, &packUOM, &exclude, &status, &velOv, &supplier, &beh, &policy, &supUom); err != nil {
 			return nil, err
 		}
 
@@ -519,11 +557,14 @@ func scanItems(rows *sql.Rows) ([]Item, error) {
 			ProductType: str(ptype), Category: str(cat),
 			CurrentStock: f64(current), ROP: f64(rop),
 			SellingPrice: f64(selling), LastUpdated: str(updated),
-			PackSize: str(pack), Exclude: str(exclude),
+			PackSize: str(pack), PackUOM: str(packUOM), Exclude: str(exclude),
 			ProductStatus: str(status), VelocityOv: str(velOv),
 			SupplierName: str(supplier), ItemBehaviour: str(beh),
 			PurchasePolicy: nullableString(policy),
 			SupplierUOM:    str(supUom),
+		}
+		if packQty.Valid {
+			it.PackQty = &packQty.Float64
 		}
 		out = append(out, it)
 	}

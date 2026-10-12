@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             db.execute("INSERT INTO purchase_orders(po_id,status,ship_status) VALUES('PO-CHECK','Pending Approval','Pending')")
             db.execute("CREATE TRIGGER reject_score BEFORE INSERT ON supplier_performance WHEN NEW.po_id='PO-FAIL' BEGIN SELECT RAISE(ABORT,'forced save failure'); END")
             db.execute("CREATE TRIGGER reject_status BEFORE UPDATE OF status ON purchase_orders WHEN NEW.status='Void' BEGIN SELECT RAISE(ABORT,'forced status failure'); END")
-            db.execute("UPDATE items SET pack_size='12',exclude=1 WHERE stock_id='I002'")
+            db.execute("UPDATE items SET pack_qty=12,pack_uom='box',pack_size='12/box',exclude=1 WHERE stock_id='I002'")
             db.commit()
             def token(role):
                 enc=lambda v:base64.urlsafe_b64encode(json.dumps(v).encode()).rstrip(b'=')
@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
                 _, headers, data=request('/api/inventory?supplier=Target&pageSize=2&page=2'); expect(len(json.loads(data)),1);expect(headers.get('X-Has-More'),'false')
                 _,_,data=request('/api/inventory?stock_id=I001&name=Item+1');expect([r['stock_id'] for r in json.loads(data)],['I001'])
             def anchors():
-                _,_,data=request('/api/inventory/detail?stock_id=I002');d=json.loads(data);expect(d.get('pack_size'),'12');expect(str(d.get('exclude')),'1')
+                _,_,data=request('/api/inventory/detail?stock_id=I002');d=json.loads(data);expect(d.get('pack_qty'),12);expect(d.get('pack_uom'),'box');expect(str(d.get('exclude')),'1')
             check('item details retain pack and exclusion anchors',anchors)
             check('inventory filters precede pagination and combined field search works',inventory)
             check('missing PO update returns 404',lambda:expect(request('/api/pos/MISSING/status',{'status':'Paid'})[0],404))
@@ -80,14 +80,14 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
                 check(role+' cannot edit inventory',lambda role=role:expect(request('/api/inventory/I001',{'cost':2},role)[0],403))
                 check(role+' cannot freeze analytics',lambda role=role:expect(request('/api/analytics/freeze?year=2026&month=8',{},role)[0],403))
             def edit():
-                expect(request('/api/inventory/I001',{'cost':2},'EDITOR')[0],200);expect(db.execute("SELECT cost FROM items WHERE stock_id='I001'").fetchone()[0],2)
+                expect(request('/api/inventory/I001',{'cost':2,'reason':'check'},'EDITOR')[0],200);expect(db.execute("SELECT cost FROM items WHERE stock_id='I001'").fetchone()[0],2)
             check('editor inventory save persists',edit)
             def export():
                 status,headers,data=request('/api/inventory/export?format=xlsx&supplier=Target');expect(status,200);assert 'spreadsheetml' in headers.get('Content-Type','');expect(headers.get('Content-Disposition'),'attachment; filename="items.xlsx"')
                 with zipfile.ZipFile(io.BytesIO(data)) as z: assert 'xl/workbook.xml' in z.namelist()
                 status,headers,data=request('/api/inventory/export?format=csv&supplier=Target');expect(status,200);expect(len(data.decode().strip().splitlines()),4)
             check('filtered XLSX is a workbook and CSV includes all matching rows',export)
-            check('missing anchor save reports 404',lambda:expect(request('/api/inventory/MISSING',{'cost':2})[0],404))
+            check('missing anchor save reports 404',lambda:expect(request('/api/inventory/MISSING',{'cost':2,'reason':'check'})[0],404))
             def status_save():
                 expect(request('/api/pos/PO-CHECK/status',{'status':'Delivered','field':'ship'})[0],200)
                 expect(db.execute("SELECT status,ship_status FROM purchase_orders WHERE po_id='PO-CHECK'").fetchone(),('Pending Approval','Delivered'))
@@ -96,6 +96,7 @@ with tempfile.TemporaryDirectory(prefix='procura-ui-check-') as tmp:
             db.execute("INSERT INTO purchase_order_items(po_id,stock_id,item_name,quantity,cost,total) VALUES('PO-SCORE','I001','Item 1',2,3,6)")
             db.commit()
             subprocess.run(['node',str(root/'scripts/check-ui-browser.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
+            subprocess.run(['node',str(root/'scripts/check-po-pack-size.mjs')],cwd=root,env=dict(os.environ,CHECK_URL=f'http://127.0.0.1:{port}',CHECK_TOKEN=token('ADMIN')),check=True)
             db.close()
         finally:
             proc.terminate();proc.wait(timeout=5)

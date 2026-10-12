@@ -109,7 +109,8 @@ const ChangesSchema = Type.Object({
   product_type: Type.Optional(Scalar),
   rop: Type.Optional(Scalar),
   velocity_override: Type.Optional(Scalar),
-  pack_size: Type.Optional(Scalar),
+  pack_qty: Type.Optional(Scalar),
+  pack_uom: Type.Optional(Scalar),
 });
 
 const ReasonField = Type.String({ description: "Why, in the user's own words; recorded in Procura's audit log" });
@@ -360,7 +361,7 @@ ORDER BY date DESC LIMIT ${limit};`,
     name: "procura_edit_item",
     label: "Procura: Edit One Item",
     description:
-      "Apply ONE explicit edit to ONE item at once, when the user clearly asked for it (e.g. 'mark A1 as on_demand'). Editable fields: exclude (0/1), item_behaviour, purchase_policy (routine/on_demand/do_not_reorder), product_status (Available/not-available), product_type, rop, velocity_override, pack_size. A reason is required and is audited. Reads the result back and reports old -> new. Edits with side effects (Service/Asset behaviour forces ROP to 0) and anything bulk must go through procura_preview_item_edits instead. Cannot change cost, UOM, or confirm a UOM change.",
+      "Apply ONE explicit edit to ONE item at once, when the user clearly asked for it (e.g. 'mark A1 as on_demand'). Editable fields: exclude (0/1), item_behaviour, purchase_policy (routine/on_demand/do_not_reorder), product_status (Available/not-available), product_type, rop, velocity_override, pack_qty + pack_uom (pack size: 1 pack_uom holds pack_qty of the item's UOM; pack_uom is one of box, pack, bag, bottle, carton, roll, tube, can, jar, vial, pouch, drum, gallon; set or clear both together). A reason is required and is audited. Reads the result back and reports old -> new. Edits with side effects (Service/Asset behaviour forces ROP to 0) and anything bulk must go through procura_preview_item_edits instead. Cannot change cost, UOM, or confirm a UOM change.",
     parameters: EditItemParams,
     async execute(_toolCallId: string, input: Static<typeof EditItemParams>) {
       return writeResult("procura_edit_item", async () => {

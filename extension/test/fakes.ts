@@ -7,7 +7,7 @@ export function item(overrides: Partial<ItemRow> & { stock_id: string }): ItemRo
   return {
     item_name: `Item ${overrides.stock_id}`, category: "Antibiotic", product_type: "Medication", uom: "box", cost: 10,
     current_stock: 2, rop: 10, purchase_policy: "routine", product_status: "Available", exclude: "0",
-    item_behaviour: "", pack_size: "", velocity_override: "", hospital_product_status: null, hospital_product_type: null,
+    item_behaviour: "", pack_size: "", pack_qty: null, pack_uom: null, velocity_override: "", hospital_product_status: null, hospital_product_type: null,
     uom_confirmation_pending: 0, ...overrides,
   };
 }

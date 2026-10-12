@@ -144,3 +144,12 @@ test("a lost reply is checked by read-back instead of retried", async () => {
   assert.match(result.text, /the reply was lost; checked below/);
   assert.match(result.text, /NOT CONFIRMED/);
 });
+
+test("pack size is a listed unit plus a quantity, set or cleared together", async () => {
+  const preview = await previewItemEdits([{ stock_id: "A1", changes: { pack_qty: "12", pack_uom: " BOX " } }], "new box size", store());
+  assert.equal(preview.ok, true);
+  assert.deepEqual(preview.edits, [{ stock_id: "A1", changes: { pack_qty: 12, pack_uom: "box" } }]);
+  for (const changes of [{ pack_qty: 12 }, { pack_uom: "crate", pack_qty: 12 }, { pack_qty: 0, pack_uom: "box" }]) {
+    assert.equal((await previewItemEdits([{ stock_id: "A1", changes }], "r", store())).ok, false, JSON.stringify(changes));
+  }
+});

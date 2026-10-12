@@ -1,6 +1,7 @@
 package po
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -70,5 +71,39 @@ func TestPendingUOMBlocksOnlyNewItemsOnPOResave(t *testing.T) {
 	}
 	if _, err := s.Save(p); err != nil {
 		t.Fatalf("adding confirmed item: %v", err)
+	}
+}
+
+func TestSupplierUOMMustBeListedUnlessUnchangedLegacy(t *testing.T) {
+	db, err := core.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO items(stock_id,item_name) VALUES('A','Item A'),('B','Item B');
+		INSERT INTO purchase_orders(po_id,date,supplier) VALUES('PO-OLD','2026-01-02','Supplier');
+		INSERT INTO purchase_order_items(po_id,item_name,quantity,stock_id,supplier_uom) VALUES('PO-OLD','Item A',1,'A','PACLK')`); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{DB: db}
+	p := PO{Date: "2026-01-02", Supplier: "Supplier", Department: "Ward", Items: []Item{{StockID: "A", Name: "Item A", Qty: 1, SupplierUOM: " BOX "}}}
+	id, err := s.Save(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetByID(id); got.Items[0].SupplierUOM != "box" || p.Items[0].SupplierUOM != "box" {
+		t.Fatalf("saved %q, caller sees %q, want box", got.Items[0].SupplierUOM, p.Items[0].SupplierUOM)
+	}
+	p.Items[0].SupplierUOM = "PACLK"
+	if _, err := s.Save(p); !errors.Is(err, core.ErrInvalidPackUOM) {
+		t.Fatalf("unlisted unit: %v", err)
+	}
+	old := PO{POID: "PO-OLD", Date: "2026-01-02", Supplier: "Supplier", Department: "Ward", Items: []Item{{StockID: "A", Name: "Item A", Qty: 2, SupplierUOM: "PACLK"}}}
+	if _, err := s.Save(old); err != nil {
+		t.Fatalf("unchanged legacy unit: %v", err)
+	}
+	old.Items = append(old.Items, Item{StockID: "B", Name: "Item B", Qty: 1, SupplierUOM: "PACLK"})
+	if _, err := s.Save(old); !errors.Is(err, core.ErrInvalidPackUOM) {
+		t.Fatalf("legacy unit on new line: %v", err)
 	}
 }

@@ -101,7 +101,7 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 	importSvc := &ximport.Service{DB: db, ImportsDir: "data/imports"}
 	validationSvc := &validation.Service{DB: db}
 
-	tmpl := template.Must(template.ParseFS(assets, "templates/*.html"))
+	tmpl := template.Must(template.New("").Funcs(template.FuncMap{"packUOMs": func() []string { return core.PackUOMs }}).ParseFS(assets, "templates/*.html"))
 
 	mux := http.NewServeMux()
 
@@ -975,13 +975,14 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 		// Item detail
 		var id, name, cat, ptype, supplier, uom, status, updated, beh sql.NullString
 		var cost, selling, current, rop sql.NullFloat64
-		var velOv, pack, exclude, policy, hospitalStatus, hospitalType sql.NullString
+		var velOv, pack, packUOM, exclude, policy, hospitalStatus, hospitalType sql.NullString
+		var packQty sql.NullFloat64
 		var uomPending int
 		err := db.QueryRow(`SELECT stock_id, item_name, category, product_type, supplier_name, uom,
-			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override, pack_size, exclude, purchase_policy,
+			product_status, last_updated, item_behaviour, cost, selling_price, current_stock, rop, velocity_override, pack_size, pack_qty, pack_uom, exclude, purchase_policy,
 			hospital_product_status, hospital_product_type, uom_confirmation_pending
 			FROM items WHERE stock_id = ?`, stockID).Scan(&id, &name, &cat, &ptype, &supplier, &uom,
-			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv, &pack, &exclude, &policy,
+			&status, &updated, &beh, &cost, &selling, &current, &rop, &velOv, &pack, &packQty, &packUOM, &exclude, &policy,
 			&hospitalStatus, &hospitalType, &uomPending)
 		if err != nil {
 			status := http.StatusInternalServerError
@@ -1041,7 +1042,7 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 			"uom_confirmation_pending": uomPending == 1,
 			"item_behaviour":           strv(beh), "cost": f64v(cost), "selling_price": f64v(selling),
 			"current_stock": f64v(current), "rop": f64v(rop), "velocity_override": strv(velOv),
-			"supplier_uom": strv(supUom), "pack_size": strv(pack), "exclude": strv(exclude), "purchase_policy": nullableStringValue(policy),
+			"supplier_uom": strv(supUom), "pack_size": strv(pack), "pack_qty": nullableFloat(packQty), "pack_uom": strv(packUOM), "exclude": strv(exclude), "purchase_policy": nullableStringValue(policy),
 			"movements": movements, "po_history": poHistory,
 		})
 	}))
@@ -1348,7 +1349,7 @@ func decodeOrderRequest(r *http.Request, body interface{}) error {
 func writeOrderSaveError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	body := map[string]interface{}{"success": false, "error": err.Error()}
-	if errors.Is(err, core.ErrPendingUOM) || errors.Is(err, planning.ErrAssistantStockID) {
+	if errors.Is(err, core.ErrPendingUOM) || errors.Is(err, core.ErrInvalidPackUOM) || errors.Is(err, planning.ErrAssistantStockID) {
 		status = http.StatusBadRequest
 	}
 	var purchaseError *planning.PurchaseError
@@ -1380,6 +1381,12 @@ func strv(s sql.NullString) string {
 func nullableStringValue(s sql.NullString) interface{} {
 	if s.Valid {
 		return s.String
+	}
+	return nil
+}
+func nullableFloat(f sql.NullFloat64) interface{} {
+	if f.Valid {
+		return f.Float64
 	}
 	return nil
 }

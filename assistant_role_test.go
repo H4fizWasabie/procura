@@ -116,7 +116,7 @@ func TestAssistantItemFieldsValidationAndAudit(t *testing.T) {
 	db, request := assistantHTTP(t)
 	for field, value := range map[string]interface{}{
 		"exclude": 1, "item_behaviour": "In-House Use", "purchase_policy": "on_demand", "product_status": "not-available",
-		"product_type": "Supply", "rop": 20, "velocity_override": 5, "pack_size": "12",
+		"product_type": "Supply", "rop": 20, "velocity_override": 5,
 	} {
 		w := request("POST", "/api/inventory/A", map[string]interface{}{field: value, "reason": "Fixture review"})
 		if w.Code != 200 {
@@ -127,6 +127,9 @@ func TestAssistantItemFieldsValidationAndAudit(t *testing.T) {
 			t.Fatalf("%s audit rows=%d err=%v", field, n, err)
 		}
 	}
+	if w := request("POST", "/api/inventory/A", map[string]interface{}{"pack_qty": 12, "pack_uom": "box", "reason": "Fixture review"}); w.Code != 200 {
+		t.Fatalf("allowed pack=%d %s", w.Code, w.Body.String())
+	}
 	var before int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM item_anchor_audit`).Scan(&before); err != nil {
 		t.Fatal(err)
@@ -135,7 +138,7 @@ func TestAssistantItemFieldsValidationAndAudit(t *testing.T) {
 		"cost": 9, "selling_price": 9, "uom": "box", "confirm_uom": true,
 		"current_stock": 9, "supplier_name": "Fixture supplier", "category": "Fixture category", "item_name": "Renamed fixture",
 		"resync_product_status": true, "resync_product_type": true, "hospital_product_type": "Supply",
-		"last_updated": "2026-02-03", "uom_confirmation_pending": 0, "unexpected": true,
+		"last_updated": "2026-02-03", "uom_confirmation_pending": 0, "unexpected": true, "pack_size": "12/box",
 	} {
 		w := request("POST", "/api/inventory/A", map[string]interface{}{field: value, "exclude": false, "reason": "Fixture denied edit"})
 		if w.Code != 403 {

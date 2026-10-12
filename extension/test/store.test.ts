@@ -9,7 +9,7 @@ function fixture() {
   const db = new DatabaseSync(":memory:");
   db.exec(`
     CREATE TABLE items (stock_id TEXT PRIMARY KEY, item_name TEXT, category TEXT, product_type TEXT, uom TEXT, cost REAL,
-      current_stock REAL, rop REAL, purchase_policy TEXT, product_status TEXT, exclude, item_behaviour TEXT, pack_size TEXT,
+      current_stock REAL, rop REAL, purchase_policy TEXT, product_status TEXT, exclude, item_behaviour TEXT, pack_size TEXT, pack_qty REAL, pack_uom TEXT,
       velocity_override TEXT, hospital_product_status TEXT, hospital_product_type TEXT, uom_confirmation_pending INTEGER);
     CREATE TABLE suppliers (supplier_name TEXT PRIMARY KEY);
     CREATE TABLE purchase_orders (po_id TEXT, date TEXT, supplier TEXT, department TEXT, status TEXT, ship_status TEXT, total REAL);
@@ -17,8 +17,8 @@ function fixture() {
     CREATE TABLE direct_orders (order_id TEXT, date TEXT, stock_id TEXT, status TEXT);
     CREATE TABLE rfq_logs (rfq_id TEXT, date TEXT, supplier TEXT, raw_rfq_json TEXT);
     CREATE TABLE supplier_item_mappings (id INTEGER PRIMARY KEY, supplier_name TEXT, stock_id TEXT, supplier_uom TEXT, is_active INTEGER);
-    INSERT INTO items VALUES ('A1','Alpha','Antibiotic','Medication','box',12.5,3,10,NULL,'Available',1,'','', '', NULL,NULL,0);
-    INSERT INTO items VALUES ('B2','Beta','Antibiotic','Medication','vial',4,0,5,'routine','not-available',0,'Service','10s','2','Available','Medication',1);
+    INSERT INTO items VALUES ('A1','Alpha','Antibiotic','Medication','box',12.5,3,10,NULL,'Available',1,'','',NULL,NULL,'', NULL,NULL,0);
+    INSERT INTO items VALUES ('B2','Beta','Antibiotic','Medication','vial',4,0,5,'routine','not-available',0,'Service','10s',10,'box','2','Available','Medication',1);
     INSERT INTO suppliers VALUES ('ACME SDN BHD'), ('O''Brien Vet');
     INSERT INTO purchase_orders VALUES ('PO - 102026 - 001','${day(-2)}','ACME SDN BHD','Pharmacy','Pending Approval','Pending',20);
     INSERT INTO purchase_orders VALUES ('PO - 102026 - 002','${day(-2)}','ACME SDN BHD','Pharmacy','Approved','Received',5);
@@ -42,6 +42,8 @@ test("items are matched by exact id and keep their NULL policy", async () => {
   assert.equal(found.get("B2")?.purchase_policy, "routine");
   assert.equal(found.get("B2")?.uom_confirmation_pending, 1);
   assert.equal(found.get("B2")?.pack_size, "10s");
+  assert.equal(found.get("B2")?.pack_qty, 10);
+  assert.equal(found.get("A1")?.pack_uom, null);
   assert.equal((await store.items([])).size, 0);
   assert.deepEqual([...(await store.caseInsensitiveMatches(["a1", "zz"])).entries()], [["a1", "A1"]]);
 });

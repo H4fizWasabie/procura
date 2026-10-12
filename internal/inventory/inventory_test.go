@@ -39,7 +39,6 @@ func TestUpdateAnchorsValidationAndSingleFieldAudit(t *testing.T) {
 		{"cost", 0.0, -0.01, "greater than or equal to 0"},
 		{"selling_price", 0.0, -2.0, "greater than or equal to 0"},
 		{"uom", " box ", "  ", "non-empty text"},
-		{"pack_size", "", 3.0, "empty is allowed"},
 		{"purchase_policy", "on_demand", "unknown", "routine, on_demand, do_not_reorder"},
 		{"purchase_policy", "do_not_reorder", "unknown", "routine, on_demand, do_not_reorder"},
 	}
@@ -383,5 +382,51 @@ func TestUpdateAnchorsRequiresActorAndReason(t *testing.T) {
 		if err := service.UpdateAnchors("A", input[0], input[1], map[string]interface{}{"cost": 3.0}); !errors.Is(err, ErrInvalidUpdate) {
 			t.Fatalf("UpdateAnchors(%q,%q) error = %v, want ErrInvalidUpdate", input[0], input[1], err)
 		}
+	}
+}
+
+func TestPackSizeIsStructuredAndDerived(t *testing.T) {
+	db := inventoryDB(t)
+	service := &Service{DB: db}
+	pack := func() (sql.NullFloat64, sql.NullString, sql.NullString) {
+		var qty sql.NullFloat64
+		var uom, size sql.NullString
+		if err := db.QueryRow("SELECT pack_qty, pack_uom, pack_size FROM items WHERE stock_id='A'").Scan(&qty, &uom, &size); err != nil {
+			t.Fatal(err)
+		}
+		return qty, uom, size
+	}
+	for _, bad := range []map[string]interface{}{
+		{"pack_qty": 12.0},
+		{"pack_uom": "box"},
+		{"pack_qty": 0.0, "pack_uom": "box"},
+		{"pack_qty": 12.0, "pack_uom": "crate"},
+		{"pack_size": "12/box"},
+	} {
+		if err := service.UpdateAnchors("A", "editor@example.test", "pack", bad); !errors.Is(err, ErrInvalidUpdate) {
+			t.Fatalf("%v: err = %v, want ErrInvalidUpdate", bad, err)
+		}
+	}
+	if err := service.UpdateAnchorsAs("A", "assistant@example.test", "ASSISTANT", "pack", map[string]interface{}{"pack_qty": "12", "pack_uom": " BOX "}); err != nil {
+		t.Fatal(err)
+	}
+	if qty, uom, size := pack(); qty.Float64 != 12 || uom.String != "box" || size.String != "12/box" {
+		t.Fatalf("pack = %v %v %v, want 12 box 12/box", qty, uom, size)
+	}
+	if err := service.UpdateAnchors("A", "editor@example.test", "pack", map[string]interface{}{"pack_qty": 2.5}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, size := pack(); size.String != "2.5/box" {
+		t.Fatalf("pack_size = %v, want 2.5/box", size)
+	}
+	if err := service.UpdateAnchors("A", "editor@example.test", "pack", map[string]interface{}{"pack_qty": "", "pack_uom": ""}); err != nil {
+		t.Fatal(err)
+	}
+	if qty, uom, size := pack(); qty.Valid || uom.Valid || size.Valid {
+		t.Fatalf("cleared pack = %v %v %v, want all NULL", qty, uom, size)
+	}
+	var audits int
+	if err := db.QueryRow("SELECT COUNT(*) FROM item_anchor_audit WHERE field_name IN ('pack_qty','pack_uom')").Scan(&audits); err != nil || audits != 5 {
+		t.Fatalf("pack audits = %d err=%v, want 5", audits, err)
 	}
 }

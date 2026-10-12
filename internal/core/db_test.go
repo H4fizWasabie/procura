@@ -283,3 +283,38 @@ func TestOpenFailsWhenPurchasePolicyMigrationCannotAddColumn(t *testing.T) {
 		t.Fatalf("migration failure was not logged: %s", logs.String())
 	}
 }
+
+func TestClearLegacyPackSizeRunsOnceWithAudit(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO items(stock_id,item_name,pack_size) VALUES('A','Item A','12/box'),('B','Item B','');
+		DELETE FROM settings WHERE key='migration.clear_pack_size.v1'`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if db, err = Open(dir); err != nil {
+		t.Fatal(err)
+	}
+	var size sql.NullString
+	var audits int
+	db.QueryRow("SELECT pack_size FROM items WHERE stock_id='A'").Scan(&size)
+	db.QueryRow("SELECT COUNT(*) FROM item_anchor_audit WHERE stock_id='A' AND field_name='pack_size' AND old_value='12/box'").Scan(&audits)
+	if size.Valid || audits != 1 {
+		t.Fatalf("pack_size=%v audits=%d, want NULL and one audit", size, audits)
+	}
+	if _, err := db.Exec(`UPDATE items SET pack_qty=6, pack_uom='box', pack_size='6/box' WHERE stock_id='A'`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if db, err = Open(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.QueryRow("SELECT pack_size FROM items WHERE stock_id='A'").Scan(&size)
+	if size.String != "6/box" {
+		t.Fatalf("second open cleared structured pack: %v", size)
+	}
+}

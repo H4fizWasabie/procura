@@ -209,23 +209,34 @@ func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 		return "", err
 	}
 	existingItems := map[string]bool{}
+	legacyUOMs := map[string]bool{}
 	if exists {
-		rows, err := s.DB.Query(`SELECT COALESCE(stock_id,'') FROM purchase_order_items WHERE po_id=?`, p.POID)
+		rows, err := s.DB.Query(`SELECT COALESCE(stock_id,''), COALESCE(supplier_uom,'') FROM purchase_order_items WHERE po_id=?`, p.POID)
 		if err != nil {
 			return "", err
 		}
 		for rows.Next() {
-			var stockID string
-			if err := rows.Scan(&stockID); err != nil {
+			var stockID, supplierUOM string
+			if err := rows.Scan(&stockID, &supplierUOM); err != nil {
 				rows.Close()
 				return "", err
 			}
 			existingItems[stockID] = true
+			legacyUOMs[stockID+"|"+supplierUOM] = true
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
 			return "", err
+		}
+	}
+	// Writes through the shared Items array, so the caller's mapping upsert
+	// also sees the normalized unit. Unchanged pre-list lines keep their unit.
+	for i, item := range p.Items {
+		if u, ok := core.NormalizePackUOM(item.SupplierUOM); ok {
+			p.Items[i].SupplierUOM = u
+		} else if strings.TrimSpace(item.SupplierUOM) != "" && !legacyUOMs[item.StockID+"|"+item.SupplierUOM] {
+			return "", fmt.Errorf("%s: supplier UOM %q %w (%s)", item.Name, item.SupplierUOM, core.ErrInvalidPackUOM, strings.Join(core.PackUOMs, ", "))
 		}
 	}
 	var overrides []string

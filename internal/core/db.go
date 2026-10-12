@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -255,6 +256,9 @@ var migrations = []migration{
 	execMigration("ALTER TABLE items ADD COLUMN hospital_product_status TEXT"),
 	execMigration("ALTER TABLE items ADD COLUMN hospital_product_type TEXT"),
 	execMigration("ALTER TABLE items ADD COLUMN uom_confirmation_pending INTEGER NOT NULL DEFAULT 0"),
+	execMigration("ALTER TABLE items ADD COLUMN pack_qty REAL"),
+	execMigration("ALTER TABLE items ADD COLUMN pack_uom TEXT"),
+	clearLegacyPackSize,
 }
 
 func Open(dataDir string) (*sql.DB, error) {
@@ -284,7 +288,7 @@ func Open(dataDir string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migration incomplete: items.purchase_policy is missing")
 	}
-	for _, column := range []string{"hospital_product_status", "hospital_product_type", "uom_confirmation_pending"} {
+	for _, column := range []string{"hospital_product_status", "hospital_product_type", "uom_confirmation_pending", "pack_qty", "pack_uom"} {
 		var present bool
 		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM pragma_table_info('items') WHERE name=?)", column).Scan(&present); err != nil || !present {
 			db.Close()
@@ -338,6 +342,44 @@ func migratePurchasePolicy(db *sql.DB) error {
 		return err
 	}
 	log.Printf("core: purchase policy backfill classified %d excluded items as unclassified", count)
+	return nil
+}
+
+// clearLegacyPackSize removes free-text pack sizes once, auditing each value,
+// so pack_size afterwards is only ever derived from pack_qty and pack_uom.
+func clearLegacyPackSize(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var marker string
+	err = tx.QueryRow("SELECT value FROM settings WHERE key = 'migration.clear_pack_size.v1'").Scan(&marker)
+	if err == nil {
+		return tx.Commit()
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO item_anchor_audit
+		(timestamp, stock_id, item_name, field_name, old_value, new_value, reason, changed_by)
+		SELECT ?, stock_id, item_name, 'pack_size', pack_size, '', 'Cleared for structured pack size', 'system'
+		FROM items WHERE TRIM(COALESCE(pack_size, '')) != ''`, time.Now().Format("2006-01-02T15:04:05")); err != nil {
+		return err
+	}
+	res, err := tx.Exec(`UPDATE items SET pack_size = NULL, pack_qty = NULL, pack_uom = NULL
+		WHERE TRIM(COALESCE(pack_size, '')) != '' OR pack_qty IS NOT NULL OR pack_uom IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	count, _ := res.RowsAffected()
+	if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES('migration.clear_pack_size.v1',?)", strconv.FormatInt(count, 10)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("core: cleared %d legacy pack sizes", count)
 	return nil
 }
 
