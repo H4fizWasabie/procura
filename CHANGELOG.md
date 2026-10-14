@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-14
+- [core/po/inventory] pcs and unit added to the pack and supplier UOM list — items sold per piece (e.g. pill introducers) had no unit to pick
+
 ## 2026-10-12
 - [analytics] Freezing a month records the last PO it saw (po_rowid; existing frozen months marked once, migration.freeze_rowid.v1); a PO entered after its invoice month was frozen counts in its PO month instead of vanishing behind the frozen figure; a month keeps its first watermark when re-frozen, so nothing is counted twice — invoice-date spend would otherwise lose every late invoice each month
 - [ci] GitHub runs go vet and go test on every PR and master push (read-only token, not persisted) — Go tests only ran by hand
