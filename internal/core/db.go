@@ -262,6 +262,8 @@ var migrations = []migration{
 	normalizeInvoiceDates,
 	execMigration("ALTER TABLE tasks ADD COLUMN assigned_to TEXT"),
 	execMigration("ALTER TABLE rfq_logs ADD COLUMN closed_at TEXT"),
+	execMigration("ALTER TABLE purchase_order_items ADD COLUMN pack_qty REAL"),
+	execMigration("ALTER TABLE purchase_order_items ADD COLUMN pack_uom TEXT"),
 }
 
 func Open(dataDir string) (*sql.DB, error) {

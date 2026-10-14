@@ -542,6 +542,14 @@ func newHandler(db *sql.DB, demoMode bool) http.Handler {
 	mux.HandleFunc("GET /api/pos/next-id", protected(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"id": poSvc.GenerateID()})
 	}))
+	mux.HandleFunc("GET /api/pos/packs", protected(func(w http.ResponseWriter, r *http.Request) {
+		packs, err := poSvc.LinePacks()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "pack sizes could not be loaded"})
+			return
+		}
+		writeJSON(w, http.StatusOK, packs)
+	}))
 	mux.HandleFunc("POST /api/pos", protected(auth.RequireRole("ASSISTANT", "EDITOR", "ADMIN")(func(w http.ResponseWriter, r *http.Request) {
 		var body po.PO
 		if err := decodeOrderRequest(r, &body); err != nil {

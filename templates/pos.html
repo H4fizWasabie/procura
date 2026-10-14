@@ -154,7 +154,7 @@
 
 <script>
 const PACK_UOMS = {{packUOMs}};
-let poRfqs=[], allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, selectedPoId='', poSuggestionItems=[], poSuggestionIndex=-1;
+let poRfqs=[], allPos=[], poItems=[], poItemMaster=[], poItemLookup={}, poSupplierUOMLookup={}, poLinePacks={}, selectedPoId='', poSuggestionItems=[], poSuggestionIndex=-1;
 let poView='history', selectedPo=null, poFormBaseline='', poListScroll=0, poRequest=0;
 
 function sizePoList() {
@@ -181,6 +181,7 @@ async function initPo() {
         fetch('/api/suppliers'),
         fetch('/api/uom/mappings'),
         fetch('/api/rfq'),
+        loadPoPacks(),
     ]);
     poRfqs = (await rfqRes.json()) || [];
     renderPoRfqOptions();
@@ -400,11 +401,27 @@ function fillSupplierUOM() {
     const item = poItemLookup[document.getElementById('npo-item-search').value.trim().toLowerCase()];
     if (!item) return;
     document.getElementById('npo-sup-uom').value = listedUom(lookupSupplierUOM(item)) || listedUom(item.uom);
-    document.getElementById('npo-pack-qty').value = item.pack_qty ?? '';
-    document.getElementById('npo-pack-uom').value = item.pack_uom||'';
+    const pack = supplierPack(item.stock_id) || itemPack(item.stock_id);
+    document.getElementById('npo-pack-qty').value = pack.pack_qty;
+    document.getElementById('npo-pack-uom').value = pack.pack_uom;
 }
 
-// Pack size belongs to the item master: lines carry it only to update items after the PO saves.
+// Pack sizes saved on PO lines: the latest per supplier and item, and each PO's own.
+async function loadPoPacks() {
+    const packs = await (await fetch('/api/pos/packs')).json();
+    poLinePacks = {};
+    (Array.isArray(packs) ? packs : []).forEach(p => {
+        const pack = {pack_qty: String(p.pack_qty), pack_uom: p.pack_uom};
+        poLinePacks[('s|'+p.supplier+'|'+p.stock_id).toLowerCase()] = pack;
+        poLinePacks[('p|'+p.po_id+'|'+p.stock_id).toLowerCase()] = pack;
+    });
+}
+
+function supplierPack(stockId) {
+    return poLinePacks[('s|'+document.getElementById('npo-supplier').value.trim()+'|'+stockId).toLowerCase()];
+}
+
+// The item's pack size is the fallback for a supplier not bought from yet.
 function itemPack(stockId) {
     const item = stockId && poItemLookup[stockId.toLowerCase()];
     return {pack_qty: item && item.pack_qty != null ? String(item.pack_qty) : '', pack_uom: (item && item.pack_uom)||''};
@@ -415,9 +432,8 @@ function setPoPack(i, field, value) { poItems[i][field] = value.trim(); updatePo
 async function savePoPacks(poId) {
     const failed = [];
     for (const it of poItems) {
-        const current = itemPack(it.stock_id);
-        // Blank means "no change"; clearing a pack size is done on the Inventory page.
-        if (!it.stock_id || !it.pack_qty || (it.pack_qty === current.pack_qty && it.pack_uom === current.pack_uom)) continue;
+        // The item keeps its first pack size; later ones stay on their PO lines. Change it on the Inventory page.
+        if (!it.stock_id || !it.pack_qty || itemPack(it.stock_id).pack_qty) continue;
         try {
             const res = await fetch('/api/inventory/'+encodeURIComponent(it.stock_id), {method:'POST', headers:{'Content-Type':'application/json'},
                 body: JSON.stringify({pack_qty: it.pack_qty, pack_uom: it.pack_uom, reason: 'Set from PO '+poId})});
@@ -617,7 +633,8 @@ function editSelectedPo() {
     setPoSelect('npo-ship', po.ship_status||'Pending');
     poItems = (po.items||[]).map(it => ({
         stock_id: it.stock_id, item_name: it.item_name, uom: it.uom||'UNIT',
-        supplier_uom: it.supplier_uom||'', quantity: it.quantity, cost: it.cost, total: it.total, ...itemPack(it.stock_id),
+        supplier_uom: it.supplier_uom||'', quantity: it.quantity, cost: it.cost, total: it.total,
+        ...(poLinePacks[('p|'+po.po_id+'|'+it.stock_id).toLowerCase()] || {pack_qty: '', pack_uom: ''}),
     }));
     document.getElementById('npo-rfq').value = po.linked_rfq||'';
     renderPoItems();
@@ -722,7 +739,8 @@ async function savePo() {
         ship_status: document.getElementById('npo-ship').value,
         linked_rfq: linkedRfq,
         items: poItems.map(it => ({stock_id:it.stock_id,item_name:it.item_name,name:it.item_name,
-            quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom,supplier_uom:it.supplier_uom})),
+            quantity:it.quantity,qty:it.quantity,cost:it.cost,total:it.total,uom:it.uom,supplier_uom:it.supplier_uom,
+            pack_qty:Number(it.pack_qty)||0,pack_uom:it.pack_qty ? it.pack_uom : ''})),
     };
     const button = document.getElementById('po-save');
     if (button.disabled) return;
@@ -730,7 +748,7 @@ async function savePo() {
     try {
     const {response:res, data:d} = await saveWithAvailabilityOverride('/api/pos', body);
     if(res.ok && d.success){ if (rfq && !(rfq.po_ids||'').split(', ').includes(d.po_id)) rfq.po_ids = rfq.po_ids ? rfq.po_ids+', '+d.po_id : d.po_id;
-        const packErrors = await savePoPacks(d.po_id);
+        const packErrors = await savePoPacks(d.po_id); await loadPoPacks();
         toast(packErrors.length ? 'PO '+d.po_id+' saved; pack size not updated for '+packErrors.join('; ') : 'PO '+d.po_id+' saved!', !packErrors.length); document.getElementById('npo-id').value=d.po_id; if (!packErrors.length) poFormBaseline = poFormSnapshot(); updatePoEditState(); await loadPos(); selectedPoId=d.po_id; selectedPo=allPos.find(p => p.po_id === d.po_id)||null; }
     else toast('Error: '+d.error,false);
     } catch { toast('Could not confirm the save. Reload the order before retrying.',false); }

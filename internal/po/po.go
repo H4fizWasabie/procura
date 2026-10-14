@@ -8,6 +8,7 @@ import (
 	"procura/internal/core"
 	"procura/internal/planning"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -38,6 +39,9 @@ type Item struct {
 	Total       float64 `json:"total"`
 	UOM         string  `json:"uom"`
 	SupplierUOM string  `json:"supplier_uom"`
+	// Pack size this supplier delivered in; kept on purchase_order_items only, not in raw_po_json or the PO document.
+	PackQty float64 `json:"pack_qty"`
+	PackUOM string  `json:"pack_uom"`
 }
 
 // MarshalJSON emits both GAS-format "id" and long-form "stock_id" so every
@@ -299,6 +303,14 @@ func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 		} else if strings.TrimSpace(item.SupplierUOM) != "" && !legacyUOMs[item.StockID+"|"+item.SupplierUOM] {
 			return "", fmt.Errorf("%s: supplier UOM %q %w (%s)", item.Name, item.SupplierUOM, core.ErrInvalidPackUOM, strings.Join(core.PackUOMs, ", "))
 		}
+		if item.PackQty == 0 && strings.TrimSpace(item.PackUOM) == "" {
+			continue
+		}
+		u, ok := core.NormalizePackUOM(item.PackUOM)
+		if item.PackQty <= 0 || !ok || item.StockID == "" {
+			return "", fmt.Errorf("%s: pack size needs a listed item, a quantity above 0 and a unit (%s)", item.Name, strings.Join(core.PackUOMs, ", "))
+		}
+		p.Items[i].PackUOM = u
 	}
 	var overrides []string
 	for _, item := range p.Items {
@@ -388,9 +400,9 @@ func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 	}
 	for _, it := range p.Items {
 		_, err = tx.Exec(`
-			INSERT INTO purchase_order_items (po_id, item_name, quantity, cost, total, uom, stock_id, supplier_uom)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, p.POID, it.Name, it.Qty, it.Cost, it.Total, it.UOM, it.StockID, it.SupplierUOM)
+			INSERT INTO purchase_order_items (po_id, item_name, quantity, cost, total, uom, stock_id, supplier_uom, pack_qty, pack_uom, pack_size)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''))
+		`, p.POID, it.Name, it.Qty, it.Cost, it.Total, it.UOM, it.StockID, it.SupplierUOM, it.PackQty, it.PackUOM, packSize(it))
 		if err != nil {
 			return "", err
 		}
@@ -403,6 +415,44 @@ func (s *Service) save(p PO, user string, createOnly bool) (string, error) {
 		return "", err
 	}
 	return p.POID, nil
+}
+
+// packSize is the derived "12/box" text items.pack_size also carries for mino.
+func packSize(it Item) string {
+	if it.PackQty <= 0 {
+		return ""
+	}
+	return strconv.FormatFloat(it.PackQty, 'f', -1, 64) + "/" + it.PackUOM
+}
+
+type LinePack struct {
+	POID     string  `json:"po_id"`
+	Supplier string  `json:"supplier"`
+	StockID  string  `json:"stock_id"`
+	PackQty  float64 `json:"pack_qty"`
+	PackUOM  string  `json:"pack_uom"`
+}
+
+// LinePacks lists pack sizes saved on non-void PO lines, oldest first, so a
+// reader keeping the last one per supplier and item gets the latest.
+func (s *Service) LinePacks() ([]LinePack, error) {
+	rows, err := s.DB.Query(`SELECT i.po_id, COALESCE(o.supplier,''), i.stock_id, i.pack_qty, i.pack_uom
+		FROM purchase_order_items i JOIN purchase_orders o ON o.po_id = i.po_id
+		WHERE i.pack_qty IS NOT NULL AND i.pack_uom IS NOT NULL AND COALESCE(i.stock_id,'') != '' AND COALESCE(o.status,'') != 'VOID'
+		ORDER BY o.date, i.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	packs := []LinePack{}
+	for rows.Next() {
+		var lp LinePack
+		if err := rows.Scan(&lp.POID, &lp.Supplier, &lp.StockID, &lp.PackQty, &lp.PackUOM); err != nil {
+			return nil, err
+		}
+		packs = append(packs, lp)
+	}
+	return packs, rows.Err()
 }
 
 // ValidateRequired checks the PO header fields users must provide. PO IDs and
