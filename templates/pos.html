@@ -408,7 +408,8 @@ function fillSupplierUOM() {
 
 // Pack sizes saved on PO lines: the latest per supplier and item, and each PO's own.
 async function loadPoPacks() {
-    const packs = await (await fetch('/api/pos/packs')).json();
+    let packs;
+    try { packs = await (await fetch('/api/pos/packs')).json(); } catch { return; } // keep the last lookup; the item pack still prefills
     poLinePacks = {};
     (Array.isArray(packs) ? packs : []).forEach(p => {
         const pack = {pack_qty: String(p.pack_qty), pack_uom: p.pack_uom};
