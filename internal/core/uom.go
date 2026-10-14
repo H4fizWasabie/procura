@@ -41,7 +41,7 @@ func CheckPendingUOM(db RowQuerier, stockID string) error {
 }
 
 // PackUOMs is the fixed unit list for item pack sizes and PO supplier units.
-var PackUOMs = []string{"box", "pack", "bag", "bottle", "carton", "roll", "tube", "can", "jar", "vial", "pouch", "drum", "gallon"}
+var PackUOMs = []string{"pcs", "unit", "box", "pack", "bag", "bottle", "carton", "roll", "tube", "can", "jar", "vial", "pouch", "drum", "gallon"}
 
 // NormalizePackUOM returns the listed unit matching s, ignoring case and spaces.
 func NormalizePackUOM(s string) (string, bool) {
