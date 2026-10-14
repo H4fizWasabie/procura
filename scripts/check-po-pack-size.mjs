@@ -43,7 +43,18 @@ try {
  assert.ok(!preview.includes('100/box'),'pack size shown on the PO preview');
  await run(`selectedPoId=${JSON.stringify(poId)};selectedPo=allPos.find(p=>p.po_id===selectedPoId);poFormBaseline=poFormSnapshot();editSelectedPo()`);
  assert.deepEqual(await run('[poItems[0].pack_qty,poItems[0].pack_uom]'),['100','box']);
- console.log('PASS: pack size entered on a PO line updates the item (100/box), Sup.UOM saves as a listed unit, the PO record and preview carry no pack size, and editing the PO prefills pack from the item');
+ await run(`(()=>{resetPoForm(false);showPoView('new');const v=(id,x)=>document.getElementById(id).value=x;const sups=[...document.querySelectorAll('#po-sup-list option')].map(o=>o.value);
+  window.firstSup=sups[0];v('npo-supplier',sups[1]);const dept=document.getElementById('npo-dept');dept.value=[...dept.options].find(o=>o.value).value;
+  const item=poItemLookup[checkStock.toLowerCase()];v('npo-item-search','['+item.stock_id+'] '+item.item_name);fillSupplierUOM();
+  v('npo-qty','1');v('npo-line-total','10');v('npo-pack-qty','50');v('npo-pack-uom','bag');addPoItem()})()`);
+ await run('savePo()');await wait(`document.getElementById('npo-id').value !== '' || document.getElementById('toast').className.includes('err')`);assert.equal(await run(`document.getElementById('toast').className.includes('err') ? document.getElementById('toast').textContent : ''`),'');
+ const kept=await run(`fetch('/api/inventory/detail?stock_id='+encodeURIComponent(checkStock)).then(r=>r.json())`);
+ assert.equal(kept.pack_size,'100/box','a second supplier overwrote the item pack size');
+ const prefill=sup=>run(`(()=>{resetPoForm(false);document.getElementById('npo-supplier').value=${JSON.stringify(sup)};const item=poItemLookup[checkStock.toLowerCase()];
+  document.getElementById('npo-item-search').value='['+item.stock_id+'] '+item.item_name;fillSupplierUOM();return document.getElementById('npo-pack-qty').value+'/'+document.getElementById('npo-pack-uom').value})()`);
+ assert.equal(await prefill(await run('document.querySelectorAll("#po-sup-list option")[1].value')),'50/bag');
+ assert.equal(await prefill(await run('firstSup')),'100/box');
+ console.log('PASS: the first PO pack size fills the empty item (100/box), a second supplier\'s 50/bag stays on its PO line, each supplier prefills its own latest pack, Sup.UOM saves as a listed unit, the PO record and preview carry no pack size, and editing the PO prefills its own line pack');
 } finally {
  if(send&&ws?.readyState===WebSocket.OPEN){try{await send('Browser.close')}catch{}}
  ws?.close();
