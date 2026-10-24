@@ -67,8 +67,8 @@ func main() {
 	if port == "" {
 		port = "8082"
 	}
-	log.Println("procura listening on :" + port)
-	http.ListenAndServe(":"+port, newHandler(db, demoMode))
+	log.Println("procura listening on 127.0.0.1:" + port)
+	http.ListenAndServe("127.0.0.1:"+port, newHandler(db, demoMode))
 }
 
 // newHandler builds the same routes for the server and HTTP permission tests.
