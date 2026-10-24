@@ -28,7 +28,7 @@ Procurement management system — a Go rewrite of a Google Apps Script + Python 
 
 ```sh
 go build -o procura .
-./procura            # listens on :8082 (env PORT to change)
+./procura            # listens on 127.0.0.1:8082 (env PORT to change); put a reverse proxy in front
 ```
 
 First run bootstraps an admin user (email from `PROCURA_ADMIN_EMAIL`, default `admin@procura.local`) and prints a one-time PIN.
@@ -42,7 +42,7 @@ Environment variables:
 | `PROCURA_DATA_DIR` | SQLite data directory (default `data`) |
 | `PROCURA_DEMO` | Set to `1` to seed and serve the isolated demo database |
 | `PROCURA_DEMO_URL` | URL opened by the demo button, for example `https://demo.procura.wasabietech.com/login?demo=1` |
-| `PORT` | HTTP listen port (default 8082) |
+| `PORT` | HTTP listen port on 127.0.0.1 (default 8082) |
 
 Data lives in `data/procura.sqlite` (relative to working directory).
 

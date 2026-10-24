@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-24
+- [core] Server binds to 127.0.0.1:$PORT instead of all interfaces — only the same-host reverse proxy (Caddy) can reach it, so a firewall gap no longer exposes the app or demo directly
+
 ## 2026-10-14
 - [po/core] Pack size follows the supplier: each PO line saves its pack (purchase_order_items.pack_qty/pack_uom, pack_size as "500/bottle"; not in raw_po_json or the PO document), picking an item prefills that supplier's latest pack from non-void POs and falls back to the item's, editing a PO shows its own line packs, and a PO only sets the item's pack size when the item has none (a failed pack lookup keeps the last one and never fails the save) — buying the same item from another supplier overwrote the item's pack size
 - [core/po/inventory] pcs and unit added to the pack and supplier UOM list — items sold per piece (e.g. pill introducers) had no unit to pick
