@@ -64,13 +64,19 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 	var headersFound []string
 	var importErrors []string
 
-	// DB_Items — try exact match first, then fall back to first sheet
+	// Each sheet is written in one transaction: a commit per row costs a disk
+	// sync per row, which made imports take tens of seconds on the VPS.
 
 	// DB_Items — try exact match first, then fall back to first sheet
 	itemsSheetName, itemsSheetIdx := s.findInventorySheet(f)
 	if itemsSheetIdx != -1 {
 		rows, _ := f.GetRows(itemsSheetName)
 		if len(rows) > 1 {
+			tx, err := s.DB.Begin()
+			if err != nil {
+				return nil, err
+			}
+			defer tx.Rollback()
 			rawHeaders := normHeaders(rows[0])
 			headers := applyInventoryAliases(rawHeaders)
 			headersFound = rawHeaders
@@ -83,11 +89,14 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 				}
 				ts := now.Format("2006-01-02T15:04:05.000000000")
 
-				if err := s.upsertItem(r, ts); err != nil {
+				if err := upsertItem(tx, r, ts); err != nil {
 					importErrors = append(importErrors, fmt.Sprintf("item %s: %v", sid, err))
 					continue
 				}
 				inserted++
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, fmt.Errorf("commit items: %w", err)
 			}
 			tableRows["items"] = inserted
 		}
@@ -99,16 +108,24 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 		if len(rows) > 1 {
 			headers := normHeaders(rows[0])
 			inserted := 0
+			tx, err := s.DB.Begin()
+			if err != nil {
+				return nil, err
+			}
+			defer tx.Rollback()
 			for _, row := range rows[1:] {
 				r := mapRow(headers, row)
 				sn := strVal(r["supplier_name"])
 				if sn == "" {
 					continue
 				}
-				s.DB.Exec(`INSERT OR REPLACE INTO suppliers (supplier_name, contact_person, phone, email, address, payment_terms, brn, account_no, bank_name) VALUES (?,?,?,?,?,?,?,?,?)`,
+				tx.Exec(`INSERT OR REPLACE INTO suppliers (supplier_name, contact_person, phone, email, address, payment_terms, brn, account_no, bank_name) VALUES (?,?,?,?,?,?,?,?,?)`,
 					sn, strVal(r["contact_person"]), strVal(r["phone"]), strVal(r["email"]), strVal(r["address"]),
 					strVal(r["payment_terms"]), strVal(r["brn"]), strVal(r["account_no"]), strVal(r["bank_name"]))
 				inserted++
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, fmt.Errorf("commit suppliers: %w", err)
 			}
 			tableRows["suppliers"] = inserted
 		}
@@ -145,7 +162,15 @@ func (s *Service) Import(r io.Reader, filename string) (*Result, error) {
 	}
 
 	// Stock movements — flexible sheet matching
-	movCount := s.parseMovementSheets(f, tableRows)
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	movCount := parseMovementSheets(tx, f)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit stock movements: %w", err)
+	}
 	if movCount > 0 {
 		tableRows["stock_movements"] = movCount
 	}
@@ -287,7 +312,7 @@ func (s *Service) findInventorySheet(f *excelize.File) (string, int) {
 }
 
 // parseMovementSheets finds movement sheets and parses them in either long or wide format.
-func (s *Service) parseMovementSheets(f *excelize.File, tableRows map[string]int) int {
+func parseMovementSheets(tx *sql.Tx, f *excelize.File) int {
 	total := 0
 	for _, sheetName := range f.GetSheetList() {
 		lower := strings.ToLower(sheetName)
@@ -305,9 +330,9 @@ func (s *Service) parseMovementSheets(f *excelize.File, tableRows map[string]int
 		}
 		// Detect format: wide format has 20+ columns (2 + 12*5), long format has ~8
 		if len(rows[0]) >= 20 {
-			total += s.parseWideMovement(rows, yr)
+			total += parseWideMovement(tx, rows, yr)
 		} else {
-			total += s.parseLongMovement(rows, yr)
+			total += parseLongMovement(tx, rows, yr)
 		}
 	}
 	return total
@@ -317,7 +342,7 @@ func (s *Service) parseMovementSheets(f *excelize.File, tableRows map[string]int
 // Header row 0: Stock ID, Item Name, JANUARY(merged), FEBRUARY(merged), ...
 // Header row 1: empty, empty, IN, OUT, ADJ IN, ADJ OUT, REPORT CLOSING, ...
 // Data rows 2+: Stock ID, Item Name, val, val, val, val, val, ...
-func (s *Service) parseWideMovement(rows [][]string, year int) int {
+func parseWideMovement(tx *sql.Tx, rows [][]string, year int) int {
 	if len(rows) < 3 {
 		return 0
 	}
@@ -354,8 +379,8 @@ func (s *Service) parseWideMovement(rows [][]string, year int) int {
 			if inQty == 0 && outQty == 0 && adjIn == 0 && adjOut == 0 && closing == 0 {
 				continue
 			}
-			s.DB.Exec("DELETE FROM stock_movements WHERE COALESCE(stock_id,'') = ? AND year = ? AND month = ?", sid, year, mo)
-			s.DB.Exec("INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing) VALUES (?,?,?,?,?,?,?,?,?)",
+			tx.Exec("DELETE FROM stock_movements WHERE COALESCE(stock_id,'') = ? AND year = ? AND month = ?", sid, year, mo)
+			tx.Exec("INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing) VALUES (?,?,?,?,?,?,?,?,?)",
 				sid, itemName, year, mo, inQty, outQty, adjIn, adjOut, closing)
 			count++
 		}
@@ -364,7 +389,7 @@ func (s *Service) parseWideMovement(rows [][]string, year int) int {
 }
 
 // parseLongMovement handles transposed format: one row per stock_id+month, 8+ columns.
-func (s *Service) parseLongMovement(rows [][]string, year int) int {
+func parseLongMovement(tx *sql.Tx, rows [][]string, year int) int {
 	count := 0
 	for _, row := range rows[1:] {
 		if len(row) < 8 {
@@ -378,8 +403,8 @@ func (s *Service) parseLongMovement(rows [][]string, year int) int {
 		if sid == "" {
 			continue
 		}
-		s.DB.Exec("DELETE FROM stock_movements WHERE COALESCE(stock_id,'') = ? AND year = ? AND month = ?", sid, year, mo)
-		s.DB.Exec("INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing) VALUES (?,?,?,?,?,?,?,?,?)",
+		tx.Exec("DELETE FROM stock_movements WHERE COALESCE(stock_id,'') = ? AND year = ? AND month = ?", sid, year, mo)
+		tx.Exec("INSERT INTO stock_movements (stock_id, item_name, year, month, in_qty, out_qty, adj_in, adj_out, report_closing) VALUES (?,?,?,?,?,?,?,?,?)",
 			sid, strVal(row[2]), year, mo, floatVal(row[3]), floatVal(row[4]), floatVal(row[5]), floatVal(row[6]), floatVal(row[7]))
 		count++
 	}
@@ -428,6 +453,13 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 	headers := applyInventoryAliases(normHeaders(rows[0]))
 	updated, added, skippedEmpty, skippedDash, errors := 0, 0, 0, 0, 0
 	now := time.Now().Format("2006-01-02T15:04:05.000000000")
+	// One transaction for the whole report: a commit per row costs a disk sync
+	// per row (~40s for ~1,200 SKUs on the VPS).
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 	for _, row := range rows[1:] {
 		fields := mapRow(headers, row)
 		sku := strVal(fields["stock_id"])
@@ -452,9 +484,9 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 		}
 
 		var exists int
-		if err = s.DB.QueryRow("SELECT COUNT(*) FROM items WHERE stock_id = ?", sku).Scan(&exists); err == nil {
+		if err = tx.QueryRow("SELECT COUNT(*) FROM items WHERE stock_id = ?", sku).Scan(&exists); err == nil {
 			fields["current"] = strconv.FormatFloat(stock, 'f', -1, 64)
-			err = s.upsertItem(fields, now)
+			err = upsertItem(tx, fields, now)
 		}
 		if err != nil {
 			errors++
@@ -463,6 +495,9 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 		} else {
 			added++
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit stock balance: %w", err)
 	}
 
 	return map[string]int{
@@ -475,7 +510,7 @@ func (s *Service) ImportStock(r io.Reader) (map[string]int, error) {
 }
 
 // upsertItem is the single ownership boundary for both hospital import routes.
-func (s *Service) upsertItem(fields map[string]string, timestamp string) error {
+func upsertItem(tx *sql.Tx, fields map[string]string, timestamp string) error {
 	// mapRow includes every source header, even when its cell is empty.
 	// Missing headers must leave existing values (including shadows) untouched.
 	updates := []string{"last_updated=excluded.last_updated"}
@@ -497,7 +532,7 @@ func (s *Service) upsertItem(fields map[string]string, timestamp string) error {
 			updates = append(updates, field.column+"=excluded."+field.column)
 		}
 	}
-	_, err := s.DB.Exec(`INSERT INTO items
+	_, err := tx.Exec(`INSERT INTO items
 		(stock_id,item_name,cost,selling_price,uom,product_type,category,supplier_name,product_status,
 		 current_stock,last_updated,exclude,velocity_override,item_behaviour,
 		 hospital_product_status,hospital_product_type)
