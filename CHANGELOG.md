@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-10-28
+- [import] Stock balance and workbook imports write each sheet in one transaction instead of one commit per row — every commit forced a disk sync, so a ~1,200-SKU stock report took 10–45s on the VPS's slow disk; now ~2s, and a failed import no longer leaves half the items updated
+
 ## 2026-10-24
 - [core] Server binds to 127.0.0.1:$PORT instead of all interfaces — only the same-host reverse proxy (Caddy) can reach it, so a firewall gap no longer exposes the app or demo directly
 
